@@ -1,23 +1,34 @@
 import { useState } from "react";
 
 export default function UploadPanel() {
-  const [fileName, setFileName] = useState("");
-
-  const handleFile = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setFileName(file.name);
-  };
+  const [dataFile, setDataFile] = useState("");
+  const [agreementsFile, setAgreementsFile] = useState("");
 
   return (
-    <div className="card">
-      <h2>העלאת קובץ אקסל</h2>
+    <section className="card">
+      <h2>העלאת קבצים</h2>
 
-      <input type="file" accept=".xlsx,.xls" onChange={handleFile} />
+      <label className="uploadBox">
+        <span>דוח נתונים - מנהלי הסדר</span>
+        <input
+          type="file"
+          accept=".xlsx,.xls"
+          onChange={(e) => setDataFile(e.target.files?.[0]?.name || "")}
+        />
+      </label>
 
-      {fileName && (
-        <p>הקובץ שנבחר: {fileName}</p>
-      )}
-    </div>
+      {dataFile && <p className="fileName">נבחר: {dataFile}</p>}
+
+      <label className="uploadBox">
+        <span>דוח הסכמים</span>
+        <input
+          type="file"
+          accept=".xlsx,.xls"
+          onChange={(e) => setAgreementsFile(e.target.files?.[0]?.name || "")}
+        />
+      </label>
+
+      {agreementsFile && <p className="fileName">נבחר: {agreementsFile}</p>}
+    </section>
   );
 }

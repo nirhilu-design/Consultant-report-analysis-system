@@ -1,0 +1,17 @@
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+  direction: rtl;
+  background: #f5f7fb;
+}
+
+.app {
+  padding: 24px;
+}
+
+.card {
+  background: white;
+  padding: 16px;
+  border-radius: 12px;
+  margin-top: 16px;
+}

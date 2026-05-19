@@ -51,3 +51,67 @@ body {
   color: #0f766e;
   font-weight: 700;
 }
+.uploadBox small {
+  display: block;
+  color: #64748b;
+  margin-bottom: 12px;
+}
+
+.uploadBox input {
+  display: block;
+}
+
+.primaryButton {
+  margin-top: 20px;
+  padding: 12px 22px;
+  border: 0;
+  border-radius: 12px;
+  background: #102a43;
+  color: white;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.primaryButton:disabled {
+  background: #94a3b8;
+  cursor: not-allowed;
+}
+
+.hint {
+  color: #64748b;
+}
+
+.dashboard {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  gap: 24px;
+}
+
+.sidebar {
+  background: white;
+  border-radius: 18px;
+  padding: 16px;
+  min-height: calc(100vh - 64px);
+}
+
+.sideItem {
+  display: block;
+  width: 100%;
+  padding: 12px;
+  margin-bottom: 8px;
+  border: 0;
+  border-radius: 10px;
+  background: #f1f5f9;
+  text-align: right;
+  cursor: pointer;
+}
+
+.sideItem.active {
+  background: #102a43;
+  color: white;
+  font-weight: 700;
+}
+
+.dashboardHeader {
+  margin-bottom: 18px;
+}

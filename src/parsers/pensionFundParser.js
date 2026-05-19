@@ -47,7 +47,7 @@ function rowToText(row) {
 function findHeaderIndex(rows) {
   const maxRowsToScan = Math.min(
     rows.length,
-    15
+    25
   );
 
   for (
@@ -58,15 +58,17 @@ function findHeaderIndex(rows) {
     const text = rowToText(rows[i]);
 
     const hasProduct =
-      /מוצר|סוג.*מוצר|שם.*מוצר|תוכנית|תכנית/.test(
+      /מוצר|סוג.*מוצר|שם.*מוצר|תוכנית|תכנית|קרן|קופה/.test(
         text
       );
 
     const hasManager =
-      /יצרן|חברה|גוף|מנהל|קרן/.test(text);
+      /יצרן|חברה|גוף|מנהל|שם.*קרן|שם.*קופה/.test(
+        text
+      );
 
     const hasPension =
-      /פנסיה|קרן/.test(text);
+      /פנסיה|מקיפה|משלימה/.test(text);
 
     if (
       (hasProduct && hasManager) ||
@@ -99,7 +101,7 @@ function makeObjects(rows, headerIndex) {
       });
 
       obj.__raw = row;
-
+      obj.__headers = headers;
       obj.__text = rowToText(row);
 
       return obj;
@@ -119,56 +121,77 @@ function getByHeader(row, patterns) {
   return entry ? entry[1] : "";
 }
 
-function detectManager(row) {
-  const directValue = getByHeader(row, [
-    /יצרן/,
-    /חברה.*מנהלת/,
-    /חברה/,
-    /גוף.*מנהל/,
-    /קרן/,
-  ]);
-
-  const text = normalizeText(
-    `${directValue} ${row.__text}`
+function getFirstNonEmptyByHeader(row, patterns) {
+  const entries = Object.entries(row).filter(
+    ([header, value]) =>
+      patterns.some((pattern) =>
+        pattern.test(
+          normalizeText(header)
+        )
+      ) &&
+      normalizeText(value)
   );
 
-  if (/הפניקס|פניקס/.test(text))
-    return "הפניקס";
+  return entries.length
+    ? entries[0][1]
+    : "";
+}
 
-  if (/הראל/.test(text))
-    return "הראל";
+function cleanManagerName(value) {
+  const text = normalizeText(value)
+    .replace(/^קרן\s+/g, "")
+    .replace(/^חברת\s+/g, "")
+    .replace(/^חברה\s+מנהלת\s*/g, "")
+    .replace(/בע"מ/g, "")
+    .replace(/בעמ/g, "")
+    .replace(/\s+-\s+.*$/g, "")
+    .trim();
 
-  if (/כלל/.test(text))
-    return "כלל";
-
-  if (/מקפת|מגדל/.test(text))
-    return "מקפת";
-
-  if (/מבטחים|מנורה/.test(text))
-    return "מבטחים";
-
-  if (/מיטב/.test(text))
-    return "מיטב";
-
-  if (/אלטשולר/.test(text))
-    return "אלטשולר";
-
-  if (/מור/.test(text))
-    return "מור";
-
-  return "אחרים";
+  return text;
 }
 
 function detectOriginalManager(row) {
-  return normalizeText(
-    getByHeader(row, [
-      /יצרן/,
+  const directValue =
+    getFirstNonEmptyByHeader(row, [
+      /^יצרן$/,
+      /שם.*יצרן/,
       /חברה.*מנהלת/,
-      /חברה/,
+      /^חברה$/,
+      /שם.*חברה/,
       /גוף.*מנהל/,
-      /קרן/,
-    ])
-  );
+      /שם.*גוף/,
+      /שם.*קרן/,
+      /שם.*קופה/,
+      /קרן.*פנסיה/,
+    ]);
+
+  if (normalizeText(directValue)) {
+    return cleanManagerName(directValue);
+  }
+
+  const text = normalizeText(row.__text);
+
+  const knownMatch = [
+    "הפניקס",
+    "פניקס",
+    "הראל",
+    "כלל",
+    "מקפת",
+    "מגדל",
+    "מבטחים",
+    "מנורה",
+    "מיטב",
+    "אלטשולר",
+    "מור",
+    "אינפיניטי",
+    "ילין",
+    "אנליסט",
+    "איילון",
+    "הכשרה",
+    "פסגות",
+  ].find((name) => text.includes(name));
+
+  return knownMatch || "לא מזוהה";
 }
 
 function detectProductType(row) {
@@ -176,11 +199,13 @@ function detectProductType(row) {
     row.__text
   );
 
-  if (/משלימה|כללית/.test(text))
+  if (/משלימה|כללית/.test(text)) {
     return "משלימה";
+  }
 
-  if (/מקיפה/.test(text))
+  if (/מקיפה/.test(text)) {
     return "מקיפה";
+  }
 
   return "קרן פנסיה";
 }
@@ -224,6 +249,7 @@ function detectAccumulation(row) {
       /יתרה/,
       /חיסכון/,
       /ערך.*פדיון/,
+      /סה.*כ.*חיסכון/,
     ])
   );
 }
@@ -234,6 +260,7 @@ function detectDepositFee(row) {
       /דמי.*ניהול.*הפקדה/,
       /ד\.?נ.*הפקדה/,
       /מהפקדה/,
+      /הפקדות/,
     ])
   );
 }
@@ -253,6 +280,7 @@ function detectTrack(row) {
     getByHeader(row, [
       /מסלול/,
       /אפיק/,
+      /שם.*מסלול/,
     ])
   );
 }
@@ -302,24 +330,23 @@ export function parsePensionFund(
       objects
         .filter(isPensionRow)
         .forEach((row) => {
+          const originalManager =
+            detectOriginalManager(row);
+
           allRows.push({
             sheetName,
 
-            manager:
-              detectManager(row),
+            // בכוונה נשמר אותו שם גם ב-manager וגם ב-originalManager.
+            // הנרמול הסופי מתבצע ב-buildPensionSummary כדי לאפשר יצרנים דינמיים.
+            manager: originalManager,
 
-            originalManager:
-              detectOriginalManager(
-                row
-              ),
+            originalManager,
 
             productType:
               detectProductType(row),
 
             insuranceWaiver:
-              detectInsuranceWaiver(
-                row
-              ),
+              detectInsuranceWaiver(row),
 
             accumulation:
               detectAccumulation(row),
@@ -328,9 +355,7 @@ export function parsePensionFund(
               detectDepositFee(row),
 
             accumulationFee:
-              detectAccumulationFee(
-                row
-              ),
+              detectAccumulationFee(row),
 
             track:
               detectTrack(row),

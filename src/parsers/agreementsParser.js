@@ -1,13 +1,5 @@
 import * as XLSX from "xlsx";
 
-const PENSION_KEYWORDS = [
-  "קרן פנסיה",
-  "פנסיה מקיפה",
-  "פנסיה משלימה",
-  "מקיפה",
-  "משלימה",
-];
-
 function normalizeText(value) {
   return String(value ?? "")
     .replace(/\s+/g, " ")
@@ -47,7 +39,7 @@ function rowToText(row) {
 function findHeaderIndex(rows) {
   const maxRowsToScan = Math.min(
     rows.length,
-    15
+    20
   );
 
   for (
@@ -57,20 +49,22 @@ function findHeaderIndex(rows) {
   ) {
     const text = rowToText(rows[i]);
 
-    const hasProduct =
-      /מוצר|סוג.*מוצר|שם.*מוצר|תוכנית|תכנית/.test(
+    const hasManager =
+      /יצרן|חברה|גוף|מנהל/.test(text);
+
+    const hasFee =
+      /דמי.*ניהול|צבירה|הפקדה|ד\.?נ/.test(
         text
       );
 
-    const hasManager =
-      /יצרן|חברה|גוף|מנהל|קרן/.test(text);
-
-    const hasPension =
-      /פנסיה|קרן/.test(text);
+    const hasProduct =
+      /מוצר|פנסיה|גמל|השתלמות/.test(
+        text
+      );
 
     if (
-      (hasProduct && hasManager) ||
-      (hasPension && hasManager)
+      hasManager &&
+      (hasFee || hasProduct)
     ) {
       return i;
     }
@@ -120,16 +114,13 @@ function getByHeader(row, patterns) {
 }
 
 function detectManager(row) {
-  const directValue = getByHeader(row, [
-    /יצרן/,
-    /חברה.*מנהלת/,
-    /חברה/,
-    /גוף.*מנהל/,
-    /קרן/,
-  ]);
-
   const text = normalizeText(
-    `${directValue} ${row.__text}`
+    `${getByHeader(row, [
+      /יצרן/,
+      /חברה/,
+      /גוף.*מנהל/,
+      /קרן/,
+    ])} ${row.__text}`
   );
 
   if (/הפניקס|פניקס/.test(text))
@@ -159,72 +150,13 @@ function detectManager(row) {
   return "אחרים";
 }
 
-function detectOriginalManager(row) {
-  return normalizeText(
-    getByHeader(row, [
-      /יצרן/,
-      /חברה.*מנהלת/,
-      /חברה/,
-      /גוף.*מנהל/,
-      /קרן/,
-    ])
-  );
-}
-
-function detectProductType(row) {
+function isPensionAgreement(row) {
   const text = normalizeText(
     row.__text
   );
 
-  if (/משלימה|כללית/.test(text))
-    return "משלימה";
-
-  if (/מקיפה/.test(text))
-    return "מקיפה";
-
-  return "קרן פנסיה";
-}
-
-function detectInsuranceWaiver(row) {
-  const text = normalizeText(
-    row.__text
-  );
-
-  if (
-    /ויתור.*מלא|קיים.*ויתור.*מלא|ויתור.*שארים.*מלא/.test(
-      text
-    )
-  ) {
-    return "קיים ויתור מלא";
-  }
-
-  if (
-    /בת זוג בלבד|בן זוג בלבד|ויתור.*בת זוג|ויתור.*בן זוג/.test(
-      text
-    )
-  ) {
-    return "ויתור על בת זוג בלבד";
-  }
-
-  if (
-    /לא קיים.*ויתור|אין.*ויתור|ללא.*ויתור/.test(
-      text
-    )
-  ) {
-    return "לא קיים ויתור שארים";
-  }
-
-  return "חסר נתון";
-}
-
-function detectAccumulation(row) {
-  return normalizeNumber(
-    getByHeader(row, [
-      /צבירה/,
-      /יתרה/,
-      /חיסכון/,
-      /ערך.*פדיון/,
-    ])
+  return /פנסיה|מקיפה|משלימה|קרן/.test(
+    text
   );
 }
 
@@ -234,6 +166,7 @@ function detectDepositFee(row) {
       /דמי.*ניהול.*הפקדה/,
       /ד\.?נ.*הפקדה/,
       /מהפקדה/,
+      /הפקדות/,
     ])
   );
 }
@@ -244,36 +177,17 @@ function detectAccumulationFee(row) {
       /דמי.*ניהול.*צבירה/,
       /ד\.?נ.*צבירה/,
       /מצבירה/,
+      /צבירה/,
     ])
   );
 }
 
-function detectTrack(row) {
-  return normalizeText(
-    getByHeader(row, [
-      /מסלול/,
-      /אפיק/,
-    ])
-  );
-}
-
-function isPensionRow(row) {
-  const text = normalizeText(
-    row.__text
-  );
-
-  return PENSION_KEYWORDS.some(
-    (keyword) =>
-      text.includes(keyword)
-  );
-}
-
-export function parsePensionFund(
+export function parseAgreements(
   workbook
 ) {
   if (!workbook) return [];
 
-  const allRows = [];
+  const agreements = [];
 
   workbook.SheetNames.forEach(
     (sheetName) => {
@@ -300,29 +214,13 @@ export function parsePensionFund(
       );
 
       objects
-        .filter(isPensionRow)
+        .filter(isPensionAgreement)
         .forEach((row) => {
-          allRows.push({
+          agreements.push({
             sheetName,
 
             manager:
               detectManager(row),
-
-            originalManager:
-              detectOriginalManager(
-                row
-              ),
-
-            productType:
-              detectProductType(row),
-
-            insuranceWaiver:
-              detectInsuranceWaiver(
-                row
-              ),
-
-            accumulation:
-              detectAccumulation(row),
 
             depositFee:
               detectDepositFee(row),
@@ -332,14 +230,11 @@ export function parsePensionFund(
                 row
               ),
 
-            track:
-              detectTrack(row),
-
             raw: row,
           });
         });
     }
   );
 
-  return allRows;
+  return agreements;
 }

@@ -1,13 +1,5 @@
 import * as XLSX from "xlsx";
 
-const PENSION_KEYWORDS = [
-  "קרן פנסיה",
-  "פנסיה מקיפה",
-  "פנסיה משלימה",
-  "מקיפה",
-  "משלימה",
-];
-
 function normalizeText(value) {
   return String(value ?? "")
     .replace(/\s+/g, " ")
@@ -44,11 +36,20 @@ function rowToText(row) {
   return row.map(normalizeText).join(" ");
 }
 
+function sheetLooksLikePension(sheetName) {
+  return /פנסיה|מקיפה|משלימה|קרן/.test(
+    normalizeText(sheetName)
+  );
+}
+
 function findHeaderIndex(rows) {
   const maxRowsToScan = Math.min(
     rows.length,
-    25
+    35
   );
+
+  let bestIndex = 0;
+  let bestScore = -1;
 
   for (
     let i = 0;
@@ -57,28 +58,22 @@ function findHeaderIndex(rows) {
   ) {
     const text = rowToText(rows[i]);
 
-    const hasProduct =
-      /מוצר|סוג.*מוצר|שם.*מוצר|תוכנית|תכנית|קרן|קופה/.test(
-        text
-      );
+    let score = 0;
 
-    const hasManager =
-      /יצרן|חברה|גוף|מנהל|שם.*קרן|שם.*קופה/.test(
-        text
-      );
+    if (/שם.*עובד|עובד|ת\.?ז|זהות/.test(text)) score += 1;
+    if (/יצרן|חברה|גוף|מנהל|שם.*קרן|שם.*קופה/.test(text)) score += 3;
+    if (/מוצר|סוג.*מוצר|שם.*מוצר|תוכנית|תכנית|קרן|קופה/.test(text)) score += 2;
+    if (/פנסיה|מקיפה|משלימה/.test(text)) score += 2;
+    if (/דמי.*ניהול|ד\.?נ|צבירה|הפקדה|מצבירה|מהפקדה/.test(text)) score += 3;
+    if (/מסלול|שארים|ויתור/.test(text)) score += 1;
 
-    const hasPension =
-      /פנסיה|מקיפה|משלימה/.test(text);
-
-    if (
-      (hasProduct && hasManager) ||
-      (hasPension && hasManager)
-    ) {
-      return i;
+    if (score > bestScore) {
+      bestScore = score;
+      bestIndex = i;
     }
   }
 
-  return 0;
+  return bestIndex;
 }
 
 function makeObjects(rows, headerIndex) {
@@ -110,19 +105,6 @@ function makeObjects(rows, headerIndex) {
 
 function getByHeader(row, patterns) {
   const entry = Object.entries(row).find(
-    ([header]) =>
-      patterns.some((pattern) =>
-        pattern.test(
-          normalizeText(header)
-        )
-      )
-  );
-
-  return entry ? entry[1] : "";
-}
-
-function getFirstNonEmptyByHeader(row, patterns) {
-  const entries = Object.entries(row).filter(
     ([header, value]) =>
       patterns.some((pattern) =>
         pattern.test(
@@ -132,9 +114,7 @@ function getFirstNonEmptyByHeader(row, patterns) {
       normalizeText(value)
   );
 
-  return entries.length
-    ? entries[0][1]
-    : "";
+  return entry ? entry[1] : "";
 }
 
 function cleanManagerName(value) {
@@ -151,19 +131,19 @@ function cleanManagerName(value) {
 }
 
 function detectOriginalManager(row) {
-  const directValue =
-    getFirstNonEmptyByHeader(row, [
-      /^יצרן$/,
-      /שם.*יצרן/,
-      /חברה.*מנהלת/,
-      /^חברה$/,
-      /שם.*חברה/,
-      /גוף.*מנהל/,
-      /שם.*גוף/,
-      /שם.*קרן/,
-      /שם.*קופה/,
-      /קרן.*פנסיה/,
-    ]);
+  const directValue = getByHeader(row, [
+    /^יצרן$/,
+    /שם.*יצרן/,
+    /יצרן.*פנסיה/,
+    /חברה.*מנהלת/,
+    /^חברה$/,
+    /שם.*חברה/,
+    /גוף.*מנהל/,
+    /שם.*גוף/,
+    /שם.*קרן/,
+    /קרן.*פנסיה/,
+    /קופה/,
+  ]);
 
   if (normalizeText(directValue)) {
     return cleanManagerName(directValue);
@@ -194,9 +174,9 @@ function detectOriginalManager(row) {
   return knownMatch || "לא מזוהה";
 }
 
-function detectProductType(row) {
+function detectProductType(row, sheetName) {
   const text = normalizeText(
-    row.__text
+    `${sheetName} ${row.__text}`
   );
 
   if (/משלימה|כללית/.test(text)) {
@@ -211,8 +191,15 @@ function detectProductType(row) {
 }
 
 function detectInsuranceWaiver(row) {
+  const waiverValue = getByHeader(row, [
+    /ויתור.*שארים/,
+    /שארים/,
+    /מסלול.*ביטוח/,
+    /כיסוי.*שארים/,
+  ]);
+
   const text = normalizeText(
-    row.__text
+    `${waiverValue} ${row.__text}`
   );
 
   if (
@@ -285,15 +272,26 @@ function detectTrack(row) {
   );
 }
 
-function isPensionRow(row) {
-  const text = normalizeText(
-    row.__text
-  );
+function hasRealData(row) {
+  const text = normalizeText(row.__text);
 
-  return PENSION_KEYWORDS.some(
-    (keyword) =>
-      text.includes(keyword)
-  );
+  if (!text) return false;
+
+  const nonEmptyCells = row.__raw.filter(
+    (cell) => normalizeText(cell)
+  ).length;
+
+  return nonEmptyCells >= 3;
+}
+
+function rowLooksLikePension(row, sheetName) {
+  if (sheetLooksLikePension(sheetName)) {
+    return hasRealData(row);
+  }
+
+  const text = normalizeText(row.__text);
+
+  return /פנסיה|מקיפה|משלימה|קרן פנסיה/.test(text);
 }
 
 export function parsePensionFund(
@@ -328,7 +326,12 @@ export function parsePensionFund(
       );
 
       objects
-        .filter(isPensionRow)
+        .filter((row) =>
+          rowLooksLikePension(
+            row,
+            sheetName
+          )
+        )
         .forEach((row) => {
           const originalManager =
             detectOriginalManager(row);
@@ -336,14 +339,15 @@ export function parsePensionFund(
           allRows.push({
             sheetName,
 
-            // בכוונה נשמר אותו שם גם ב-manager וגם ב-originalManager.
-            // הנרמול הסופי מתבצע ב-buildPensionSummary כדי לאפשר יצרנים דינמיים.
             manager: originalManager,
 
             originalManager,
 
             productType:
-              detectProductType(row),
+              detectProductType(
+                row,
+                sheetName
+              ),
 
             insuranceWaiver:
               detectInsuranceWaiver(row),
@@ -363,6 +367,14 @@ export function parsePensionFund(
             raw: row,
           });
         });
+    }
+  );
+
+  console.log(
+    "parsePensionFund result:",
+    {
+      rows: allRows.length,
+      sample: allRows.slice(0, 5),
     }
   );
 

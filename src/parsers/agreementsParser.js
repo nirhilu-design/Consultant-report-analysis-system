@@ -39,7 +39,7 @@ function rowToText(row) {
 function findHeaderIndex(rows) {
   const maxRowsToScan = Math.min(
     rows.length,
-    20
+    25
   );
 
   for (
@@ -50,7 +50,9 @@ function findHeaderIndex(rows) {
     const text = rowToText(rows[i]);
 
     const hasManager =
-      /יצרן|חברה|גוף|מנהל/.test(text);
+      /יצרן|חברה|גוף|מנהל|קרן/.test(
+        text
+      );
 
     const hasFee =
       /דמי.*ניהול|צבירה|הפקדה|ד\.?נ/.test(
@@ -93,7 +95,7 @@ function makeObjects(rows, headerIndex) {
       });
 
       obj.__raw = row;
-
+      obj.__headers = headers;
       obj.__text = rowToText(row);
 
       return obj;
@@ -113,41 +115,79 @@ function getByHeader(row, patterns) {
   return entry ? entry[1] : "";
 }
 
-function detectManager(row) {
-  const text = normalizeText(
-    `${getByHeader(row, [
-      /יצרן/,
-      /חברה/,
-      /גוף.*מנהל/,
-      /קרן/,
-    ])} ${row.__text}`
+function getFirstNonEmptyByHeader(
+  row,
+  patterns
+) {
+  const entries = Object.entries(row).filter(
+    ([header, value]) =>
+      patterns.some((pattern) =>
+        pattern.test(
+          normalizeText(header)
+        )
+      ) &&
+      normalizeText(value)
   );
 
-  if (/הפניקס|פניקס/.test(text))
-    return "הפניקס";
+  return entries.length
+    ? entries[0][1]
+    : "";
+}
 
-  if (/הראל/.test(text))
-    return "הראל";
+function cleanManagerName(value) {
+  const text = normalizeText(value)
+    .replace(/^קרן\s+/g, "")
+    .replace(/^חברת\s+/g, "")
+    .replace(/^חברה\s+מנהלת\s*/g, "")
+    .replace(/בע"מ/g, "")
+    .replace(/בעמ/g, "")
+    .replace(/\s+-\s+.*$/g, "")
+    .trim();
 
-  if (/כלל/.test(text))
-    return "כלל";
+  return text;
+}
 
-  if (/מקפת|מגדל/.test(text))
-    return "מקפת";
+function detectOriginalManager(row) {
+  const directValue =
+    getFirstNonEmptyByHeader(row, [
+      /^יצרן$/,
+      /שם.*יצרן/,
+      /חברה.*מנהלת/,
+      /^חברה$/,
+      /שם.*חברה/,
+      /גוף.*מנהל/,
+      /שם.*גוף/,
+      /שם.*קרן/,
+      /קרן.*פנסיה/,
+    ]);
 
-  if (/מבטחים|מנורה/.test(text))
-    return "מבטחים";
+  if (normalizeText(directValue)) {
+    return cleanManagerName(directValue);
+  }
 
-  if (/מיטב/.test(text))
-    return "מיטב";
+  const text = normalizeText(row.__text);
 
-  if (/אלטשולר/.test(text))
-    return "אלטשולר";
+  const knownMatch = [
+    "הפניקס",
+    "פניקס",
+    "הראל",
+    "כלל",
+    "מקפת",
+    "מגדל",
+    "מבטחים",
+    "מנורה",
+    "מיטב",
+    "אלטשולר",
+    "מור",
+    "אינפיניטי",
+    "ילין",
+    "אנליסט",
+    "איילון",
+    "הכשרה",
+    "פסגות",
+  ].find((name) => text.includes(name));
 
-  if (/מור/.test(text))
-    return "מור";
-
-  return "אחרים";
+  return knownMatch || "לא מזוהה";
 }
 
 function isPensionAgreement(row) {
@@ -216,11 +256,17 @@ export function parseAgreements(
       objects
         .filter(isPensionAgreement)
         .forEach((row) => {
+          const originalManager =
+            detectOriginalManager(row);
+
           agreements.push({
             sheetName,
 
-            manager:
-              detectManager(row),
+            // בכוונה נשמר שם יצרן מקורי.
+            // הסיווג הסופי מתבצע ב-buildPensionSummary.
+            manager: originalManager,
+
+            originalManager,
 
             depositFee:
               detectDepositFee(row),

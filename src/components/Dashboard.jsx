@@ -19,18 +19,6 @@ const pensionTabs = [
   "סיכום קרנות פנסיה",
 ];
 
-const managerColumns = [
-  "הפניקס",
-  "הראל",
-  "כלל",
-  "מקפת",
-  "מבטחים",
-  "מיטב",
-  "אלטשולר",
-  "מור",
-  "אחרים",
-];
-
 const waiverRows = [
   "לא קיים ויתור שארים",
   "ויתור על בת זוג בלבד",
@@ -47,7 +35,7 @@ const feeRows = [
     key: "highAccumulationTrack",
     label: "מתוכם עובדים במסלול לצבירה גבוהה",
   },
-  { key: "totalFocus", label: "סה״כ" },
+  { key: "totalFocus", label: "סה״כ בדיקות צבירה גבוהה / מסלול" },
 ];
 
 function getValue(obj, path, fallback = 0) {
@@ -80,6 +68,9 @@ export default function Dashboard({
 
   const pensionSummary =
     analysisData?.pensionSummary;
+
+  const managerColumns =
+    pensionSummary?.managerColumns || [];
 
   const totals = useMemo(() => {
     return {
@@ -160,10 +151,6 @@ export default function Dashboard({
           </div>
         </div>
 
-        {/* ========================= */}
-        {/* קרן פנסיה */}
-        {/* ========================= */}
-
         {activeSheet === "קרן פנסיה" && (
           <>
             <div className="topTabs">
@@ -189,12 +176,27 @@ export default function Dashboard({
                 <h2>אין עדיין נתוני ניתוח</h2>
 
                 <p>
-                  ודא שה-App קורא את
-                  קובצי האקסל ומעביר
-                  analysisData ל-Dashboard.
+                  ודא שה-App קורא את קובצי
+                  האקסל ומעביר analysisData
+                  ל-Dashboard.
                 </p>
               </div>
             )}
+
+            {pensionSummary &&
+              managerColumns.length === 0 && (
+                <div className="card warningCard">
+                  <h2>לא נמצאו יצרנים להצגה</h2>
+
+                  <p>
+                    הניתוח רץ, אבל לא זוהו
+                    יצרנים מתוך דוח הנתונים או
+                    דוח ההסכמים. בשלב הבא צריך
+                    לדייק את parser לפי שמות
+                    העמודות בקובץ האמיתי.
+                  </p>
+                </div>
+              )}
 
             {/* ========================= */}
             {/* מסלול ביטוח */}
@@ -207,13 +209,14 @@ export default function Dashboard({
                   <div className="sectionTitle">
                     <div>
                       <h2>
-                        מסלול רווק בקרן
-                        פנסיה
+                        מסלול רווק בקרן פנסיה
                       </h2>
 
                       <p>
-                        בדיקת ויתור שארים
-                        לפי יצרן.
+                        הטבלה נבנית דינמית לפי
+                        היצרנים שמופיעים בפועל
+                        בדוח הנתונים ובדוח
+                        ההסכמים.
                       </p>
                     </div>
                   </div>
@@ -223,15 +226,13 @@ export default function Dashboard({
                       <thead>
                         <tr>
                           <th>
-                            סוג ויתור על
-                            כיסוי שארים
+                            סוג ויתור על כיסוי
+                            שארים
                           </th>
 
                           {managerColumns.map(
                             (manager) => (
-                              <th
-                                key={manager}
-                              >
+                              <th key={manager}>
                                 {manager}
                               </th>
                             )
@@ -244,21 +245,15 @@ export default function Dashboard({
                       <tbody>
                         {waiverRows.map(
                           (rowLabel) => (
-                            <tr
-                              key={rowLabel}
-                            >
+                            <tr key={rowLabel}>
                               <td className="rowTitle">
                                 {rowLabel}
                               </td>
 
                               {managerColumns.map(
-                                (
-                                  manager
-                                ) => (
+                                (manager) => (
                                   <DataCell
-                                    key={
-                                      manager
-                                    }
+                                    key={manager}
                                     value={getValue(
                                       pensionSummary.insurancePath,
                                       [
@@ -324,13 +319,14 @@ export default function Dashboard({
                   <div className="sectionTitle">
                     <div>
                       <h2>
-                        דמי ניהול בקרן
-                        פנסיה
+                        דמי ניהול בקרן פנסיה
                       </h2>
 
                       <p>
-                        בדיקת תקינות מול
-                        דוח הסכמים.
+                        בדיקת תקינות מול דוח
+                        הסכמים. יצרן שלא נמצא
+                        בהסכמים נספר תחת
+                        “אחרים / ללא הסכם”.
                       </p>
                     </div>
                   </div>
@@ -345,9 +341,7 @@ export default function Dashboard({
 
                           {managerColumns.map(
                             (manager) => (
-                              <th
-                                key={manager}
-                              >
+                              <th key={manager}>
                                 {manager}
                               </th>
                             )
@@ -356,43 +350,37 @@ export default function Dashboard({
                       </thead>
 
                       <tbody>
-                        {feeRows.map(
-                          (row) => (
-                            <tr
-                              key={row.key}
-                              className={
-                                row.key.includes(
-                                  "total"
-                                )
-                                  ? "totalRow"
-                                  : ""
-                              }
-                            >
-                              <td className="rowTitle">
-                                {row.label}
-                              </td>
+                        {feeRows.map((row) => (
+                          <tr
+                            key={row.key}
+                            className={
+                              row.key.includes(
+                                "total"
+                              )
+                                ? "totalRow"
+                                : ""
+                            }
+                          >
+                            <td className="rowTitle">
+                              {row.label}
+                            </td>
 
-                              {managerColumns.map(
-                                (
-                                  manager
-                                ) => (
-                                  <DataCell
-                                    key={
-                                      manager
-                                    }
-                                    value={getValue(
-                                      pensionSummary.managementFees,
-                                      [
-                                        row.key,
-                                        manager,
-                                      ]
-                                    )}
-                                  />
-                                )
-                              )}
-                            </tr>
-                          )
-                        )}
+                            {managerColumns.map(
+                              (manager) => (
+                                <DataCell
+                                  key={manager}
+                                  value={getValue(
+                                    pensionSummary.managementFees,
+                                    [
+                                      row.key,
+                                      manager,
+                                    ]
+                                  )}
+                                />
+                              )
+                            )}
+                          </tr>
+                        ))}
                       </tbody>
                     </table>
                   </div>
@@ -422,8 +410,9 @@ export default function Dashboard({
                 <h2>צבירות</h2>
 
                 <p>
-                  בהמשך נחבר ניתוח
-                  צבירות אמיתי.
+                  בהמשך נחבר ניתוח צבירות
+                  אמיתי לפי עובד, יצרן, מוצר
+                  וקרן.
                 </p>
               </div>
             )}
@@ -434,8 +423,9 @@ export default function Dashboard({
                 <h2>חסרי סוכן</h2>
 
                 <p>
-                  בהמשך נבצע בדיקת
-                  מספר סוכן.
+                  בהמשך נבצע בדיקת מספר
+                  סוכן / שם סוכן מתוך דוח
+                  הנתונים.
                 </p>
               </div>
             )}
@@ -463,8 +453,7 @@ export default function Dashboard({
 
                     <div className="kpiCard">
                       <span>
-                        דמי ניהול
-                        תקינים
+                        דמי ניהול תקינים
                       </span>
 
                       <strong>
@@ -476,8 +465,7 @@ export default function Dashboard({
 
                     <div className="kpiCard">
                       <span>
-                        דמי ניהול לא
-                        תקינים
+                        דמי ניהול לא תקינים
                       </span>
 
                       <strong>
@@ -509,9 +497,8 @@ export default function Dashboard({
             <h2>תצוגת ניתוח</h2>
 
             <p>
-              כאן נציג את טבלאות
-              הניתוח של הגיליון
-              הנבחר.
+              כאן נציג את טבלאות הניתוח
+              של הגיליון הנבחר.
             </p>
           </div>
         )}

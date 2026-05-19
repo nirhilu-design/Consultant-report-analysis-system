@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 const sheets = [
   "נתונים כלליים",
@@ -19,11 +19,83 @@ const pensionTabs = [
   "סיכום קרנות פנסיה",
 ];
 
-export default function Dashboard({ files }) {
-  const [activeSheet, setActiveSheet] = useState("קרן פנסיה");
+const managerColumns = [
+  "הפניקס",
+  "הראל",
+  "כלל",
+  "מקפת",
+  "מבטחים",
+  "מיטב",
+  "אלטשולר",
+  "מור",
+  "אחרים",
+];
+
+const waiverRows = [
+  "לא קיים ויתור שארים",
+  "ויתור על בת זוג בלבד",
+  "קיים ויתור מלא",
+  "חסר נתון",
+];
+
+const feeRows = [
+  { key: "valid", label: "ד.נ תקינים" },
+  { key: "invalid", label: "ד.נ לא תקינים" },
+  { key: "total", label: "סה״כ" },
+  { key: "over500k", label: "מתוכם מספר עובדים עם צבירה מעל 500,000 ₪" },
+  {
+    key: "highAccumulationTrack",
+    label: "מתוכם עובדים במסלול לצבירה גבוהה",
+  },
+  { key: "totalFocus", label: "סה״כ" },
+];
+
+function getValue(obj, path, fallback = 0) {
+  return path.reduce((acc, key) => acc?.[key], obj) ?? fallback;
+}
+
+function formatNumber(value) {
+  return Number(value || 0).toLocaleString("he-IL");
+}
+
+function DataCell({ value }) {
+  const numericValue = Number(value || 0);
+
+  return (
+    <td className={numericValue > 0 ? "hasValue" : ""}>
+      {formatNumber(numericValue)}
+    </td>
+  );
+}
+
+export default function Dashboard({
+  files,
+  analysisData,
+}) {
+  const [activeSheet, setActiveSheet] =
+    useState("קרן פנסיה");
 
   const [activePensionTab, setActivePensionTab] =
     useState("מסלול ביטוח");
+
+  const pensionSummary =
+    analysisData?.pensionSummary;
+
+  const totals = useMemo(() => {
+    return {
+      rows:
+        analysisData?.pensionRows?.length || 0,
+
+      agreements:
+        analysisData?.agreements?.length || 0,
+
+      pensionPolicies:
+        pensionSummary?.totalPolicies || 0,
+
+      noAgreement:
+        pensionSummary?.noAgreementPolicies || 0,
+    };
+  }, [analysisData, pensionSummary]);
 
   return (
     <div className="dashboard">
@@ -33,8 +105,14 @@ export default function Dashboard({ files }) {
         {sheets.map((sheet) => (
           <button
             key={sheet}
-            className={activeSheet === sheet ? "sideItem active" : "sideItem"}
-            onClick={() => setActiveSheet(sheet)}
+            className={
+              activeSheet === sheet
+                ? "sideItem active"
+                : "sideItem"
+            }
+            onClick={() =>
+              setActiveSheet(sheet)
+            }
           >
             {sheet}
           </button>
@@ -43,12 +121,43 @@ export default function Dashboard({ files }) {
 
       <section className="dashboardMain">
         <div className="dashboardHeader">
-          <h1>{activeSheet}</h1>
+          <div>
+            <p className="eyebrow">
+              ניתוח קובצי Excel
+            </p>
 
-          <p>
-            דוח נתונים: {files.dataFile?.name} | דוח הסכמים:{" "}
-            {files.agreementsFile?.name}
-          </p>
+            <h1>{activeSheet}</h1>
+
+            <p>
+              דוח נתונים:{" "}
+              {files.dataFile?.name ||
+                "לא הועלה"}{" "}
+              | דוח הסכמים:{" "}
+              {files.agreementsFile?.name ||
+                "לא הועלה"}
+            </p>
+          </div>
+
+          <div className="summaryBadges">
+            <span>
+              שורות פנסיה:{" "}
+              {formatNumber(totals.rows)}
+            </span>
+
+            <span>
+              הסכמים:{" "}
+              {formatNumber(
+                totals.agreements
+              )}
+            </span>
+
+            <span>
+              ללא הסכם:{" "}
+              {formatNumber(
+                totals.noAgreement
+              )}
+            </span>
+          </div>
         </div>
 
         {/* ========================= */}
@@ -66,256 +175,343 @@ export default function Dashboard({ files }) {
                       ? "topTab active"
                       : "topTab"
                   }
-                  onClick={() => setActivePensionTab(tab)}
+                  onClick={() =>
+                    setActivePensionTab(tab)
+                  }
                 >
                   {tab}
                 </button>
               ))}
             </div>
 
+            {!pensionSummary && (
+              <div className="card warningCard">
+                <h2>אין עדיין נתוני ניתוח</h2>
+
+                <p>
+                  ודא שה-App קורא את
+                  קובצי האקסל ומעביר
+                  analysisData ל-Dashboard.
+                </p>
+              </div>
+            )}
+
             {/* ========================= */}
             {/* מסלול ביטוח */}
             {/* ========================= */}
 
-            {activePensionTab === "מסלול ביטוח" && (
-              <div className="card">
-                <h2>מסלול רווק בקרן פנסיה</h2>
+            {pensionSummary &&
+              activePensionTab ===
+                "מסלול ביטוח" && (
+                <div className="card wideCard">
+                  <div className="sectionTitle">
+                    <div>
+                      <h2>
+                        מסלול רווק בקרן
+                        פנסיה
+                      </h2>
 
-                <table className="analysisTable">
-                  <thead>
-                    <tr>
-                      <th>סוג ויתור על כיסוי שארים</th>
-                      <th>הפניקס</th>
-                      <th>הראל</th>
-                      <th>כלל</th>
-                      <th>מקפת</th>
-                      <th>מבטחים</th>
-                      <th>מיטב</th>
-                      <th>אלטשולר</th>
-                      <th>מור</th>
-                      <th>אחרים</th>
-                      <th>סה״כ</th>
-                    </tr>
-                  </thead>
+                      <p>
+                        בדיקת ויתור שארים
+                        לפי יצרן.
+                      </p>
+                    </div>
+                  </div>
 
-                  <tbody>
-                    <tr>
-                      <td>לא קיים ויתור שארים</td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td>0</td>
-                    </tr>
+                  <div className="tableWrap">
+                    <table className="analysisTable">
+                      <thead>
+                        <tr>
+                          <th>
+                            סוג ויתור על
+                            כיסוי שארים
+                          </th>
 
-                    <tr>
-                      <td>ויתור על בת זוג בלבד</td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td>0</td>
-                    </tr>
+                          {managerColumns.map(
+                            (manager) => (
+                              <th
+                                key={manager}
+                              >
+                                {manager}
+                              </th>
+                            )
+                          )}
 
-                    <tr>
-                      <td>קיים ויתור מלא</td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td>0</td>
-                    </tr>
+                          <th>סה״כ</th>
+                        </tr>
+                      </thead>
 
-                    <tr>
-                      <td>חסר נתון</td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td>0</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            )}
+                      <tbody>
+                        {waiverRows.map(
+                          (rowLabel) => (
+                            <tr
+                              key={rowLabel}
+                            >
+                              <td className="rowTitle">
+                                {rowLabel}
+                              </td>
+
+                              {managerColumns.map(
+                                (
+                                  manager
+                                ) => (
+                                  <DataCell
+                                    key={
+                                      manager
+                                    }
+                                    value={getValue(
+                                      pensionSummary.insurancePath,
+                                      [
+                                        rowLabel,
+                                        manager,
+                                      ]
+                                    )}
+                                  />
+                                )
+                              )}
+
+                              <DataCell
+                                value={getValue(
+                                  pensionSummary.insurancePathTotals,
+                                  [
+                                    rowLabel,
+                                  ]
+                                )}
+                              />
+                            </tr>
+                          )
+                        )}
+
+                        <tr className="totalRow">
+                          <td className="rowTitle">
+                            סכום כולל
+                          </td>
+
+                          {managerColumns.map(
+                            (manager) => (
+                              <DataCell
+                                key={manager}
+                                value={getValue(
+                                  pensionSummary.insuranceManagerTotals,
+                                  [
+                                    manager,
+                                  ]
+                                )}
+                              />
+                            )
+                          )}
+
+                          <DataCell
+                            value={
+                              pensionSummary.totalPolicies
+                            }
+                          />
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
 
             {/* ========================= */}
             {/* דמי ניהול */}
             {/* ========================= */}
 
-            {activePensionTab === "דמי ניהול" && (
-              <div className="card">
-                <h2>
-                  דמי ניהול בקרן פנסיה מקיפה ומשלימה
-                  (מספר תוכניות)
-                </h2>
+            {pensionSummary &&
+              activePensionTab ===
+                "דמי ניהול" && (
+                <div className="card wideCard">
+                  <div className="sectionTitle">
+                    <div>
+                      <h2>
+                        דמי ניהול בקרן
+                        פנסיה
+                      </h2>
 
-                <table className="analysisTable">
-                  <thead>
-                    <tr>
-                      <th>קרנות פנסיה</th>
-                      <th>הפניקס</th>
-                      <th>הראל</th>
-                      <th>כלל</th>
-                      <th>מקפת</th>
-                      <th>מבטחים</th>
-                      <th>מיטב</th>
-                      <th>אלטשולר</th>
-                      <th>מור</th>
-                      <th>אחרים</th>
-                    </tr>
-                  </thead>
+                      <p>
+                        בדיקת תקינות מול
+                        דוח הסכמים.
+                      </p>
+                    </div>
+                  </div>
 
-                  <tbody>
-                    <tr>
-                      <td>ד.נ תקינים</td>
+                  <div className="tableWrap">
+                    <table className="analysisTable">
+                      <thead>
+                        <tr>
+                          <th>
+                            קרנות פנסיה
+                          </th>
 
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                    </tr>
+                          {managerColumns.map(
+                            (manager) => (
+                              <th
+                                key={manager}
+                              >
+                                {manager}
+                              </th>
+                            )
+                          )}
+                        </tr>
+                      </thead>
 
-                    <tr>
-                      <td>ד.נ לא תקינים</td>
+                      <tbody>
+                        {feeRows.map(
+                          (row) => (
+                            <tr
+                              key={row.key}
+                              className={
+                                row.key.includes(
+                                  "total"
+                                )
+                                  ? "totalRow"
+                                  : ""
+                              }
+                            >
+                              <td className="rowTitle">
+                                {row.label}
+                              </td>
 
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                    </tr>
+                              {managerColumns.map(
+                                (
+                                  manager
+                                ) => (
+                                  <DataCell
+                                    key={
+                                      manager
+                                    }
+                                    value={getValue(
+                                      pensionSummary.managementFees,
+                                      [
+                                        row.key,
+                                        manager,
+                                      ]
+                                    )}
+                                  />
+                                )
+                              )}
+                            </tr>
+                          )
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
 
-                    <tr>
-                      <td>סה״כ</td>
-
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                    </tr>
-
-                    <tr>
-                      <td>
-                        מתוכם מספר עובדים עם צבירה מעל 500,000 ₪
-                      </td>
-
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                    </tr>
-
-                    <tr>
-                      <td>
-                        מתוכם עובדים במסלול לצבירה גבוהה
-                      </td>
-
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                    </tr>
-
-                    <tr>
-                      <td>סה״כ</td>
-
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                      <td></td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            )}
+                  {pensionSummary
+                    .noAgreementDetails
+                    .length > 0 && (
+                    <div className="noteBox">
+                      <strong>
+                        יצרנים ללא הסכם:
+                      </strong>{" "}
+                      {pensionSummary.noAgreementDetails.join(
+                        ", "
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
 
             {/* ========================= */}
             {/* טאבים עתידיים */}
             {/* ========================= */}
 
-            {activePensionTab === "צבירות" && (
+            {activePensionTab ===
+              "צבירות" && (
               <div className="card">
                 <h2>צבירות</h2>
-                <p>בהמשך נחבר נתוני צבירות אמיתיים.</p>
+
+                <p>
+                  בהמשך נחבר ניתוח
+                  צבירות אמיתי.
+                </p>
               </div>
             )}
 
-            {activePensionTab === "חסרי סוכן" && (
+            {activePensionTab ===
+              "חסרי סוכן" && (
               <div className="card">
                 <h2>חסרי סוכן</h2>
-                <p>בהמשך נבצע ניתוח חסרי סוכן.</p>
+
+                <p>
+                  בהמשך נבצע בדיקת
+                  מספר סוכן.
+                </p>
               </div>
             )}
 
-            {activePensionTab === "סיכום קרנות פנסיה" && (
-              <div className="card">
-                <h2>סיכום קרנות פנסיה</h2>
-                <p>בהמשך נציג טבלאות סיכום.</p>
-              </div>
-            )}
+            {activePensionTab ===
+              "סיכום קרנות פנסיה" &&
+              pensionSummary && (
+                <div className="card">
+                  <h2>
+                    סיכום קרנות פנסיה
+                  </h2>
+
+                  <div className="kpiGrid">
+                    <div className="kpiCard">
+                      <span>
+                        סה״כ תוכניות
+                      </span>
+
+                      <strong>
+                        {formatNumber(
+                          pensionSummary.totalPolicies
+                        )}
+                      </strong>
+                    </div>
+
+                    <div className="kpiCard">
+                      <span>
+                        דמי ניהול
+                        תקינים
+                      </span>
+
+                      <strong>
+                        {formatNumber(
+                          pensionSummary.validFeePolicies
+                        )}
+                      </strong>
+                    </div>
+
+                    <div className="kpiCard">
+                      <span>
+                        דמי ניהול לא
+                        תקינים
+                      </span>
+
+                      <strong>
+                        {formatNumber(
+                          pensionSummary.invalidFeePolicies
+                        )}
+                      </strong>
+                    </div>
+
+                    <div className="kpiCard">
+                      <span>
+                        ללא הסכם
+                      </span>
+
+                      <strong>
+                        {formatNumber(
+                          pensionSummary.noAgreementPolicies
+                        )}
+                      </strong>
+                    </div>
+                  </div>
+                </div>
+              )}
           </>
         )}
-
-        {/* ========================= */}
-        {/* שאר הגיליונות */}
-        {/* ========================= */}
 
         {activeSheet !== "קרן פנסיה" && (
           <div className="card">
             <h2>תצוגת ניתוח</h2>
 
             <p>
-              כאן נציג את טבלאות הניתוח של הגיליון הנבחר.
+              כאן נציג את טבלאות
+              הניתוח של הגיליון
+              הנבחר.
             </p>
           </div>
         )}

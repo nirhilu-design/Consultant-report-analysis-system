@@ -1,213 +1,244 @@
-export function buildAnalytics(unifiedRows = []) {
-  const rows = Array.isArray(unifiedRows) ? unifiedRows : [];
+// NEW FILE
+// Path: src/unified/analyticsEngine.js
 
-  const auditedRows = rows.filter((r) => r.auditStatus !== "EXCLUDED");
+function emptyIssuerRow(label, issuers) {
+  const row = { label };
 
-  const validRows = auditedRows.filter((r) =>
-    String(r.auditStatus || "").startsWith("VALID")
-  );
-
-  const invalidRows = auditedRows.filter(
-    (r) => r.auditStatus === "INVALID"
-  );
-
-  const noAgreementRows = auditedRows.filter(
-    (r) => r.auditModel === "BASELINE"
-  );
-
-  const complianceRate = auditedRows.length
-    ? ((validRows.length / auditedRows.length) * 100).toFixed(1)
-    : "0.0";
-
-  return {
-    kpi: buildKpi({
-      totalRows: rows.length,
-      auditedRows: auditedRows.length,
-      validRows: validRows.length,
-      invalidRows: invalidRows.length,
-      noAgreementRows: noAgreementRows.length,
-      complianceRate,
-    }),
-
-    managementFeesAudit: buildManagementFeeAudit(auditedRows),
-
-    investmentTrackRewards: buildTrackTable(
-      rows,
-      "investmentTrackRewards"
-    ),
-
-    investmentTrackCompensation: buildTrackTable(
-      rows,
-      "investmentTrackCompensation"
-    ),
-
-    insuranceTrackVsMarital: buildInsuranceVsMarital(rows),
-
-    accumulationTierAnalysis: buildAccumulationTiers(rows),
-
-    actionCenter: buildActionCenter(rows),
-  };
-}
-
-function buildKpi(data) {
-  return {
-    totalRows: data.totalRows,
-    auditedRows: data.auditedRows,
-    validRows: data.validRows,
-    invalidRows: data.invalidRows,
-    noAgreementRows: data.noAgreementRows,
-    complianceRate: data.complianceRate,
-  };
-}
-
-function buildManagementFeeAudit(rows) {
-  const grouped = {};
-
-  rows.forEach((row) => {
-    const issuer = row.issuerCanonical || "לא ידוע";
-
-    if (!grouped[issuer]) {
-      grouped[issuer] = {
-        issuer,
-        total: 0,
-        valid: 0,
-        invalid: 0,
-      };
-    }
-
-    grouped[issuer].total += 1;
-
-    if (String(row.auditStatus || "").startsWith("VALID")) {
-      grouped[issuer].valid += 1;
-    }
-
-    if (row.auditStatus === "INVALID") {
-      grouped[issuer].invalid += 1;
-    }
+  issuers.forEach((issuer) => {
+    row[issuer] = 0;
   });
 
-  return Object.values(grouped).map((item) => ({
-    ...item,
-    complianceRate: item.total
-      ? ((item.valid / item.total) * 100).toFixed(1)
-      : "0.0",
-  }));
+  return row;
 }
 
-function buildTrackTable(rows, fieldName) {
-  const grouped = {};
+export function buildManagementFeesAudit(unifiedRows = []) {
+  const issuers = Array.from(
+    new Set(unifiedRows.map((row) => row.issuerCanonical || "לא מזוהה"))
+  ).sort((a, b) => a.localeCompare(b, "he"));
 
-  rows.forEach((row) => {
-    const issuer = row.issuerCanonical || "לא ידוע";
-
-    const track =
-      row[fieldName] &&
-      !/^\d+$/.test(String(row[fieldName]).trim())
-        ? row[fieldName]
-        : "ללא מסלול השקעה";
-
-    const key = `${issuer}__${track}`;
-
-    if (!grouped[key]) {
-      grouped[key] = {
-        issuer,
-        track,
-        count: 0,
-        accumulation: 0,
-      };
-    }
-
-    grouped[key].count += 1;
-
-    grouped[key].accumulation += Number(row.accumulation || 0);
-  });
-
-  return Object.values(grouped);
-}
-
-function buildInsuranceVsMarital(rows) {
-  const grouped = {};
-
-  rows.forEach((row) => {
-    if (row.productType !== "pension") return;
-
-    const insuranceTrack =
-      row.insuranceTrack || "ללא מסלול ביטוח";
-
-    const maritalStatus =
-      row.maritalStatus || "לא ידוע";
-
-    const key = `${insuranceTrack}__${maritalStatus}`;
-
-    if (!grouped[key]) {
-      grouped[key] = {
-        insuranceTrack,
-        maritalStatus,
-        count: 0,
-      };
-    }
-
-    grouped[key].count += 1;
-  });
-
-  return Object.values(grouped);
-}
-
-function buildAccumulationTiers(rows) {
-  const buckets = {
-    "0-50K": 0,
-    "50K-100K": 0,
-    "100K-300K": 0,
-    "300K-500K": 0,
-    "500K+": 0,
-    "notSpecified": 0,
+  const rows = {
+    matchModelA: emptyIssuerRow("תקין לפי מודל א", issuers),
+    matchModelB: emptyIssuerRow("תקין לפי מודל ב", issuers),
+    matchTier: emptyIssuerRow("תקין לפי מודל צבירות גבוהות / מדרגה", issuers),
+    matchAccumulationFee: emptyIssuerRow("תקין לפי מצבירה מאושרת", issuers),
+    baselineNoAgreement: emptyIssuerRow("תקין לפי כלל בסיס ללא הסדר", issuers),
+    invalid: emptyIssuerRow("ד.נ תקולים", issuers),
+    excluded: emptyIssuerRow("הוחרגו - תפעול בלבד / חסר מידע", issuers),
+    totalAudited: emptyIssuerRow("סה״כ נבדקו", issuers),
+    compliance: emptyIssuerRow("אחוז ד.נ תקין", issuers),
   };
 
-  rows.forEach((row) => {
-    const value = Number(row.accumulation || 0);
+  unifiedRows.forEach((row) => {
+    const issuer = row.issuerCanonical || "לא מזוהה";
 
-    if (!value) {
-      buckets.notSpecified += 1;
+    if (
+      row.isExcludedFromFeeAudit ||
+      row.auditStatus === "excluded"
+    ) {
+      rows.excluded[issuer] += 1;
       return;
     }
 
-    if (value < 50000) {
-      buckets["0-50K"] += 1;
-    } else if (value < 100000) {
-      buckets["50K-100K"] += 1;
-    } else if (value < 300000) {
-      buckets["100K-300K"] += 1;
-    } else if (value < 500000) {
-      buckets["300K-500K"] += 1;
-    } else {
-      buckets["500K+"] += 1;
+    rows.totalAudited[issuer] += 1;
+
+    if (row.auditStatus === "invalid") {
+      rows.invalid[issuer] += 1;
+      return;
+    }
+
+    if (row.auditMatchRuleType === "WITHOUT_AGREEMENT") {
+      rows.baselineNoAgreement[issuer] += 1;
+      return;
+    }
+
+    if (row.auditMatchRuleType === "ACCUMULATION_FEE_ONLY") {
+      rows.matchAccumulationFee[issuer] += 1;
+      return;
+    }
+
+    if (/ב|B/i.test(row.auditMatchModelName || "")) {
+      rows.matchModelB[issuer] += 1;
+      return;
+    }
+
+    if (
+      /צביר|מדרג|MIN_ACCUMULATION|MAX_ACCUMULATION/.test(
+        `${row.auditMatchModelName || ""} ${row.auditMatchRuleType || ""}`
+      )
+    ) {
+      rows.matchTier[issuer] += 1;
+      return;
+    }
+
+    if (row.auditStatus === "valid") {
+      rows.matchModelA[issuer] += 1;
     }
   });
 
-  return buckets;
+  issuers.forEach((issuer) => {
+    const valid =
+      rows.matchModelA[issuer] +
+      rows.matchModelB[issuer] +
+      rows.matchTier[issuer] +
+      rows.matchAccumulationFee[issuer] +
+      rows.baselineNoAgreement[issuer];
+
+    const total = rows.totalAudited[issuer];
+
+    rows.compliance[issuer] = total ? valid / total : 0;
+  });
+
+  return {
+    issuers,
+    rows: Object.values(rows),
+  };
 }
 
-function buildActionCenter(rows) {
-  return rows
-    .filter((row) => {
-      if (row.auditStatus === "INVALID") return true;
+export function buildActionCenter(unifiedRows = []) {
+  return unifiedRows.filter((row) => {
+    return (
+      row.auditStatus === "invalid" ||
+      !row.agreementIssuerFound ||
+      row.tierPotentialNotUsed
+    ) && row.auditStatus !== "excluded";
+  });
+}
 
-      if (
-        Number(row.accumulation || 0) >= 500000 &&
-        row.auditModel !== "TIER_MODEL"
-      ) {
-        return true;
-      }
+export function buildKpi(unifiedRows = []) {
+  const audited = unifiedRows.filter(
+    (row) => !row.isExcludedFromFeeAudit && row.auditStatus !== "excluded"
+  );
 
-      return false;
-    })
-    .map((row) => ({
-      clientId: row.clientId,
-      fullName: row.fullName,
-      issuer: row.issuerCanonical,
-      productType: row.productType,
-      accumulation: row.accumulation,
-      auditStatus: row.auditStatus,
-      auditModel: row.auditModel,
-    }));
+  const valid = audited.filter((row) => row.auditStatus === "valid").length;
+  const invalid = audited.filter((row) => row.auditStatus === "invalid").length;
+  const noAgreement = audited.filter((row) => !row.agreementIssuerFound).length;
+  const tierPotential = unifiedRows.filter((row) => row.tierPotentialNotUsed).length;
+  const actionItems = buildActionCenter(unifiedRows).length;
+
+  return {
+    totalRows: unifiedRows.length,
+    auditedRows: audited.length,
+    validRows: valid,
+    invalidRows: invalid,
+    excludedRows: unifiedRows.length - audited.length,
+    noAgreementRows: noAgreement,
+    complianceRate: audited.length ? valid / audited.length : 0,
+    tierPotentialRows: tierPotential,
+    actionItems,
+  };
+}
+
+export function buildMatrix({
+  rows = [],
+  rowGetter,
+  colGetter,
+  rowLabelName,
+  totalLabel = "סה״כ",
+}) {
+  const rowKeys = Array.from(
+    new Set(rows.map(rowGetter).filter(Boolean))
+  ).sort((a, b) => a.localeCompare(b, "he"));
+
+  const colKeys = Array.from(
+    new Set(rows.map(colGetter).filter(Boolean))
+  ).sort((a, b) => a.localeCompare(b, "he"));
+
+  const output = rowKeys.map((rowKey) => {
+    const item = { [rowLabelName]: rowKey };
+
+    colKeys.forEach((colKey) => {
+      item[colKey] = 0;
+    });
+
+    item[totalLabel] = 0;
+
+    return item;
+  });
+
+  const byRow = new Map(output.map((item) => [item[rowLabelName], item]));
+
+  rows.forEach((row) => {
+    const rowKey = rowGetter(row);
+    const colKey = colGetter(row);
+
+    if (!rowKey || !colKey || !byRow.has(rowKey)) return;
+
+    byRow.get(rowKey)[colKey] += 1;
+    byRow.get(rowKey)[totalLabel] += 1;
+  });
+
+  return {
+    columns: colKeys,
+    rows: output.sort((a, b) => b[totalLabel] - a[totalLabel]),
+  };
+}
+
+export function buildInsuranceTrackMarital(unifiedRows = []) {
+  return buildMatrix({
+    rows: unifiedRows,
+    rowGetter: (row) => row.insuranceTrack || "מסלול ביטוח לא צוין",
+    colGetter: (row) => row.maritalStatus || "לא צוין",
+    rowLabelName: "מסלול ביטוח",
+  });
+}
+
+export function buildInvestmentTrackRewardsIssuer(unifiedRows = []) {
+  return buildMatrix({
+    rows: unifiedRows,
+    rowGetter: (row) => row.investmentTrackRewards || "ללא מסלול השקעה",
+    colGetter: (row) => row.issuerCanonical || "לא מזוהה",
+    rowLabelName: "מסלול השקעה תגמולים",
+  });
+}
+
+export function buildInvestmentTrackCompensationIssuer(unifiedRows = []) {
+  return buildMatrix({
+    rows: unifiedRows,
+    rowGetter: (row) => row.investmentTrackCompensation || "ללא מסלול השקעה",
+    colGetter: (row) => row.issuerCanonical || "לא מזוהה",
+    rowLabelName: "מסלול השקעה פיצויים",
+  });
+}
+
+export function buildAccumulationTierAnalysis(unifiedRows = []) {
+  const buckets = [
+    "0-50K",
+    "50K-100K",
+    "100K-300K",
+    "300K-500K",
+    "500K+",
+    "לא צוין",
+  ];
+
+  return buckets.map((bucket) => {
+    const rows = unifiedRows.filter((row) => row.accumulationBucket === bucket);
+
+    return {
+      "מדרגת צבירה": bucket,
+      "כמות לקוחות": rows.length,
+      "סך צבירה": rows.reduce(
+        (sum, row) => sum + Number(row.accumulation || 0),
+        0
+      ),
+      "קיים מודל צבירות גבוהות": rows.filter((row) => row.hasTierModel).length,
+      "נמצאים בפועל במודל צבירות גבוהות": rows.filter(
+        (row) => row.actualInTierModel
+      ).length,
+      "פוטנציאל שלא מומש": rows.filter(
+        (row) => row.tierPotentialNotUsed
+      ).length,
+    };
+  });
+}
+
+export function buildPensionAnalytics(unifiedRows = []) {
+  return {
+    kpi: buildKpi(unifiedRows),
+    managementAudit: buildManagementFeesAudit(unifiedRows),
+    insuranceTrackMarital: buildInsuranceTrackMarital(unifiedRows),
+    investmentTrackRewardsIssuer: buildInvestmentTrackRewardsIssuer(unifiedRows),
+    investmentTrackCompensationIssuer: buildInvestmentTrackCompensationIssuer(unifiedRows),
+    accumulationTierAnalysis: buildAccumulationTierAnalysis(unifiedRows),
+    actionDrilldown: buildActionCenter(unifiedRows),
+  };
 }

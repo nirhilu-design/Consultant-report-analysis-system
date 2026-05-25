@@ -1,138 +1,135 @@
-// NEW FILE
-// Path: src/unified/agreementEngine.js
-
-import {
-  canonicalIssuer,
-  buildIssuerAliasLookup,
-} from "./issuerAliases";
-
-import {
-  normalizePercent,
-  normalizeNumber,
-  normalizeText,
-} from "./normalizers";
-
-function getAgreementIssuer(agreement = {}) {
-  return (
-    agreement.issuer ||
-    agreement.originalManager ||
-    agreement.manager ||
-    agreement.raw?.issuer ||
-    agreement.raw?.["שם יצרן"] ||
-    agreement.raw?.["יצרן"] ||
-    "לא מזוהה"
-  );
-}
-
-function detectOptionName(agreement = {}, index = 0) {
-  return (
-    agreement.optionName ||
-    agreement.modelName ||
-    agreement.raw?.["מודל"] ||
-    agreement.raw?.["אפשרות"] ||
-    agreement.raw?.["שם מודל"] ||
-    `מודל ${index + 1}`
-  );
-}
-
-function detectConditionType(agreement = {}) {
-  if (agreement.conditionType) return agreement.conditionType;
-
-  const text = normalizeText(
-    `${agreement.optionName || ""} ${agreement.modelName || ""} ${agreement.raw?.["מודל"] || ""} ${agreement.raw?.["הערות"] || ""}`
-  );
-
-  if (/צביר|גבוה|מעל|MIN_ACCUMULATION/.test(text)) {
-    return "MIN_ACCUMULATION";
-  }
-
-  if (/עד|MAX_ACCUMULATION/.test(text)) {
-    return "MAX_ACCUMULATION";
-  }
-
-  if (/בחירת|עובד|EMPLOYEE_CHOICE/.test(text)) {
-    return "EMPLOYEE_CHOICE";
-  }
-
-  return "DEFAULT";
-}
-
-function detectConditionValue(agreement = {}) {
-  if (
-    agreement.conditionValue !== undefined &&
-    agreement.conditionValue !== null
-  ) {
-    return normalizeNumber(agreement.conditionValue);
-  }
-
-  const text = normalizeText(
-    `${agreement.optionName || ""} ${agreement.modelName || ""} ${agreement.raw?.["מודל"] || ""} ${agreement.raw?.["הערות"] || ""}`
-  );
-
-  const match = text.match(/(\d{2,3}(?:,\d{3})+|\d{5,})/);
-
-  return match ? normalizeNumber(match[1]) : null;
-}
-
-export function normalizeAgreementOptions({
+export function auditUnifiedRows({
+  unifiedRows = [],
   agreements = [],
-  issuerAliases = {},
-} = {}) {
-  const aliasLookup = buildIssuerAliasLookup(issuerAliases);
-  const optionsByIssuer = {};
+}) {
+  return unifiedRows.map((row) => {
+    const issuer = row.issuerCanonical;
 
-  agreements.forEach((agreement, index) => {
-    const issuer = canonicalIssuer(
-      getAgreementIssuer(agreement),
-      aliasLookup
+    const issuerAgreements = agreements.filter(
+      (agreement) =>
+        agreement.issuerCanonical === issuer &&
+        agreement.productType === row.productType
     );
 
-    const conditionType = detectConditionType(agreement);
-
-    const option = {
-      issuer,
-      optionName: detectOptionName(agreement, index),
-      depositFee: normalizePercent(
-        agreement.depositFee ?? agreement.premiumFee
-      ),
-      accumulationFee: normalizePercent(
-        agreement.accumulationFee ?? agreement.assetFee
-      ),
-      conditionType,
-      conditionValue: detectConditionValue(agreement),
-      isDefault:
-        Boolean(agreement.isDefault) ||
-        conditionType === "DEFAULT",
-      raw: agreement,
-    };
-
-    if (!optionsByIssuer[issuer]) {
-      optionsByIssuer[issuer] = [];
+    if (!issuerAgreements.length) {
+      return applyBaselineAudit(row);
     }
 
-    optionsByIssuer[issuer].push(option);
-  });
+    const matchedAgreement = findMatchingAgreement(
+      row,
+      issuerAgreements
+    );
 
-  return {
-    optionsByIssuer,
-    aliasLookup,
-  };
+    if (matchedAgreement) {
+      return {
+        ...row,
+        auditStatus: "VALID",
+        auditReason: matchedAgreement.reason,
+        auditModel: matchedAgreement.model,
+      };
+    }
+
+    return {
+      ...row,
+      auditStatus: "INVALID",
+      auditReason: "Fees exceed approved agreement",
+      auditModel: "NONE",
+    };
+  });
 }
 
-export function isEligibleOption(option, accumulation) {
-  const acc = Number(accumulation || 0);
+function findMatchingAgreement(row, agreements) {
+  const accumulationFee = Number(
+    row.accumulationFee || 0
+  );
 
-  if (option.conditionType === "MIN_ACCUMULATION") {
-    return option.conditionValue === null
-      ? true
-      : acc > option.conditionValue;
+  const depositFee = Number(
+    row.depositFee || 0
+  );
+
+  const accumulation = Number(
+    row.accumulation || 0
+  );
+
+  for (const agreement of agreements) {
+    const agreementAccumulationFee = Number(
+      agreement.accumulationFee || 0
+    );
+
+    const agreementDepositFee = Number(
+      agreement.depositFee || 0
+    );
+
+    const minAccumulation = Number(
+      agreement.minAccumulation || 0
+    );
+
+    const supportsTier =
+      accumulation >= minAccumulation;
+
+    const accumulationPass =
+      accumulationFee <= agreementAccumulationFee;
+
+    const depositPass =
+      row.productType === "hishtalmut"
+        ? true
+        : depositFee <= agreementDepositFee;
+
+    if (
+      accumulationPass &&
+      depositPass &&
+      supportsTier
+    ) {
+      return {
+        model:
+          minAccumulation > 0
+            ? "TIER_MODEL"
+            : agreement.modelName || "STANDARD_MODEL",
+
+        reason:
+          accumulationFee <
+          agreementAccumulationFee
+            ? "Valid via accumulation fee rule"
+            : "Valid via agreement",
+      };
+    }
   }
 
-  if (option.conditionType === "MAX_ACCUMULATION") {
-    return option.conditionValue === null
+  return null;
+}
+
+function applyBaselineAudit(row) {
+  const accumulationFee = Number(
+    row.accumulationFee || 0
+  );
+
+  const depositFee = Number(
+    row.depositFee || 0
+  );
+
+  const accumulationPass =
+    accumulationFee <= 0.2;
+
+  const depositPass =
+    row.productType === "hishtalmut"
       ? true
-      : acc <= option.conditionValue;
+      : depositFee <= 1;
+
+  if (accumulationPass && depositPass) {
+    return {
+      ...row,
+      auditStatus: "VALID_BASELINE",
+      auditReason:
+        "Valid via baseline rule",
+      auditModel: "BASELINE",
+    };
   }
 
-  return true;
+  return {
+    ...row,
+    auditStatus: "INVALID",
+    auditReason:
+      "Failed baseline validation",
+    auditModel: "BASELINE",
+  };
 }

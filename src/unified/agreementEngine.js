@@ -1,269 +1,138 @@
-import {
-  createAgreementRow,
-  PRODUCT_TYPES,
-  AUDIT_MODELS,
-} from "./unifiedSchema.js";
+// NEW FILE
+// Path: src/unified/agreementEngine.js
 
 import {
-  normalizeIssuerName,
-} from "./issuerAliases.js";
+  canonicalIssuer,
+  buildIssuerAliasLookup,
+} from "./issuerAliases";
 
-export function normalizeAgreementRows({
-  rows = [],
-  productType = PRODUCT_TYPES.PENSION,
-  brokerId = "",
-  brokerName = "",
-  batchId = "",
-} = {}) {
-  return rows.map((row) =>
-    normalizeAgreementRow({
-      row,
-      productType,
-      brokerId,
-      brokerName,
-      batchId,
-    })
+import {
+  normalizePercent,
+  normalizeNumber,
+  normalizeText,
+} from "./normalizers";
+
+function getAgreementIssuer(agreement = {}) {
+  return (
+    agreement.issuer ||
+    agreement.originalManager ||
+    agreement.manager ||
+    agreement.raw?.issuer ||
+    agreement.raw?.["שם יצרן"] ||
+    agreement.raw?.["יצרן"] ||
+    "לא מזוהה"
   );
 }
 
-/**
- * Backward-compatible name used by buildPensionSummary.js.
- * Older code imports normalizeAgreementOptions.
- * Newer code can use normalizeAgreementRows.
- */
+function detectOptionName(agreement = {}, index = 0) {
+  return (
+    agreement.optionName ||
+    agreement.modelName ||
+    agreement.raw?.["מודל"] ||
+    agreement.raw?.["אפשרות"] ||
+    agreement.raw?.["שם מודל"] ||
+    `מודל ${index + 1}`
+  );
+}
+
+function detectConditionType(agreement = {}) {
+  if (agreement.conditionType) return agreement.conditionType;
+
+  const text = normalizeText(
+    `${agreement.optionName || ""} ${agreement.modelName || ""} ${agreement.raw?.["מודל"] || ""} ${agreement.raw?.["הערות"] || ""}`
+  );
+
+  if (/צביר|גבוה|מעל|MIN_ACCUMULATION/.test(text)) {
+    return "MIN_ACCUMULATION";
+  }
+
+  if (/עד|MAX_ACCUMULATION/.test(text)) {
+    return "MAX_ACCUMULATION";
+  }
+
+  if (/בחירת|עובד|EMPLOYEE_CHOICE/.test(text)) {
+    return "EMPLOYEE_CHOICE";
+  }
+
+  return "DEFAULT";
+}
+
+function detectConditionValue(agreement = {}) {
+  if (
+    agreement.conditionValue !== undefined &&
+    agreement.conditionValue !== null
+  ) {
+    return normalizeNumber(agreement.conditionValue);
+  }
+
+  const text = normalizeText(
+    `${agreement.optionName || ""} ${agreement.modelName || ""} ${agreement.raw?.["מודל"] || ""} ${agreement.raw?.["הערות"] || ""}`
+  );
+
+  const match = text.match(/(\d{2,3}(?:,\d{3})+|\d{5,})/);
+
+  return match ? normalizeNumber(match[1]) : null;
+}
+
 export function normalizeAgreementOptions({
-  options = [],
-  rows = [],
-  productType = PRODUCT_TYPES.PENSION,
-  brokerId = "",
-  brokerName = "",
-  batchId = "",
+  agreements = [],
+  issuerAliases = {},
 } = {}) {
-  const sourceRows = rows.length ? rows : options;
+  const aliasLookup = buildIssuerAliasLookup(issuerAliases);
+  const optionsByIssuer = {};
 
-  return normalizeAgreementRows({
-    rows: sourceRows,
-    productType,
-    brokerId,
-    brokerName,
-    batchId,
-  });
-}
-
-export function normalizeAgreementRow({
-  row = {},
-  productType = PRODUCT_TYPES.PENSION,
-  brokerId = "",
-  brokerName = "",
-  batchId = "",
-} = {}) {
-  const issuerOriginal =
-    row.issuer ||
-    row.company ||
-    row.יצרן ||
-    row["יצרן"] ||
-    row["חברה מנהלת"] ||
-    "";
-
-  return createAgreementRow({
-    brokerId,
-    brokerName,
-    batchId,
-
-    productType,
-
-    issuerOriginal,
-
-    issuerCanonical:
-      normalizeIssuerName(
-        issuerOriginal
-      ),
-
-    modelName: normalizeModelName(
-      row.modelName ||
-        row.model ||
-        row["מודל"] ||
-        row["שם מודל"]
-    ),
-
-    minAccumulation:
-      normalizeNumber(
-        row.minAccumulation ||
-          row.minimumAccumulation ||
-          row["צבירה מינימלית"] ||
-          row["מינימום צבירה"]
-      ),
-
-    accumulationFee:
-      normalizeNumber(
-        row.accumulationFee ||
-          row.feeFromAccumulation ||
-          row["דמי ניהול מצבירה"] ||
-          row["דמי ניהול מצבירה %"]
-      ),
-
-    depositFee:
-      productType ===
-      PRODUCT_TYPES.HISHTALMUT
-        ? null
-        : normalizeNumber(
-            row.depositFee ||
-              row.feeFromDeposit ||
-              row["דמי ניהול מהפקדה"] ||
-              row["דמי ניהול מהפקדה %"]
-          ),
-
-    raw: row,
-  });
-}
-
-/**
- * Used by auditEngine.
- * Returns true when an agreement option can be considered for the row.
- *
- * Main rule:
- * - Same product type, when provided.
- * - Same canonical issuer, when provided.
- * - Row accumulation must be at or above option minimum accumulation.
- *
- * This function intentionally does NOT validate fee pass/fail.
- * Fee comparison belongs inside auditEngine.
- */
-export function isEligibleOption(row = {}, option = {}) {
-  if (!row || !option) return false;
-
-  const rowProductType =
-    row.productType || "";
-
-  const optionProductType =
-    option.productType || "";
-
-  if (
-    optionProductType &&
-    rowProductType &&
-    optionProductType !== rowProductType
-  ) {
-    return false;
-  }
-
-  const rowIssuer =
-    row.issuerCanonical ||
-    normalizeIssuerName(
-      row.issuerOriginal ||
-        row.issuer ||
-        row.company ||
-        ""
+  agreements.forEach((agreement, index) => {
+    const issuer = canonicalIssuer(
+      getAgreementIssuer(agreement),
+      aliasLookup
     );
 
-  const optionIssuer =
-    option.issuerCanonical ||
-    normalizeIssuerName(
-      option.issuerOriginal ||
-        option.issuer ||
-        option.company ||
-        ""
-    );
+    const conditionType = detectConditionType(agreement);
 
-  if (
-    optionIssuer &&
-    rowIssuer &&
-    optionIssuer !== rowIssuer
-  ) {
-    return false;
+    const option = {
+      issuer,
+      optionName: detectOptionName(agreement, index),
+      depositFee: normalizePercent(
+        agreement.depositFee ?? agreement.premiumFee
+      ),
+      accumulationFee: normalizePercent(
+        agreement.accumulationFee ?? agreement.assetFee
+      ),
+      conditionType,
+      conditionValue: detectConditionValue(agreement),
+      isDefault:
+        Boolean(agreement.isDefault) ||
+        conditionType === "DEFAULT",
+      raw: agreement,
+    };
+
+    if (!optionsByIssuer[issuer]) {
+      optionsByIssuer[issuer] = [];
+    }
+
+    optionsByIssuer[issuer].push(option);
+  });
+
+  return {
+    optionsByIssuer,
+    aliasLookup,
+  };
+}
+
+export function isEligibleOption(option, accumulation) {
+  const acc = Number(accumulation || 0);
+
+  if (option.conditionType === "MIN_ACCUMULATION") {
+    return option.conditionValue === null
+      ? true
+      : acc > option.conditionValue;
   }
 
-  const rowAccumulation = normalizeNumber(
-    row.accumulation
-  );
-
-  const minAccumulation = normalizeNumber(
-    option.minAccumulation
-  );
-
-  if (
-    minAccumulation > 0 &&
-    rowAccumulation < minAccumulation
-  ) {
-    return false;
+  if (option.conditionType === "MAX_ACCUMULATION") {
+    return option.conditionValue === null
+      ? true
+      : acc <= option.conditionValue;
   }
 
   return true;
-}
-
-export function getEligibleAgreementOptions(
-  row = {},
-  agreementRows = []
-) {
-  return agreementRows.filter((option) =>
-    isEligibleOption(row, option)
-  );
-}
-
-export function groupAgreementsByIssuer(
-  agreementRows = []
-) {
-  return agreementRows.reduce(
-    (acc, agreement) => {
-      const issuer =
-        agreement.issuerCanonical ||
-        "יצרן לא מוכר";
-
-      if (!acc[issuer]) {
-        acc[issuer] = [];
-      }
-
-      acc[issuer].push(agreement);
-      return acc;
-    },
-    {}
-  );
-}
-
-function normalizeModelName(modelName) {
-  const value = String(
-    modelName || ""
-  ).trim();
-
-  if (!value) {
-    return AUDIT_MODELS.STANDARD_MODEL;
-  }
-
-  if (/מודל א/i.test(value)) {
-    return AUDIT_MODELS.MODEL_A;
-  }
-
-  if (/מודל ב/i.test(value)) {
-    return AUDIT_MODELS.MODEL_B;
-  }
-
-  if (/tier/i.test(value)) {
-    return AUDIT_MODELS.TIER_MODEL;
-  }
-
-  if (/מדרג/i.test(value)) {
-    return AUDIT_MODELS.TIER_MODEL;
-  }
-
-  return value;
-}
-
-function normalizeNumber(value) {
-  if (
-    value === undefined ||
-    value === null ||
-    value === ""
-  ) {
-    return 0;
-  }
-
-  const normalized = String(value)
-    .replace(/,/g, "")
-    .replace(/%/g, "")
-    .trim();
-
-  const parsed = Number(normalized);
-
-  return Number.isNaN(parsed)
-    ? 0
-    : parsed;
 }

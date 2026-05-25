@@ -1,3 +1,6 @@
+// NEW FILE
+// Path in project: src/audit/buildUnifiedAudit.js
+
 import { PRODUCT_TYPES, getProductConfig } from "../config/productConfigs";
 
 function normalizeText(value) {

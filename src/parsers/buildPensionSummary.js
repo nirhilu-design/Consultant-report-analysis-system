@@ -1,344 +1,190 @@
-function normalizeText(value) {
-  return String(value ?? "")
-    .replace(/\s+/g, " ")
-    .replace(/[״"]/g, "")
-    .trim();
-}
+import {
+  buildUnifiedAudit,
+  buildManagementFeesAudit,
+  buildActionDrilldown,
+  buildAccumulationTierAnalysis,
+  buildInvestmentTrackAccumulation,
+} from "../audit/buildUnifiedAudit";
 
-function normalizePercent(value) {
-  if (
-    value === null ||
-    value === undefined ||
-    value === ""
-  ) {
-    return null;
-  }
-
-  const numberValue = Number(value);
-
-  if (!Number.isFinite(numberValue)) {
-    return null;
-  }
-
-  return numberValue > 1
-    ? numberValue
-    : numberValue * 100;
-}
-
-function isHighAccumulationTrack(track = "") {
-  return /עתיר|מוגבר|צבירה גבוהה|מניות|כללי/.test(
-    String(track)
-  );
-}
-
-function getCleanManagerName(policyOrAgreement) {
-  const manager =
-    policyOrAgreement.originalManager ||
-    policyOrAgreement.manager ||
-    "";
-
-  const cleanManager = normalizeText(manager);
-
-  return cleanManager || "לא מזוהה";
-}
-
-function getDisplayManagerName(managerName) {
-  const text = normalizeText(managerName);
-
-  if (!text) return "לא מזוהה";
-
-  if (/הפניקס|פניקס/.test(text)) return "הפניקס";
-  if (/הראל/.test(text)) return "הראל";
-  if (/כלל/.test(text)) return "כלל";
-  if (/מקפת|מגדל/.test(text)) return "מגדל מקפת";
-  if (/מבטחים|מנורה/.test(text)) return "מנורה מבטחים";
-  if (/מיטב/.test(text)) return "מיטב";
-  if (/אלטשולר/.test(text)) return "אלטשולר";
-  if (/מור/.test(text)) return "מור";
-
-  return text;
-}
+import { PRODUCT_TYPES } from "../config/productConfigs";
 
 function emptyManagerMap(managerColumns) {
-  return managerColumns.reduce(
-    (acc, manager) => {
-      acc[manager] = 0;
-      return acc;
-    },
-    {}
-  );
+  return managerColumns.reduce((acc, manager) => {
+    acc[manager] = 0;
+    return acc;
+  }, {});
 }
 
-function buildAgreementMap(agreements = []) {
-  return agreements.reduce(
-    (acc, agreement) => {
-      const managerName = getDisplayManagerName(
-        getCleanManagerName(agreement)
-      );
-
-      if (!acc[managerName]) {
-        acc[managerName] = agreement;
-      }
-
-      return acc;
-    },
-    {}
-  );
-}
-
-function isFeeValid(policy, agreement) {
-  if (!agreement) return false;
-
-  const policyDepositFee =
-    normalizePercent(policy.depositFee);
-
-  const policyAccumulationFee =
-    normalizePercent(policy.accumulationFee);
-
-  const agreementDepositFee =
-    normalizePercent(agreement.depositFee);
-
-  const agreementAccumulationFee =
-    normalizePercent(agreement.accumulationFee);
-
-  const hasDepositCheck =
-    policyDepositFee !== null &&
-    agreementDepositFee !== null;
-
-  const hasAccumulationCheck =
-    policyAccumulationFee !== null &&
-    agreementAccumulationFee !== null;
-
-  if (
-    !hasDepositCheck &&
-    !hasAccumulationCheck
-  ) {
-    return false;
-  }
-
-  const depositValid =
-    !hasDepositCheck ||
-    policyDepositFee <= agreementDepositFee;
-
-  const accumulationValid =
-    !hasAccumulationCheck ||
-    policyAccumulationFee <= agreementAccumulationFee;
-
-  return depositValid && accumulationValid;
-}
-
-function buildDynamicManagerColumns(
-  pensionRows = [],
-  agreements = []
-) {
-  const managerSet = new Set();
-
-  agreements.forEach((agreement) => {
-    const managerName = getDisplayManagerName(
-      getCleanManagerName(agreement)
-    );
-
-    if (
-      managerName &&
-      managerName !== "אחרים" &&
-      managerName !== "לא מזוהה"
-    ) {
-      managerSet.add(managerName);
-    }
-  });
-
-  pensionRows.forEach((policy) => {
-    const managerName = getDisplayManagerName(
-      getCleanManagerName(policy)
-    );
-
-    if (
-      managerName &&
-      managerName !== "אחרים" &&
-      managerName !== "לא מזוהה"
-    ) {
-      managerSet.add(managerName);
-    }
-  });
-
-  const managerColumns = Array.from(managerSet).sort(
-    (a, b) => a.localeCompare(b, "he")
-  );
-
-  managerColumns.push("אחרים / ללא הסכם");
-
-  return managerColumns;
-}
-
-const WAIVER_ROWS = [
-  "לא קיים ויתור שארים",
-  "ויתור על בת זוג בלבד",
-  "קיים ויתור מלא",
-  "חסר נתון",
-];
-
-export function buildPensionSummary(
-  pensionRows = [],
-  agreements = []
-) {
-  const agreementMap = buildAgreementMap(agreements);
-
-  const managerColumns = buildDynamicManagerColumns(
-    pensionRows,
-    agreements
-  );
-
-  const otherColumnName = "אחרים / ללא הסכם";
-
-  // =========================
-  // מסלול ביטוח
-  // =========================
-
-  const insurancePath =
-    WAIVER_ROWS.reduce(
-      (acc, row) => {
-        acc[row] = emptyManagerMap(managerColumns);
-        return acc;
-      },
-      {}
-    );
-
-  const insurancePathTotals =
-    WAIVER_ROWS.reduce(
-      (acc, row) => {
-        acc[row] = 0;
-        return acc;
-      },
-      {}
-    );
-
-  const insuranceManagerTotals =
-    emptyManagerMap(managerColumns);
-
-  // =========================
-  // דמי ניהול
-  // =========================
+function formatLegacyManagementFees(managementAudit) {
+  const managerColumns = managementAudit.issuers || [];
 
   const managementFees = {
     valid: emptyManagerMap(managerColumns),
     invalid: emptyManagerMap(managerColumns),
     total: emptyManagerMap(managerColumns),
+
+    matchModelA: emptyManagerMap(managerColumns),
+    matchModelB: emptyManagerMap(managerColumns),
+    matchTier: emptyManagerMap(managerColumns),
+    matchAccumulationFee: emptyManagerMap(managerColumns),
+    baselineNoAgreement: emptyManagerMap(managerColumns),
+
     over500k: emptyManagerMap(managerColumns),
     highAccumulationTrack: emptyManagerMap(managerColumns),
     totalFocus: emptyManagerMap(managerColumns),
   };
 
-  // =========================
-  // KPI
-  // =========================
+  (managementAudit.rows || []).forEach((row) => {
+    managerColumns.forEach((issuer) => {
+      if (row.label === "תקין לפי מודל א") {
+        managementFees.matchModelA[issuer] = row[issuer] || 0;
+        managementFees.valid[issuer] += row[issuer] || 0;
+      }
 
-  const noAgreementDetails = new Set();
+      if (row.label === "תקין לפי מודל ב") {
+        managementFees.matchModelB[issuer] = row[issuer] || 0;
+        managementFees.valid[issuer] += row[issuer] || 0;
+      }
 
-  let totalPolicies = 0;
-  let validFeePolicies = 0;
-  let invalidFeePolicies = 0;
-  let noAgreementPolicies = 0;
+      if (row.label === "תקין לפי מודל צבירות / מדרגה") {
+        managementFees.matchTier[issuer] = row[issuer] || 0;
+        managementFees.valid[issuer] += row[issuer] || 0;
+      }
 
-  // =========================
-  // Main Loop
-  // =========================
+      if (row.label === "תקין לפי מצבירה מאושרת") {
+        managementFees.matchAccumulationFee[issuer] = row[issuer] || 0;
+        managementFees.valid[issuer] += row[issuer] || 0;
+      }
 
-  pensionRows.forEach((policy) => {
-    const originalManagerName = getDisplayManagerName(
-      getCleanManagerName(policy)
-    );
+      if (row.label === "תקין לפי כלל בסיס ללא הסדר") {
+        managementFees.baselineNoAgreement[issuer] = row[issuer] || 0;
+        managementFees.valid[issuer] += row[issuer] || 0;
+      }
 
-    const hasAgreement =
-      Boolean(agreementMap[originalManagerName]);
+      if (row.label === "ד.נ תקולים") {
+        managementFees.invalid[issuer] = row[issuer] || 0;
+      }
 
-    const manager =
-      hasAgreement &&
-      managerColumns.includes(originalManagerName)
-        ? originalManagerName
-        : otherColumnName;
-
-    // =========================
-    // מסלול ביטוח
-    // =========================
-
-    const waiverLabel =
-      WAIVER_ROWS.includes(policy.insuranceWaiver)
-        ? policy.insuranceWaiver
-        : "חסר נתון";
-
-    insurancePath[waiverLabel][manager] += 1;
-    insurancePathTotals[waiverLabel] += 1;
-    insuranceManagerTotals[manager] += 1;
-
-    // =========================
-    // Totals
-    // =========================
-
-    totalPolicies += 1;
-    managementFees.total[manager] += 1;
-
-    // =========================
-    // Agreement Logic
-    // =========================
-
-    if (!hasAgreement) {
-      noAgreementPolicies += 1;
-      invalidFeePolicies += 1;
-      managementFees.invalid[manager] += 1;
-
-      noAgreementDetails.add(originalManagerName);
-    } else if (
-      isFeeValid(
-        policy,
-        agreementMap[originalManagerName]
-      )
-    ) {
-      validFeePolicies += 1;
-      managementFees.valid[manager] += 1;
-    } else {
-      invalidFeePolicies += 1;
-      managementFees.invalid[manager] += 1;
-    }
-
-    // =========================
-    // צבירה גבוהה
-    // =========================
-
-    if (Number(policy.accumulation || 0) > 500000) {
-      managementFees.over500k[manager] += 1;
-      managementFees.totalFocus[manager] += 1;
-    }
-
-    // =========================
-    // מסלול עתיר צבירה
-    // =========================
-
-    if (isHighAccumulationTrack(policy.track)) {
-      managementFees.highAccumulationTrack[manager] += 1;
-      managementFees.totalFocus[manager] += 1;
-    }
+      if (row.label === "סה״כ נבדקו") {
+        managementFees.total[issuer] = row[issuer] || 0;
+      }
+    });
   });
 
-  // =========================
-  // Final Object
-  // =========================
+  return managementFees;
+}
+
+function buildInsurancePath(unifiedRows, managerColumns) {
+  const labels = Array.from(
+    new Set(
+      unifiedRows.map((row) => row.insuranceTrack || "מסלול ביטוח לא צוין")
+    )
+  ).sort((a, b) => a.localeCompare(b, "he"));
+
+  const insurancePath = {};
+  const insurancePathTotals = {};
+  const insuranceManagerTotals = emptyManagerMap(managerColumns);
+
+  labels.forEach((label) => {
+    insurancePath[label] = emptyManagerMap(managerColumns);
+    insurancePathTotals[label] = 0;
+  });
+
+  unifiedRows.forEach((row) => {
+    const label = row.insuranceTrack || "מסלול ביטוח לא צוין";
+    const issuer = row.issuerCanonical || "לא מזוהה";
+
+    if (!insurancePath[label]) {
+      insurancePath[label] = emptyManagerMap(managerColumns);
+      insurancePathTotals[label] = 0;
+    }
+
+    if (!insurancePath[label][issuer]) {
+      insurancePath[label][issuer] = 0;
+    }
+
+    insurancePath[label][issuer] += 1;
+    insurancePathTotals[label] += 1;
+
+    if (insuranceManagerTotals[issuer] === undefined) {
+      insuranceManagerTotals[issuer] = 0;
+    }
+
+    insuranceManagerTotals[issuer] += 1;
+  });
 
   return {
-    managerColumns,
-
-    totalPolicies,
-    validFeePolicies,
-    invalidFeePolicies,
-    noAgreementPolicies,
-
-    noAgreementDetails:
-      Array.from(noAgreementDetails)
-        .filter(Boolean)
-        .sort((a, b) => a.localeCompare(b, "he")),
-
+    insuranceRows: labels,
     insurancePath,
     insurancePathTotals,
     insuranceManagerTotals,
+  };
+}
+
+export function buildPensionSummary(pensionRows = [], agreements = [], options = {}) {
+  const {
+    broker = {
+      brokerId: "broker_001",
+      brokerName: "מנהל הסדר 1",
+    },
+    productType = PRODUCT_TYPES.PENSION,
+    issuerAliases = {},
+  } = options;
+
+  const { unifiedRows, agreementOptionsByIssuer } = buildUnifiedAudit({
+    rows: pensionRows,
+    agreements,
+    broker,
+    productType,
+    issuerAliases,
+  });
+
+  const managementAudit = buildManagementFeesAudit(unifiedRows);
+  const managerColumns = managementAudit.issuers;
+
+  const managementFees = formatLegacyManagementFees(managementAudit);
+
+  const validFeePolicies = unifiedRows.filter((row) => row.auditStatus === "valid").length;
+  const invalidFeePolicies = unifiedRows.filter((row) => row.auditStatus === "invalid").length;
+  const noAgreementPolicies = unifiedRows.filter((row) => !row.agreementIssuerFound).length;
+
+  const noAgreementDetails = Array.from(
+    new Set(
+      unifiedRows
+        .filter((row) => !row.agreementIssuerFound)
+        .map((row) => row.issuerCanonical)
+        .filter(Boolean)
+    )
+  ).sort((a, b) => a.localeCompare(b, "he"));
+
+  const insurance = buildInsurancePath(unifiedRows, managerColumns);
+
+  const actionDrilldown = buildActionDrilldown(unifiedRows);
+  const accumulationTierAnalysis = buildAccumulationTierAnalysis(unifiedRows);
+  const investmentTrackAccumulation = buildInvestmentTrackAccumulation(unifiedRows);
+
+  return {
+    // Legacy fields used by existing Dashboard.jsx
+    managerColumns,
+
+    totalPolicies: unifiedRows.length,
+    validFeePolicies,
+    invalidFeePolicies,
+    noAgreementPolicies,
+    noAgreementDetails,
+
+    insurancePath: insurance.insurancePath,
+    insurancePathTotals: insurance.insurancePathTotals,
+    insuranceManagerTotals: insurance.insuranceManagerTotals,
+
     managementFees,
+
+    // New outputs for next dashboard steps
+    unifiedRows,
+    managementAudit,
+    actionDrilldown,
+    accumulationTierAnalysis,
+    investmentTrackAccumulation,
+    agreementOptionsByIssuer,
   };
 }

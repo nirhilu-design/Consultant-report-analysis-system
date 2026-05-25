@@ -1,3 +1,6 @@
+// NEW FILE
+// Path in project: src/config/productConfigs.js
+
 export const PRODUCT_TYPES = {
   PENSION: "pension",
   HISHTALMUT: "hishtalmut",

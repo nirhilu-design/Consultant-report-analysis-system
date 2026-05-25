@@ -1,89 +1,106 @@
+// NEW FILE
+// Path: src/unified/issuerAliases.js
+
+import { normalizeLooseText } from "./normalizers";
+
 export const DEFAULT_ISSUER_ALIASES = {
-  "הפניקס": "הפניקס",
-  "הפניקס חברה לביטוח": "הפניקס",
-  "פניקס": "הפניקס",
-  "הפינקס": "הפניקס",
+  "הפניקס": [
+    "הפניקס",
+    "פניקס",
+    "הפניקס חברה לביטוח",
+    "הפניקס פנסיה",
+    "הפניקס פנסיה וגמל",
+    "אקסלנס",
+    "אקסלנס הפניקס",
+  ],
 
-  "הראל": "הראל",
-  "הראל ביטוח": "הראל",
-  "הראל חברה לביטוח": "הראל",
+  "הראל": [
+    "הראל",
+    "הראל פנסיה",
+    "הראל חברה לביטוח",
+  ],
 
-  "כלל": "כלל",
-  "כלל ביטוח": "כלל",
-  "כלל חברה לביטוח": "כלל",
+  "כלל": [
+    "כלל",
+    "כלל פנסיה",
+    "כלל פנסיה וגמל",
+  ],
 
-  "מגדל": "מגדל",
-  "מגדל חברה לביטוח": "מגדל",
+  "מגדל": [
+    "מגדל",
+    "מגדל מקפת",
+    "מקפת",
+  ],
 
-  "מנורה": "מנורה מבטחים",
-  "מנורה מבטחים": "מנורה מבטחים",
-  "מנורה מבטחים פנסיה וגמל": "מנורה מבטחים",
+  "מנורה מבטחים": [
+    "מנורה",
+    "מבטחים",
+    "מנורה מבטחים",
+  ],
 
-  "מיטב": "מיטב",
-  "מיטב דש": "מיטב",
-  "מיטב בית השקעות": "מיטב",
+  "מיטב": [
+    "מיטב",
+    "מיטב דש",
+  ],
 
-  "מור": "מור",
-  "מור גמל ופנסיה": "מור",
+  "אלטשולר שחם": [
+    "אלטשולר",
+    "אלטשולר שחם",
+  ],
 
-  "אלטשולר": "אלטשולר שחם",
-  "אלטשולר שחם": "אלטשולר שחם",
-  "אלטשולר שחם גמל ופנסיה": "אלטשולר שחם",
+  "מור": [
+    "מור",
+    "מור גמל",
+    "מור גמל ופנסיה",
+  ],
 
-  "ילין": "ילין לפידות",
-  "ילין לפידות": "ילין לפידות",
+  "ילין לפידות": [
+    "ילין",
+    "ילין לפידות",
+  ],
 
-  "אנליסט": "אנליסט",
-  "אנליסט קופות גמל": "אנליסט",
+  "אנליסט": [
+    "אנליסט",
+  ],
 
-  "איילון": "איילון",
-  "איילון חברה לביטוח": "איילון",
+  "איילון": [
+    "איילון",
+  ],
 };
 
-/**
- * New canonical alias name.
- * Keep this exported separately while the refactor is in progress.
- */
-export const ISSUER_ALIASES = DEFAULT_ISSUER_ALIASES;
-
-export function normalizeIssuerName(rawIssuer) {
-  if (!rawIssuer) {
-    return "יצרן לא מוכר";
-  }
-
-  const cleaned = preprocessIssuerText(rawIssuer);
-
-  return (
-    DEFAULT_ISSUER_ALIASES[cleaned] ||
-    `יצרן לא מוכר - ${rawIssuer}`
-  );
-}
-
-export function preprocessIssuerText(text) {
-  return String(text || "")
-    .trim()
-    .replace(/\s+/g, " ")
-    .replace(/["']/g, "")
-    .replace(/[.,]/g, "")
-    .replace(/־/g, "-");
-}
-
-export function isUnknownIssuer(issuerName) {
-  return String(issuerName || "").startsWith(
-    "יצרן לא מוכר"
-  );
-}
-
-export function getAllCanonicalIssuers() {
-  return [
-    ...new Set(
-      Object.values(DEFAULT_ISSUER_ALIASES)
-    ),
-  ];
-}
-
-export function getIssuerAliases() {
-  return {
+export function buildIssuerAliasLookup(customAliases = {}) {
+  const merged = {
     ...DEFAULT_ISSUER_ALIASES,
+    ...customAliases,
   };
+
+  const lookup = {};
+
+  Object.entries(merged).forEach(([canonical, aliases]) => {
+    [canonical, ...(aliases || [])].forEach((alias) => {
+      const clean = normalizeLooseText(alias);
+
+      if (clean) {
+        lookup[clean] = canonical;
+      }
+    });
+  });
+
+  return lookup;
+}
+
+export function canonicalIssuer(value, lookup) {
+  const clean = normalizeLooseText(value);
+
+  if (!clean) return "יצרן לא צוין";
+
+  if (lookup[clean]) return lookup[clean];
+
+  const fuzzy = Object.entries(lookup).find(([alias]) => {
+    return alias && clean.includes(alias);
+  });
+
+  if (fuzzy) return fuzzy[1];
+
+  return `יצרן לא מוכר - ${clean}`;
 }

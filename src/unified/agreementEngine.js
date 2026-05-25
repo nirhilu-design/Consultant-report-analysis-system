@@ -14,7 +14,7 @@ export function normalizeAgreementRows({
   brokerId = "",
   brokerName = "",
   batchId = "",
-}) {
+} = {}) {
   return rows.map((row) =>
     normalizeAgreementRow({
       row,
@@ -26,13 +26,37 @@ export function normalizeAgreementRows({
   );
 }
 
+/**
+ * Backward-compatible name used by buildPensionSummary.js.
+ * Older code imports normalizeAgreementOptions.
+ * Newer code can use normalizeAgreementRows.
+ */
+export function normalizeAgreementOptions({
+  options = [],
+  rows = [],
+  productType = PRODUCT_TYPES.PENSION,
+  brokerId = "",
+  brokerName = "",
+  batchId = "",
+} = {}) {
+  const sourceRows = rows.length ? rows : options;
+
+  return normalizeAgreementRows({
+    rows: sourceRows,
+    productType,
+    brokerId,
+    brokerName,
+    batchId,
+  });
+}
+
 export function normalizeAgreementRow({
   row = {},
   productType = PRODUCT_TYPES.PENSION,
   brokerId = "",
   brokerName = "",
   batchId = "",
-}) {
+} = {}) {
   const issuerOriginal =
     row.issuer ||
     row.company ||

@@ -1,0 +1,399 @@
+// NEW FILE
+// Path: src/unified/rawToUnifiedRows.js
+
+import {
+  DEFAULT_BROKER,
+  PRODUCT_TYPES,
+  getProductConfig,
+  createEmptyUnifiedRow,
+} from "./unifiedSchema";
+
+import {
+  buildIssuerAliasLookup,
+  canonicalIssuer,
+} from "./issuerAliases";
+
+import {
+  normalizeText,
+  normalizeNumber,
+  normalizePercent,
+  normalizeTrackName,
+  getRaw,
+  getByKeys,
+  firstNonEmpty,
+  ageBucket,
+  accumulationBucket,
+} from "./normalizers";
+
+function getClientId(row) {
+  const raw = getRaw(row);
+
+  return normalizeText(
+    firstNonEmpty(
+      row.clientId,
+      row.employeeId,
+      getByKeys(raw, [
+        "קוד מזהה של העובד",
+        "תעודת זהות",
+        "ת.ז",
+        "מספר זהות",
+        "מספר עובד",
+      ])
+    )
+  );
+}
+
+function getIssuerOriginal(row) {
+  const raw = getRaw(row);
+
+  return normalizeText(
+    firstNonEmpty(
+      row.originalManager,
+      row.manager,
+      row.issuer,
+      row.company,
+      getByKeys(raw, [
+        "קרן פנסיה",
+        "חברת ביטוח",
+        "שם יצרן",
+        "יצרן",
+        "שם קופה",
+      ])
+    )
+  );
+}
+
+function getClientName(row) {
+  const raw = getRaw(row);
+
+  return normalizeText(
+    firstNonEmpty(
+      row.clientName,
+      getByKeys(raw, [
+        "שם עובד",
+        "שם הלקוח",
+        "שם לקוח",
+        "שם מלא",
+      ])
+    )
+  );
+}
+
+function getServiceStatus(row) {
+  const raw = getRaw(row);
+
+  return normalizeText(
+    firstNonEmpty(
+      row.serviceStatus,
+      getByKeys(raw, [
+        "סטטוס שיווקי",
+        "סטטוס לקוח",
+        "סוג שירות",
+        "סטטוס טיפול",
+      ])
+    )
+  );
+}
+
+function getFundName(row) {
+  const raw = getRaw(row);
+
+  return normalizeText(
+    firstNonEmpty(
+      row.fundName,
+      getByKeys(raw, [
+        "שם קרן הפנסיה",
+        "שם קופה",
+        "שם מוצר",
+        "שם תוכנית",
+      ])
+    )
+  );
+}
+
+function getPolicyNumber(row) {
+  const raw = getRaw(row);
+
+  return normalizeText(
+    firstNonEmpty(
+      row.policyNumber,
+      getByKeys(raw, [
+        "מספר פוליסה",
+        "מספר חשבון",
+        "מספר עמית",
+        "מספר קופה",
+      ])
+    )
+  );
+}
+
+function getInsuranceTrack(row) {
+  const raw = getRaw(row);
+
+  return (
+    normalizeText(
+      firstNonEmpty(
+        row.insuranceTrack,
+        row.insuranceWaiver,
+        getByKeys(raw, [
+          "מסלול ביטוח בקרן הפנסיה",
+          "מסלול ביטוח",
+          "כיסוי שארים",
+          "ויתור שארים",
+        ])
+      )
+    ) || "מסלול ביטוח לא צוין"
+  );
+}
+
+function getInvestmentTrackRewards(row) {
+  const raw = getRaw(row);
+
+  const explicitValue = firstNonEmpty(
+    row.investmentTrackRewards,
+    getByKeys(raw, [
+      "שם מסלול השקעה - תגמולים",
+      " שם מסלול השקעה - תגמולים",
+      "מסלול השקעה תגמולים",
+      "מסלול תגמולים",
+      "שם מסלול תגמולים",
+    ])
+  );
+
+  return normalizeTrackName(explicitValue, "ללא מסלול השקעה");
+}
+
+function getInvestmentTrackCompensation(row) {
+  const raw = getRaw(row);
+
+  const explicitValue = firstNonEmpty(
+    row.investmentTrackCompensation,
+    getByKeys(raw, [
+      "שם מסלול השקעה - פיצויים",
+      "מסלול השקעה פיצויים",
+      "מסלול פיצויים",
+      "שם מסלול פיצויים",
+    ])
+  );
+
+  return normalizeTrackName(explicitValue, "ללא מסלול השקעה");
+}
+
+function getAccumulation(row) {
+  const raw = getRaw(row);
+
+  return normalizeNumber(
+    firstNonEmpty(
+      row.accumulation,
+      getByKeys(raw, [
+        "סה\"כ ערכי פידיון",
+        "סה״כ ערכי פידיון",
+        "ערך פדיון כולל",
+        "ערך פדיון כולל ",
+        "ערך פדיון כולל ",
+        "סהכ ערכי פידיון",
+        "צבירה",
+        "יתרה",
+      ])
+    )
+  );
+}
+
+function getDepositFee(row) {
+  const raw = getRaw(row);
+
+  return normalizePercent(
+    firstNonEmpty(
+      row.depositFee,
+      getByKeys(raw, [
+        "דמי ניהול מפרמיה באחוזים",
+        "דמי ניהול מהפקדה",
+        "דמי ניהול מהפקדות",
+        "מהפקדה",
+      ])
+    )
+  );
+}
+
+function getAccumulationFee(row) {
+  const raw = getRaw(row);
+
+  return normalizePercent(
+    firstNonEmpty(
+      row.accumulationFee,
+      getByKeys(raw, [
+        "דמי ניהול מצבירה באחוזים",
+        "דמי ניהול מצבירה",
+        "מצבירה",
+      ])
+    )
+  );
+}
+
+function isOperationOnly(serviceStatus) {
+  return /תפעול בלבד|ללא שיווק/.test(normalizeText(serviceStatus));
+}
+
+function personalByClientId(personalRows = []) {
+  const map = new Map();
+
+  personalRows.forEach((row) => {
+    const raw = getRaw(row);
+
+    const clientId = normalizeText(
+      firstNonEmpty(
+        row.clientId,
+        getByKeys(raw, [
+          "קוד מזהה של העובד",
+          "תעודת זהות",
+          "ת.ז",
+          "מספר זהות",
+          "מספר עובד",
+        ])
+      )
+    );
+
+    if (!clientId) return;
+
+    map.set(clientId, row);
+  });
+
+  return map;
+}
+
+function getPersonalFields(personalRow) {
+  if (!personalRow) {
+    return {
+      age: null,
+      maritalStatus: "לא צוין",
+      gender: "",
+      childrenCount: null,
+      personalDetailsFound: false,
+    };
+  }
+
+  const raw = getRaw(personalRow);
+
+  const age = normalizeNumber(
+    firstNonEmpty(
+      personalRow.age,
+      getByKeys(raw, ["גיל מחושב", "גיל"])
+    )
+  );
+
+  return {
+    age,
+    maritalStatus:
+      normalizeText(
+        firstNonEmpty(
+          personalRow.maritalStatus,
+          getByKeys(raw, ["מצב משפחתי", "סטטוס משפחתי"])
+        )
+      ) || "לא צוין",
+    gender:
+      normalizeText(
+        firstNonEmpty(
+          personalRow.gender,
+          getByKeys(raw, ["מין", "מגדר"])
+        )
+      ) || "",
+    childrenCount: normalizeNumber(
+      firstNonEmpty(
+        personalRow.childrenCount,
+        getByKeys(raw, ["מספר ילדים", "ילדים"])
+      )
+    ),
+    personalDetailsFound: true,
+  };
+}
+
+export function buildBaseUnifiedRows({
+  rows = [],
+  personalRows = [],
+  broker = DEFAULT_BROKER,
+  productType = PRODUCT_TYPES.PENSION,
+  issuerAliases = {},
+} = {}) {
+  const config = getProductConfig(productType);
+  const aliasLookup = buildIssuerAliasLookup(issuerAliases);
+  const personalMap = personalByClientId(personalRows);
+
+  return rows.map((sourceRow, index) => {
+    const clientId = getClientId(sourceRow);
+    const personal = getPersonalFields(personalMap.get(clientId));
+
+    const issuerOriginal = getIssuerOriginal(sourceRow);
+    const issuerCanonical = canonicalIssuer(issuerOriginal, aliasLookup);
+
+    const serviceStatus = getServiceStatus(sourceRow);
+
+    const excluded =
+      config.excludeOperationOnlyFromFeeAudit &&
+      isOperationOnly(serviceStatus);
+
+    const accumulation = getAccumulation(sourceRow);
+
+    return {
+      ...createEmptyUnifiedRow(),
+
+      brokerId: broker.brokerId || DEFAULT_BROKER.brokerId,
+      brokerName: broker.brokerName || DEFAULT_BROKER.brokerName,
+      batchId: broker.batchId || "",
+      productType,
+
+      sourceRowNumber: index + 1,
+      sourceSheetName: sourceRow.sheetName || "",
+      sourceFileName: sourceRow.sourceFileName || "",
+
+      clientId,
+      clientName: getClientName(sourceRow),
+
+      serviceStatus,
+      age: personal.age,
+      ageBucket: ageBucket(personal.age),
+      maritalStatus: personal.maritalStatus,
+      gender: personal.gender,
+      childrenCount: personal.childrenCount,
+      personalDetailsFound: personal.personalDetailsFound,
+
+      issuerOriginal,
+      issuerCanonical,
+
+      policyNumber: getPolicyNumber(sourceRow),
+      fundName: getFundName(sourceRow),
+
+      insuranceTrack: config.hasInsuranceTrack
+        ? getInsuranceTrack(sourceRow)
+        : "לא רלוונטי",
+
+      investmentTrackRewards: config.hasRewardsTrack
+        ? getInvestmentTrackRewards(sourceRow)
+        : "לא רלוונטי",
+
+      investmentTrackCompensation: config.hasCompensationTrack
+        ? getInvestmentTrackCompensation(sourceRow)
+        : "לא רלוונטי",
+
+      accumulation,
+      accumulationBucket: accumulationBucket(accumulation),
+
+      depositFee: config.hasDepositFee
+        ? getDepositFee(sourceRow)
+        : null,
+
+      accumulationFee: config.hasAccumulationFee
+        ? getAccumulationFee(sourceRow)
+        : null,
+
+      isExcludedFromFeeAudit: excluded,
+
+      auditStatus: excluded ? "excluded" : "",
+      auditStatusHe: excluded ? "הוחרג" : "",
+      auditReason: excluded
+        ? "תפעול בלבד / ללא שיווק — הוחרג מבדיקת דמי ניהול"
+        : "",
+
+      raw: sourceRow,
+    };
+  });
+}

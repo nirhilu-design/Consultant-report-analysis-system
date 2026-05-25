@@ -1,147 +1,124 @@
-// NEW FILE
-// Path: src/unified/unifiedSchema.js
+export const UNIFIED_SCHEMA_VERSION = "1.0.0";
 
 export const PRODUCT_TYPES = {
   PENSION: "pension",
   HISHTALMUT: "hishtalmut",
 };
 
-export const PRODUCT_LABELS = {
-  [PRODUCT_TYPES.PENSION]: "קרן פנסיה",
-  [PRODUCT_TYPES.HISHTALMUT]: "קרן השתלמות",
+export const SOURCE_TYPES = {
+  CONSULTANT_REPORT: "consultant_report",
+  AGREEMENT_FILE: "agreement_file",
+  PERSONAL_DETAILS: "personal_details",
 };
 
-export const DEFAULT_BROKER = {
-  brokerId: "broker_001",
-  brokerName: "מנהל הסדר 1",
+export const AUDIT_STATUSES = {
+  VALID: "VALID",
+  VALID_BASELINE: "VALID_BASELINE",
+  INVALID: "INVALID",
+  EXCLUDED: "EXCLUDED",
 };
 
-export const AUDIT_STATUS = {
-  VALID: "valid",
-  INVALID: "invalid",
-  EXCLUDED: "excluded",
-};
-
-export const AUDIT_STATUS_HE = {
-  VALID: "תקין",
-  INVALID: "חריג",
-  EXCLUDED: "הוחרג",
-};
-
-export const ISSUE_CATEGORY = {
+export const AUDIT_MODELS = {
+  STANDARD_MODEL: "STANDARD_MODEL",
+  MODEL_A: "MODEL_A",
+  MODEL_B: "MODEL_B",
+  TIER_MODEL: "TIER_MODEL",
+  BASELINE: "BASELINE",
   NONE: "NONE",
-  FEE_MISMATCH: "FEE_MISMATCH",
-  MISSING_AGREEMENT: "MISSING_AGREEMENT",
-  LARGE_BALANCE_NOT_OPTIMIZED: "LARGE_BALANCE_NOT_OPTIMIZED",
-  MISSING_DATA: "MISSING_DATA",
 };
 
-export const PRODUCT_CONFIGS = {
-  [PRODUCT_TYPES.PENSION]: {
-    label: "קרן פנסיה",
-    hasDepositFee: true,
-    hasAccumulationFee: true,
-    hasInsuranceTrack: true,
-    hasInvestmentTracks: true,
-    hasRewardsTrack: true,
-    hasCompensationTrack: true,
+export const DEFAULT_UNIFIED_ROW = {
+  schemaVersion: UNIFIED_SCHEMA_VERSION,
 
-    excludeOperationOnlyFromFeeAudit: true,
+  brokerId: "",
+  brokerName: "",
+  batchId: "",
 
-    withoutAgreementBaseline: {
-      depositFee: 1,
-      accumulationFee: 0.2,
-    },
-  },
+  sourceType: SOURCE_TYPES.CONSULTANT_REPORT,
+  productType: "",
 
-  [PRODUCT_TYPES.HISHTALMUT]: {
-    label: "קרן השתלמות",
-    hasDepositFee: false,
-    hasAccumulationFee: true,
-    hasInsuranceTrack: false,
-    hasInvestmentTracks: true,
-    hasRewardsTrack: true,
-    hasCompensationTrack: false,
+  issuerOriginal: "",
+  issuerCanonical: "",
 
-    excludeOperationOnlyFromFeeAudit: false,
+  clientId: "",
+  employeeId: "",
+  fullName: "",
 
-    withoutAgreementBaseline: {
-      depositFee: null,
-      accumulationFee: 0.8,
-    },
-  },
+  policyNumber: "",
+
+  accumulation: 0,
+  monthlyDeposit: 0,
+
+  accumulationFee: 0,
+  depositFee: 0,
+
+  investmentTrackRewards: "ללא מסלול השקעה",
+  investmentTrackCompensation: "ללא מסלול השקעה",
+  insuranceTrack: "",
+
+  maritalStatus: "",
+  age: 0,
+  gender: "",
+  childrenCount: 0,
+
+  auditStatus: null,
+  auditReason: null,
+  auditModel: null,
+
+  raw: null,
 };
 
-export function getProductConfig(productType) {
-  return PRODUCT_CONFIGS[productType] || PRODUCT_CONFIGS[PRODUCT_TYPES.PENSION];
+export const DEFAULT_AGREEMENT_ROW = {
+  schemaVersion: UNIFIED_SCHEMA_VERSION,
+
+  brokerId: "",
+  brokerName: "",
+  batchId: "",
+
+  sourceType: SOURCE_TYPES.AGREEMENT_FILE,
+  productType: "",
+
+  issuerOriginal: "",
+  issuerCanonical: "",
+
+  modelName: AUDIT_MODELS.STANDARD_MODEL,
+
+  minAccumulation: 0,
+
+  accumulationFee: 0,
+  depositFee: 0,
+
+  raw: null,
+};
+
+export function createUnifiedRow(overrides = {}) {
+  return {
+    ...DEFAULT_UNIFIED_ROW,
+    ...overrides,
+    schemaVersion: UNIFIED_SCHEMA_VERSION,
+  };
 }
 
-export function createEmptyUnifiedRow() {
+export function createAgreementRow(overrides = {}) {
   return {
-    brokerId: "",
-    brokerName: "",
-    batchId: "",
-    productType: "",
-
-    sourceRowNumber: null,
-    sourceSheetName: "",
-    sourceFileName: "",
-
-    clientId: "",
-    clientName: "",
-
-    serviceStatus: "",
-    age: null,
-    ageBucket: "לא צוין",
-    maritalStatus: "לא צוין",
-    gender: "",
-    childrenCount: null,
-    personalDetailsFound: false,
-
-    issuerOriginal: "",
-    issuerCanonical: "",
-
-    policyNumber: "",
-    fundName: "",
-
-    insuranceTrack: "מסלול ביטוח לא צוין",
-
-    investmentTrackRewards: "ללא מסלול השקעה",
-    investmentTrackCompensation: "ללא מסלול השקעה",
-
-    accumulation: null,
-    accumulationBucket: "לא צוין",
-
-    depositFee: null,
-    accumulationFee: null,
-
-    agreementIssuerFound: false,
-    agreementOptions: [],
-    agreementOptionsCount: 0,
-
-    isExcludedFromFeeAudit: false,
-
-    auditStatus: "",
-    auditStatusHe: "",
-
-    auditMatchResult: "",
-    auditMatchModelName: "",
-    auditMatchRuleType: "",
-
-    auditReferenceDepositFee: null,
-    auditReferenceAccumulationFee: null,
-
-    auditReason: "",
-
-    hasTierModel: false,
-    eligibleTierModel: false,
-    actualInTierModel: false,
-    tierPotentialNotUsed: false,
-
-    issueCategory: ISSUE_CATEGORY.NONE,
-    requiredAction: "",
-    priority: "",
-
-    raw: null,
+    ...DEFAULT_AGREEMENT_ROW,
+    ...overrides,
+    schemaVersion: UNIFIED_SCHEMA_VERSION,
   };
+}
+
+export function isPensionRow(row) {
+  return row?.productType === PRODUCT_TYPES.PENSION;
+}
+
+export function isHishtalmutRow(row) {
+  return row?.productType === PRODUCT_TYPES.HISHTALMUT;
+}
+
+export function isValidUnifiedRow(row) {
+  if (!row) return false;
+  if (!row.productType) return false;
+  if (!row.issuerCanonical) return false;
+
+  return true;
 }

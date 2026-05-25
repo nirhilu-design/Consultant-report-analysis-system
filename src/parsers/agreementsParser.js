@@ -1,3 +1,6 @@
+// REPLACE EXISTING FILE
+// Path: src/parsers/agreementsParser.js
+
 import * as XLSX from "xlsx";
 
 function normalizeText(value) {
@@ -7,280 +10,205 @@ function normalizeText(value) {
     .trim();
 }
 
-function normalizeNumber(value) {
-  if (
-    value === null ||
-    value === undefined ||
-    value === ""
-  ) {
-    return null;
-  }
+function normalizePercent(value) {
+  if (value === null || value === undefined || value === "") return null;
 
   if (typeof value === "number") {
-    return value;
+    return value > 1 ? value : value * 100;
   }
 
-  const cleaned = String(value)
-    .replace(/,/g, "")
-    .replace(/%/g, "")
+  const text = String(value)
+    .replace(",", ".")
+    .replace("%", "")
     .replace(/[^\d.-]/g, "");
 
-  const parsed = Number(cleaned);
+  if (!text) return null;
 
-  return Number.isFinite(parsed)
-    ? parsed
-    : null;
+  const parsed = Number(text);
+
+  if (!Number.isFinite(parsed)) return null;
+
+  return parsed > 1 ? parsed : parsed * 100;
 }
 
 function rowToText(row) {
   return row.map(normalizeText).join(" ");
 }
 
-function findHeaderIndex(rows) {
-  const maxRowsToScan = Math.min(
-    rows.length,
-    25
-  );
+function canonicalIssuerFromText(text) {
+  const clean = normalizeText(text);
 
-  for (
-    let i = 0;
-    i < maxRowsToScan;
-    i += 1
-  ) {
-    const text = rowToText(rows[i]);
+  if (/הפניקס|פניקס/.test(clean)) return "הפניקס";
+  if (/הראל/.test(clean)) return "הראל";
+  if (/כלל/.test(clean)) return "כלל";
+  if (/מגדל|מקפת/.test(clean)) return "מגדל";
+  if (/מנורה|מבטחים/.test(clean)) return "מנורה מבטחים";
+  if (/איילון/.test(clean)) return "איילון";
+  if (/אלטשולר/.test(clean)) return "אלטשולר שחם";
+  if (/מור/.test(clean)) return "מור";
+  if (/מיטב/.test(clean)) return "מיטב";
+  if (/ילין/.test(clean)) return "ילין לפידות";
+  if (/אנליסט/.test(clean)) return "אנליסט";
 
-    const hasManager =
-      /יצרן|חברה|גוף|מנהל|קרן/.test(
-        text
-      );
-
-    const hasFee =
-      /דמי.*ניהול|צבירה|הפקדה|ד\.?נ/.test(
-        text
-      );
-
-    const hasProduct =
-      /מוצר|פנסיה|גמל|השתלמות/.test(
-        text
-      );
-
-    if (
-      hasManager &&
-      (hasFee || hasProduct)
-    ) {
-      return i;
-    }
-  }
-
-  return 0;
+  return "";
 }
 
-function makeObjects(rows, headerIndex) {
-  const headers = rows[headerIndex].map(
-    (header, index) => {
-      const cleanHeader =
-        normalizeText(header);
+function detectModelName(index, numbers) {
+  if (index === 0) return "מודל א";
+  if (index === 1) return "מודל ב";
+  return `מודל ${index + 1}`;
+}
 
-      return cleanHeader || `עמודה_${index}`;
-    }
-  );
+function extractNumbersFromRow(row) {
+  return row
+    .map((cell, index) => ({
+      index,
+      raw: cell,
+      value: normalizePercent(cell),
+    }))
+    .filter((item) => item.value !== null);
+}
 
-  return rows
-    .slice(headerIndex + 1)
-    .map((row) => {
-      const obj = {};
+function buildOptionsFromNumbers(numbers) {
+  if (!numbers.length) return [];
 
-      headers.forEach((header, index) => {
-        obj[header] = row[index];
-      });
+  const values = numbers.map((item) => item.value);
 
-      obj.__raw = row;
-      obj.__headers = headers;
-      obj.__text = rowToText(row);
+  // Most common agreement matrix:
+  // [1.00, 0.15, 2.00, 0.05] = deposit A, asset A, deposit B, asset B
+  // Sometimes Hebrew Excel extraction reverses visual order:
+  // [0.05, 2.00, 0.15, 1.00] = asset B, deposit B, asset A, deposit A
+  const looksReversed =
+    values.length >= 4 &&
+    values[0] <= 0.3 &&
+    values[1] >= 0.5 &&
+    values[2] <= 0.3 &&
+    values[3] >= 0.5;
 
-      return obj;
+  const ordered = looksReversed ? [...values].reverse() : values;
+
+  const options = [];
+
+  for (let i = 0; i < ordered.length; i += 2) {
+    const depositFee = ordered[i] ?? null;
+    const accumulationFee = ordered[i + 1] ?? null;
+
+    if (depositFee === null && accumulationFee === null) continue;
+
+    options.push({
+      optionName: detectModelName(options.length, ordered),
+      depositFee,
+      accumulationFee,
+      conditionType: "DEFAULT",
+      conditionValue: null,
+      isDefault: options.length === 0,
     });
-}
-
-function getByHeader(row, patterns) {
-  const entry = Object.entries(row).find(
-    ([header]) =>
-      patterns.some((pattern) =>
-        pattern.test(
-          normalizeText(header)
-        )
-      )
-  );
-
-  return entry ? entry[1] : "";
-}
-
-function getFirstNonEmptyByHeader(
-  row,
-  patterns
-) {
-  const entries = Object.entries(row).filter(
-    ([header, value]) =>
-      patterns.some((pattern) =>
-        pattern.test(
-          normalizeText(header)
-        )
-      ) &&
-      normalizeText(value)
-  );
-
-  return entries.length
-    ? entries[0][1]
-    : "";
-}
-
-function cleanManagerName(value) {
-  const text = normalizeText(value)
-    .replace(/^קרן\s+/g, "")
-    .replace(/^חברת\s+/g, "")
-    .replace(/^חברה\s+מנהלת\s*/g, "")
-    .replace(/בע"מ/g, "")
-    .replace(/בעמ/g, "")
-    .replace(/\s+-\s+.*$/g, "")
-    .trim();
-
-  return text;
-}
-
-function detectOriginalManager(row) {
-  const directValue =
-    getFirstNonEmptyByHeader(row, [
-      /^יצרן$/,
-      /שם.*יצרן/,
-      /חברה.*מנהלת/,
-      /^חברה$/,
-      /שם.*חברה/,
-      /גוף.*מנהל/,
-      /שם.*גוף/,
-      /שם.*קרן/,
-      /קרן.*פנסיה/,
-    ]);
-
-  if (normalizeText(directValue)) {
-    return cleanManagerName(directValue);
   }
 
-  const text = normalizeText(row.__text);
-
-  const knownMatch = [
-    "הפניקס",
-    "פניקס",
-    "הראל",
-    "כלל",
-    "מקפת",
-    "מגדל",
-    "מבטחים",
-    "מנורה",
-    "מיטב",
-    "אלטשולר",
-    "מור",
-    "אינפיניטי",
-    "ילין",
-    "אנליסט",
-    "איילון",
-    "הכשרה",
-    "פסגות",
-  ].find((name) => text.includes(name));
-
-  return knownMatch || "לא מזוהה";
+  return options;
 }
 
-function isPensionAgreement(row) {
-  const text = normalizeText(
-    row.__text
-  );
+function detectThresholdFromSheet(rows) {
+  const text = rows.map(rowToText).join(" ");
+  const matches = text.match(/(\d{2,3}(?:,\d{3})+|\d{5,})/g);
 
-  return /פנסיה|מקיפה|משלימה|קרן/.test(
-    text
-  );
+  if (!matches) return null;
+
+  const values = matches
+    .map((value) => Number(String(value).replace(/,/g, "")))
+    .filter((value) => Number.isFinite(value) && value >= 100000);
+
+  return values.length ? Math.min(...values) : null;
 }
 
-function detectDepositFee(row) {
-  return normalizeNumber(
-    getByHeader(row, [
-      /דמי.*ניהול.*הפקדה/,
-      /ד\.?נ.*הפקדה/,
-      /מהפקדה/,
-      /הפקדות/,
-    ])
-  );
+function shouldSkipRow(row) {
+  const text = rowToText(row);
+
+  if (!text) return true;
+  if (/שם.*יצרן|יצרן|חברה.*מנהלת/.test(text) && /דמי.*ניהול|הפקדה|צבירה/.test(text)) return true;
+  if (/הערה|כפוף|בקשה|חתימה|פגישה/.test(text) && !canonicalIssuerFromText(text)) return true;
+
+  return false;
 }
 
-function detectAccumulationFee(row) {
-  return normalizeNumber(
-    getByHeader(row, [
-      /דמי.*ניהול.*צבירה/,
-      /ד\.?נ.*צבירה/,
-      /מצבירה/,
-      /צבירה/,
-    ])
-  );
-}
-
-export function parseAgreements(
-  workbook
-) {
+export function parseAgreements(workbook) {
   if (!workbook) return [];
 
   const agreements = [];
 
-  workbook.SheetNames.forEach(
-    (sheetName) => {
-      const sheet =
-        workbook.Sheets[sheetName];
+  workbook.SheetNames.forEach((sheetName) => {
+    const sheet = workbook.Sheets[sheetName];
 
-      const rows =
-        XLSX.utils.sheet_to_json(
-          sheet,
-          {
-            header: 1,
-            defval: "",
-          }
-        );
+    const rows = XLSX.utils.sheet_to_json(sheet, {
+      header: 1,
+      defval: "",
+    });
 
-      if (!rows.length) return;
+    if (!rows.length) return;
 
-      const headerIndex =
-        findHeaderIndex(rows);
+    const sheetThreshold = detectThresholdFromSheet(rows);
 
-      const objects = makeObjects(
-        rows,
-        headerIndex
-      );
+    rows.forEach((row) => {
+      if (shouldSkipRow(row)) return;
 
-      objects
-        .filter(isPensionAgreement)
-        .forEach((row) => {
-          const originalManager =
-            detectOriginalManager(row);
+      const text = rowToText(row);
+      const issuer = canonicalIssuerFromText(text);
 
-          agreements.push({
-            sheetName,
+      if (!issuer) return;
 
-            // בכוונה נשמר שם יצרן מקורי.
-            // הסיווג הסופי מתבצע ב-buildPensionSummary.
-            manager: originalManager,
+      const numbers = extractNumbersFromRow(row);
+      const options = buildOptionsFromNumbers(numbers);
 
-            originalManager,
-
-            depositFee:
-              detectDepositFee(row),
-
-            accumulationFee:
-              detectAccumulationFee(
-                row
-              ),
-
-            raw: row,
-          });
+      options.forEach((option) => {
+        agreements.push({
+          sheetName,
+          manager: issuer,
+          originalManager: issuer,
+          issuer,
+          optionName: option.optionName,
+          depositFee: option.depositFee,
+          accumulationFee: option.accumulationFee,
+          conditionType: option.conditionType,
+          conditionValue: option.conditionValue,
+          isDefault: option.isDefault,
+          raw: {
+            row,
+            text,
+          },
         });
-    }
-  );
+      });
+
+      // If a second option exists and the sheet mentions high accumulation threshold,
+      // mark it as a tier option as well. The audit engine still checks all options,
+      // but this enables the "מודל צבירות גבוהות" analysis.
+      if (options.length >= 2 && sheetThreshold) {
+        const second = options[1];
+
+        agreements.push({
+          sheetName,
+          manager: issuer,
+          originalManager: issuer,
+          issuer,
+          optionName: "מודל צבירות גבוהות",
+          depositFee: second.depositFee,
+          accumulationFee: second.accumulationFee,
+          conditionType: "MIN_ACCUMULATION",
+          conditionValue: sheetThreshold,
+          isDefault: false,
+          raw: {
+            row,
+            text,
+            detectedThreshold: sheetThreshold,
+          },
+        });
+      }
+    });
+  });
+
+  console.log("parseAgreements result:", {
+    rows: agreements.length,
+    sample: agreements.slice(0, 10),
+  });
 
   return agreements;
 }

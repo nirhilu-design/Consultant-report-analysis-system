@@ -1,399 +1,278 @@
-// NEW FILE
-// Path: src/unified/rawToUnifiedRows.js
+import { normalizeIssuerName } from "./issuerAliases.js";
 
-import {
-  DEFAULT_BROKER,
-  PRODUCT_TYPES,
-  getProductConfig,
-  createEmptyUnifiedRow,
-} from "./unifiedSchema";
+export function rawToUnifiedRows({
+  pensionRows = [],
+  hishtalmutRows = [],
+  brokerId = "",
+  brokerName = "",
+  batchId = "",
+}) {
+  const unifiedRows = [];
 
-import {
-  buildIssuerAliasLookup,
-  canonicalIssuer,
-} from "./issuerAliases";
-
-import {
-  normalizeText,
-  normalizeNumber,
-  normalizePercent,
-  normalizeTrackName,
-  getRaw,
-  getByKeys,
-  firstNonEmpty,
-  ageBucket,
-  accumulationBucket,
-} from "./normalizers";
-
-function getClientId(row) {
-  const raw = getRaw(row);
-
-  return normalizeText(
-    firstNonEmpty(
-      row.clientId,
-      row.employeeId,
-      getByKeys(raw, [
-        "קוד מזהה של העובד",
-        "תעודת זהות",
-        "ת.ז",
-        "מספר זהות",
-        "מספר עובד",
-      ])
-    )
-  );
-}
-
-function getIssuerOriginal(row) {
-  const raw = getRaw(row);
-
-  return normalizeText(
-    firstNonEmpty(
-      row.originalManager,
-      row.manager,
-      row.issuer,
-      row.company,
-      getByKeys(raw, [
-        "קרן פנסיה",
-        "חברת ביטוח",
-        "שם יצרן",
-        "יצרן",
-        "שם קופה",
-      ])
-    )
-  );
-}
-
-function getClientName(row) {
-  const raw = getRaw(row);
-
-  return normalizeText(
-    firstNonEmpty(
-      row.clientName,
-      getByKeys(raw, [
-        "שם עובד",
-        "שם הלקוח",
-        "שם לקוח",
-        "שם מלא",
-      ])
-    )
-  );
-}
-
-function getServiceStatus(row) {
-  const raw = getRaw(row);
-
-  return normalizeText(
-    firstNonEmpty(
-      row.serviceStatus,
-      getByKeys(raw, [
-        "סטטוס שיווקי",
-        "סטטוס לקוח",
-        "סוג שירות",
-        "סטטוס טיפול",
-      ])
-    )
-  );
-}
-
-function getFundName(row) {
-  const raw = getRaw(row);
-
-  return normalizeText(
-    firstNonEmpty(
-      row.fundName,
-      getByKeys(raw, [
-        "שם קרן הפנסיה",
-        "שם קופה",
-        "שם מוצר",
-        "שם תוכנית",
-      ])
-    )
-  );
-}
-
-function getPolicyNumber(row) {
-  const raw = getRaw(row);
-
-  return normalizeText(
-    firstNonEmpty(
-      row.policyNumber,
-      getByKeys(raw, [
-        "מספר פוליסה",
-        "מספר חשבון",
-        "מספר עמית",
-        "מספר קופה",
-      ])
-    )
-  );
-}
-
-function getInsuranceTrack(row) {
-  const raw = getRaw(row);
-
-  return (
-    normalizeText(
-      firstNonEmpty(
-        row.insuranceTrack,
-        row.insuranceWaiver,
-        getByKeys(raw, [
-          "מסלול ביטוח בקרן הפנסיה",
-          "מסלול ביטוח",
-          "כיסוי שארים",
-          "ויתור שארים",
-        ])
-      )
-    ) || "מסלול ביטוח לא צוין"
-  );
-}
-
-function getInvestmentTrackRewards(row) {
-  const raw = getRaw(row);
-
-  const explicitValue = firstNonEmpty(
-    row.investmentTrackRewards,
-    getByKeys(raw, [
-      "שם מסלול השקעה - תגמולים",
-      " שם מסלול השקעה - תגמולים",
-      "מסלול השקעה תגמולים",
-      "מסלול תגמולים",
-      "שם מסלול תגמולים",
-    ])
-  );
-
-  return normalizeTrackName(explicitValue, "ללא מסלול השקעה");
-}
-
-function getInvestmentTrackCompensation(row) {
-  const raw = getRaw(row);
-
-  const explicitValue = firstNonEmpty(
-    row.investmentTrackCompensation,
-    getByKeys(raw, [
-      "שם מסלול השקעה - פיצויים",
-      "מסלול השקעה פיצויים",
-      "מסלול פיצויים",
-      "שם מסלול פיצויים",
-    ])
-  );
-
-  return normalizeTrackName(explicitValue, "ללא מסלול השקעה");
-}
-
-function getAccumulation(row) {
-  const raw = getRaw(row);
-
-  return normalizeNumber(
-    firstNonEmpty(
-      row.accumulation,
-      getByKeys(raw, [
-        "סה\"כ ערכי פידיון",
-        "סה״כ ערכי פידיון",
-        "ערך פדיון כולל",
-        "ערך פדיון כולל ",
-        "ערך פדיון כולל ",
-        "סהכ ערכי פידיון",
-        "צבירה",
-        "יתרה",
-      ])
-    )
-  );
-}
-
-function getDepositFee(row) {
-  const raw = getRaw(row);
-
-  return normalizePercent(
-    firstNonEmpty(
-      row.depositFee,
-      getByKeys(raw, [
-        "דמי ניהול מפרמיה באחוזים",
-        "דמי ניהול מהפקדה",
-        "דמי ניהול מהפקדות",
-        "מהפקדה",
-      ])
-    )
-  );
-}
-
-function getAccumulationFee(row) {
-  const raw = getRaw(row);
-
-  return normalizePercent(
-    firstNonEmpty(
-      row.accumulationFee,
-      getByKeys(raw, [
-        "דמי ניהול מצבירה באחוזים",
-        "דמי ניהול מצבירה",
-        "מצבירה",
-      ])
-    )
-  );
-}
-
-function isOperationOnly(serviceStatus) {
-  return /תפעול בלבד|ללא שיווק/.test(normalizeText(serviceStatus));
-}
-
-function personalByClientId(personalRows = []) {
-  const map = new Map();
-
-  personalRows.forEach((row) => {
-    const raw = getRaw(row);
-
-    const clientId = normalizeText(
-      firstNonEmpty(
-        row.clientId,
-        getByKeys(raw, [
-          "קוד מזהה של העובד",
-          "תעודת זהות",
-          "ת.ז",
-          "מספר זהות",
-          "מספר עובד",
-        ])
-      )
+  pensionRows.forEach((row) => {
+    unifiedRows.push(
+      buildPensionUnifiedRow({
+        row,
+        brokerId,
+        brokerName,
+        batchId,
+      })
     );
-
-    if (!clientId) return;
-
-    map.set(clientId, row);
   });
 
-  return map;
+  hishtalmutRows.forEach((row) => {
+    unifiedRows.push(
+      buildHishtalmutUnifiedRow({
+        row,
+        brokerId,
+        brokerName,
+        batchId,
+      })
+    );
+  });
+
+  return unifiedRows;
 }
 
-function getPersonalFields(personalRow) {
-  if (!personalRow) {
-    return {
-      age: null,
-      maritalStatus: "לא צוין",
-      gender: "",
-      childrenCount: null,
-      personalDetailsFound: false,
-    };
-  }
-
-  const raw = getRaw(personalRow);
-
-  const age = normalizeNumber(
-    firstNonEmpty(
-      personalRow.age,
-      getByKeys(raw, ["גיל מחושב", "גיל"])
-    )
+function buildPensionUnifiedRow({
+  row,
+  brokerId,
+  brokerName,
+  batchId,
+}) {
+  const issuerCanonical = normalizeIssuerName(
+    row.issuer || row.company || row.יצרן
   );
 
   return {
-    age,
-    maritalStatus:
-      normalizeText(
-        firstNonEmpty(
-          personalRow.maritalStatus,
-          getByKeys(raw, ["מצב משפחתי", "סטטוס משפחתי"])
-        )
-      ) || "לא צוין",
-    gender:
-      normalizeText(
-        firstNonEmpty(
-          personalRow.gender,
-          getByKeys(raw, ["מין", "מגדר"])
-        )
-      ) || "",
-    childrenCount: normalizeNumber(
-      firstNonEmpty(
-        personalRow.childrenCount,
-        getByKeys(raw, ["מספר ילדים", "ילדים"])
-      )
+    brokerId,
+    brokerName,
+    batchId,
+
+    sourceType: "consultant_report",
+
+    productType: "pension",
+
+    issuerOriginal:
+      row.issuer || row.company || row.יצרן || "",
+
+    issuerCanonical,
+
+    clientId:
+      row.clientId ||
+      row.id ||
+      row["תעודת זהות"] ||
+      "",
+
+    employeeId:
+      row.employeeId ||
+      row["מספר עובד"] ||
+      "",
+
+    fullName:
+      row.fullName ||
+      row["שם עובד"] ||
+      row["שם מלא"] ||
+      "",
+
+    policyNumber:
+      row.policyNumber ||
+      row.policy ||
+      row["מספר פוליסה"] ||
+      "",
+
+    accumulation: normalizeNumber(
+      row.accumulation ||
+        row.balance ||
+        row["צבירה"]
     ),
-    personalDetailsFound: true,
+
+    monthlyDeposit: normalizeNumber(
+      row.monthlyDeposit ||
+        row.deposit ||
+        row["הפקדה חודשית"]
+    ),
+
+    accumulationFee: normalizeNumber(
+      row.accumulationFee ||
+        row["דמי ניהול מצבירה"]
+    ),
+
+    depositFee: normalizeNumber(
+      row.depositFee ||
+        row["דמי ניהול מהפקדה"]
+    ),
+
+    investmentTrackRewards:
+      normalizeTrackName(
+        row.investmentTrackRewards ||
+          row["מסלול תגמולים"]
+      ),
+
+    investmentTrackCompensation:
+      normalizeTrackName(
+        row.investmentTrackCompensation ||
+          row["מסלול פיצויים"]
+      ),
+
+    insuranceTrack:
+      row.insuranceTrack ||
+      row["מסלול ביטוח"] ||
+      "ללא מסלול ביטוח",
+
+    maritalStatus:
+      row.maritalStatus ||
+      row["מצב משפחתי"] ||
+      "",
+
+    age: normalizeNumber(
+      row.age || row["גיל"]
+    ),
+
+    gender:
+      row.gender || row["מין"] || "",
+
+    childrenCount: normalizeNumber(
+      row.childrenCount ||
+        row["מספר ילדים"]
+    ),
+
+    auditStatus: null,
+    auditReason: null,
+    auditModel: null,
   };
 }
 
-export function buildBaseUnifiedRows({
-  rows = [],
-  personalRows = [],
-  broker = DEFAULT_BROKER,
-  productType = PRODUCT_TYPES.PENSION,
-  issuerAliases = {},
-} = {}) {
-  const config = getProductConfig(productType);
-  const aliasLookup = buildIssuerAliasLookup(issuerAliases);
-  const personalMap = personalByClientId(personalRows);
+function buildHishtalmutUnifiedRow({
+  row,
+  brokerId,
+  brokerName,
+  batchId,
+}) {
+  const issuerCanonical = normalizeIssuerName(
+    row.issuer || row.company || row.יצרן
+  );
 
-  return rows.map((sourceRow, index) => {
-    const clientId = getClientId(sourceRow);
-    const personal = getPersonalFields(personalMap.get(clientId));
+  return {
+    brokerId,
+    brokerName,
+    batchId,
 
-    const issuerOriginal = getIssuerOriginal(sourceRow);
-    const issuerCanonical = canonicalIssuer(issuerOriginal, aliasLookup);
+    sourceType: "consultant_report",
 
-    const serviceStatus = getServiceStatus(sourceRow);
+    productType: "hishtalmut",
 
-    const excluded =
-      config.excludeOperationOnlyFromFeeAudit &&
-      isOperationOnly(serviceStatus);
+    issuerOriginal:
+      row.issuer || row.company || row.יצרן || "",
 
-    const accumulation = getAccumulation(sourceRow);
+    issuerCanonical,
 
-    return {
-      ...createEmptyUnifiedRow(),
+    clientId:
+      row.clientId ||
+      row.id ||
+      row["תעודת זהות"] ||
+      "",
 
-      brokerId: broker.brokerId || DEFAULT_BROKER.brokerId,
-      brokerName: broker.brokerName || DEFAULT_BROKER.brokerName,
-      batchId: broker.batchId || "",
-      productType,
+    employeeId:
+      row.employeeId ||
+      row["מספר עובד"] ||
+      "",
 
-      sourceRowNumber: index + 1,
-      sourceSheetName: sourceRow.sheetName || "",
-      sourceFileName: sourceRow.sourceFileName || "",
+    fullName:
+      row.fullName ||
+      row["שם עובד"] ||
+      row["שם מלא"] ||
+      "",
 
-      clientId,
-      clientName: getClientName(sourceRow),
+    policyNumber:
+      row.policyNumber ||
+      row.policy ||
+      row["מספר פוליסה"] ||
+      "",
 
-      serviceStatus,
-      age: personal.age,
-      ageBucket: ageBucket(personal.age),
-      maritalStatus: personal.maritalStatus,
-      gender: personal.gender,
-      childrenCount: personal.childrenCount,
-      personalDetailsFound: personal.personalDetailsFound,
+    accumulation: normalizeNumber(
+      row.accumulation ||
+        row.balance ||
+        row["צבירה"]
+    ),
 
-      issuerOriginal,
-      issuerCanonical,
+    monthlyDeposit: normalizeNumber(
+      row.monthlyDeposit ||
+        row.deposit ||
+        row["הפקדה חודשית"]
+    ),
 
-      policyNumber: getPolicyNumber(sourceRow),
-      fundName: getFundName(sourceRow),
+    accumulationFee: normalizeNumber(
+      row.accumulationFee ||
+        row["דמי ניהול מצבירה"]
+    ),
 
-      insuranceTrack: config.hasInsuranceTrack
-        ? getInsuranceTrack(sourceRow)
-        : "לא רלוונטי",
+    depositFee: null,
 
-      investmentTrackRewards: config.hasRewardsTrack
-        ? getInvestmentTrackRewards(sourceRow)
-        : "לא רלוונטי",
+    investmentTrackRewards:
+      normalizeTrackName(
+        row.investmentTrack ||
+          row["מסלול השקעה"]
+      ),
 
-      investmentTrackCompensation: config.hasCompensationTrack
-        ? getInvestmentTrackCompensation(sourceRow)
-        : "לא רלוונטי",
+    investmentTrackCompensation: null,
 
-      accumulation,
-      accumulationBucket: accumulationBucket(accumulation),
+    insuranceTrack: null,
 
-      depositFee: config.hasDepositFee
-        ? getDepositFee(sourceRow)
-        : null,
+    maritalStatus:
+      row.maritalStatus ||
+      row["מצב משפחתי"] ||
+      "",
 
-      accumulationFee: config.hasAccumulationFee
-        ? getAccumulationFee(sourceRow)
-        : null,
+    age: normalizeNumber(
+      row.age || row["גיל"]
+    ),
 
-      isExcludedFromFeeAudit: excluded,
+    gender:
+      row.gender || row["מין"] || "",
 
-      auditStatus: excluded ? "excluded" : "",
-      auditStatusHe: excluded ? "הוחרג" : "",
-      auditReason: excluded
-        ? "תפעול בלבד / ללא שיווק — הוחרג מבדיקת דמי ניהול"
-        : "",
+    childrenCount: normalizeNumber(
+      row.childrenCount ||
+        row["מספר ילדים"]
+    ),
 
-      raw: sourceRow,
-    };
-  });
+    auditStatus: null,
+    auditReason: null,
+    auditModel: null,
+  };
+}
+
+function normalizeTrackName(trackName) {
+  if (!trackName) {
+    return "ללא מסלול השקעה";
+  }
+
+  const cleaned = String(trackName).trim();
+
+  if (/^\d+$/.test(cleaned)) {
+    return "ללא מסלול השקעה";
+  }
+
+  return cleaned;
+}
+
+function normalizeNumber(value) {
+  if (
+    value === undefined ||
+    value === null ||
+    value === ""
+  ) {
+    return 0;
+  }
+
+  const normalized = String(value)
+    .replace(/,/g, "")
+    .replace(/%/g, "")
+    .trim();
+
+  const numberValue = Number(normalized);
+
+  return Number.isNaN(numberValue)
+    ? 0
+    : numberValue;
 }

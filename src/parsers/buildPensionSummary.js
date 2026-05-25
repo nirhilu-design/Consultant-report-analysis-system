@@ -5,41 +5,26 @@ import { buildBaseUnifiedRows } from "../unified/rawToUnifiedRows.js";
 import { evaluateUnifiedRows } from "../unified/auditEngine.js";
 import { buildPensionAnalytics } from "../unified/analyticsEngine.js";
 
-/**
- * Builds the pension dashboard summary from parsed source rows and agreement rows.
- *
- * Important architecture rule:
- * UI components should consume this summary only. They should not parse raw rows,
- * recalculate fee compliance, or rebuild analytics directly.
- */
-export function buildPensionSummary(
-  pensionRows = [],
-  agreements = [],
-  options = {}
-) {
-  const {
-    personalRows = [],
-    broker,
-    productType = PRODUCT_TYPES.PENSION,
-    issuerAliases = DEFAULT_ISSUER_ALIASES,
-  } = options || {};
+export function buildPensionSummary(pensionRows = [], agreements = [], options = {}) {
+  const productType = options.productType || PRODUCT_TYPES.PENSION;
 
-  const { optionsByIssuer } = normalizeAgreementOptions({
+  const agreementOptionsByIssuer = normalizeAgreementOptions({
     agreements,
-    issuerAliases,
+    aliases: options.aliases || DEFAULT_ISSUER_ALIASES,
+    productType,
   });
 
   const baseUnifiedRows = buildBaseUnifiedRows({
     rows: pensionRows,
-    personalRows,
-    broker,
+    aliases: options.aliases || DEFAULT_ISSUER_ALIASES,
     productType,
-    issuerAliases,
+    broker: options.broker,
+    batchId: options.batchId,
   });
 
   const unifiedRows = evaluateUnifiedRows({
     unifiedRows: baseUnifiedRows,
-    agreementOptionsByIssuer: optionsByIssuer,
+    agreementOptionsByIssuer,
     productType,
   });
 
@@ -48,12 +33,8 @@ export function buildPensionSummary(
   return {
     ...analytics,
     unifiedRows,
-    agreementOptionsByIssuer: optionsByIssuer,
-    sourceCounts: {
-      pensionRows: pensionRows.length,
-      agreements: agreements.length,
-      unifiedRows: unifiedRows.length,
-    },
+    agreementOptionsByIssuer,
+    noAgreementPolicies: unifiedRows.filter((row) => !row.agreementIssuerFound).length,
   };
 }
 

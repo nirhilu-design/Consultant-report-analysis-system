@@ -1,106 +1,65 @@
-// NEW FILE
-// Path: src/unified/issuerAliases.js
+const ISSUER_ALIASES = {
+  "הפניקס": "הפניקס",
+  "הפניקס חברה לביטוח": "הפניקס",
+  "פניקס": "הפניקס",
+  "הפינקס": "הפניקס",
 
-import { normalizeLooseText } from "./normalizers";
+  "הראל": "הראל",
+  "הראל ביטוח": "הראל",
 
-export const DEFAULT_ISSUER_ALIASES = {
-  "הפניקס": [
-    "הפניקס",
-    "פניקס",
-    "הפניקס חברה לביטוח",
-    "הפניקס פנסיה",
-    "הפניקס פנסיה וגמל",
-    "אקסלנס",
-    "אקסלנס הפניקס",
-  ],
+  "כלל": "כלל",
+  "כלל ביטוח": "כלל",
 
-  "הראל": [
-    "הראל",
-    "הראל פנסיה",
-    "הראל חברה לביטוח",
-  ],
+  "מגדל": "מגדל",
+  "מגדל חברה לביטוח": "מגדל",
 
-  "כלל": [
-    "כלל",
-    "כלל פנסיה",
-    "כלל פנסיה וגמל",
-  ],
+  "מנורה": "מנורה מבטחים",
+  "מנורה מבטחים": "מנורה מבטחים",
 
-  "מגדל": [
-    "מגדל",
-    "מגדל מקפת",
-    "מקפת",
-  ],
+  "מיטב": "מיטב",
+  "מיטב דש": "מיטב",
 
-  "מנורה מבטחים": [
-    "מנורה",
-    "מבטחים",
-    "מנורה מבטחים",
-  ],
+  "מור": "מור",
 
-  "מיטב": [
-    "מיטב",
-    "מיטב דש",
-  ],
+  "אלטשולר": "אלטשולר שחם",
+  "אלטשולר שחם": "אלטשולר שחם",
 
-  "אלטשולר שחם": [
-    "אלטשולר",
-    "אלטשולר שחם",
-  ],
+  "ילין": "ילין לפידות",
+  "ילין לפידות": "ילין לפידות",
 
-  "מור": [
-    "מור",
-    "מור גמל",
-    "מור גמל ופנסיה",
-  ],
+  "אנליסט": "אנליסט",
 
-  "ילין לפידות": [
-    "ילין",
-    "ילין לפידות",
-  ],
-
-  "אנליסט": [
-    "אנליסט",
-  ],
-
-  "איילון": [
-    "איילון",
-  ],
+  "איילון": "איילון",
 };
 
-export function buildIssuerAliasLookup(customAliases = {}) {
-  const merged = {
-    ...DEFAULT_ISSUER_ALIASES,
-    ...customAliases,
-  };
+export function normalizeIssuerName(rawIssuer) {
+  if (!rawIssuer) {
+    return "יצרן לא מוכר";
+  }
 
-  const lookup = {};
+  const cleaned = preprocessIssuerText(rawIssuer);
 
-  Object.entries(merged).forEach(([canonical, aliases]) => {
-    [canonical, ...(aliases || [])].forEach((alias) => {
-      const clean = normalizeLooseText(alias);
-
-      if (clean) {
-        lookup[clean] = canonical;
-      }
-    });
-  });
-
-  return lookup;
+  return (
+    ISSUER_ALIASES[cleaned] ||
+    `יצרן לא מוכר - ${rawIssuer}`
+  );
 }
 
-export function canonicalIssuer(value, lookup) {
-  const clean = normalizeLooseText(value);
+export function preprocessIssuerText(text) {
+  return String(text || "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .replace(/["']/g, "")
+    .replace(/[.,]/g, "")
+    .replace(/־/g, "-");
+}
 
-  if (!clean) return "יצרן לא צוין";
+export function isUnknownIssuer(issuerName) {
+  return String(issuerName || "").startsWith(
+    "יצרן לא מוכר"
+  );
+}
 
-  if (lookup[clean]) return lookup[clean];
-
-  const fuzzy = Object.entries(lookup).find(([alias]) => {
-    return alias && clean.includes(alias);
-  });
-
-  if (fuzzy) return fuzzy[1];
-
-  return `יצרן לא מוכר - ${clean}`;
+export function getAllCanonicalIssuers() {
+  return [...new Set(Object.values(ISSUER_ALIASES))];
 }

@@ -1,135 +1,130 @@
-export function auditUnifiedRows({
-  unifiedRows = [],
-  agreements = [],
+import {
+  createAgreementRow,
+  PRODUCT_TYPES,
+  AUDIT_MODELS,
+} from "./unifiedSchema.js";
+
+import {
+  normalizeIssuerName,
+} from "./issuerAliases.js";
+
+export function normalizeAgreementRows({
+  rows = [],
+  productType = PRODUCT_TYPES.PENSION,
+  brokerId = "",
+  brokerName = "",
+  batchId = "",
 }) {
-  return unifiedRows.map((row) => {
-    const issuer = row.issuerCanonical;
-
-    const issuerAgreements = agreements.filter(
-      (agreement) =>
-        agreement.issuerCanonical === issuer &&
-        agreement.productType === row.productType
-    );
-
-    if (!issuerAgreements.length) {
-      return applyBaselineAudit(row);
-    }
-
-    const matchedAgreement = findMatchingAgreement(
+  return rows.map((row) =>
+    normalizeAgreementRow({
       row,
-      issuerAgreements
-    );
+      productType,
+      brokerId,
+      brokerName,
+      batchId,
+    })
+  );
+}
 
-    if (matchedAgreement) {
-      return {
-        ...row,
-        auditStatus: "VALID",
-        auditReason: matchedAgreement.reason,
-        auditModel: matchedAgreement.model,
-      };
-    }
+function normalizeAgreementRow({
+  row,
+  productType,
+  brokerId,
+  brokerName,
+  batchId,
+}) {
+  const issuerOriginal =
+    row.issuer ||
+    row.company ||
+    row.יצרן ||
+    "";
 
-    return {
-      ...row,
-      auditStatus: "INVALID",
-      auditReason: "Fees exceed approved agreement",
-      auditModel: "NONE",
-    };
+  return createAgreementRow({
+    brokerId,
+    brokerName,
+    batchId,
+
+    productType,
+
+    issuerOriginal,
+
+    issuerCanonical:
+      normalizeIssuerName(
+        issuerOriginal
+      ),
+
+    modelName: normalizeModelName(
+      row.modelName ||
+        row.model ||
+        row["מודל"]
+    ),
+
+    minAccumulation:
+      normalizeNumber(
+        row.minAccumulation ||
+          row["צבירה מינימלית"]
+      ),
+
+    accumulationFee:
+      normalizeNumber(
+        row.accumulationFee ||
+          row["דמי ניהול מצבירה"]
+      ),
+
+    depositFee:
+      productType ===
+      PRODUCT_TYPES.HISHTALMUT
+        ? null
+        : normalizeNumber(
+            row.depositFee ||
+              row["דמי ניהול מהפקדה"]
+          ),
+
+    raw: row,
   });
 }
 
-function findMatchingAgreement(row, agreements) {
-  const accumulationFee = Number(
-    row.accumulationFee || 0
-  );
+function normalizeModelName(modelName) {
+  const value = String(
+    modelName || ""
+  ).trim();
 
-  const depositFee = Number(
-    row.depositFee || 0
-  );
-
-  const accumulation = Number(
-    row.accumulation || 0
-  );
-
-  for (const agreement of agreements) {
-    const agreementAccumulationFee = Number(
-      agreement.accumulationFee || 0
-    );
-
-    const agreementDepositFee = Number(
-      agreement.depositFee || 0
-    );
-
-    const minAccumulation = Number(
-      agreement.minAccumulation || 0
-    );
-
-    const supportsTier =
-      accumulation >= minAccumulation;
-
-    const accumulationPass =
-      accumulationFee <= agreementAccumulationFee;
-
-    const depositPass =
-      row.productType === "hishtalmut"
-        ? true
-        : depositFee <= agreementDepositFee;
-
-    if (
-      accumulationPass &&
-      depositPass &&
-      supportsTier
-    ) {
-      return {
-        model:
-          minAccumulation > 0
-            ? "TIER_MODEL"
-            : agreement.modelName || "STANDARD_MODEL",
-
-        reason:
-          accumulationFee <
-          agreementAccumulationFee
-            ? "Valid via accumulation fee rule"
-            : "Valid via agreement",
-      };
-    }
+  if (!value) {
+    return AUDIT_MODELS.STANDARD_MODEL;
   }
 
-  return null;
+  if (/מודל א/i.test(value)) {
+    return AUDIT_MODELS.MODEL_A;
+  }
+
+  if (/מודל ב/i.test(value)) {
+    return AUDIT_MODELS.MODEL_B;
+  }
+
+  if (/tier/i.test(value)) {
+    return AUDIT_MODELS.TIER_MODEL;
+  }
+
+  return value;
 }
 
-function applyBaselineAudit(row) {
-  const accumulationFee = Number(
-    row.accumulationFee || 0
-  );
-
-  const depositFee = Number(
-    row.depositFee || 0
-  );
-
-  const accumulationPass =
-    accumulationFee <= 0.2;
-
-  const depositPass =
-    row.productType === "hishtalmut"
-      ? true
-      : depositFee <= 1;
-
-  if (accumulationPass && depositPass) {
-    return {
-      ...row,
-      auditStatus: "VALID_BASELINE",
-      auditReason:
-        "Valid via baseline rule",
-      auditModel: "BASELINE",
-    };
+function normalizeNumber(value) {
+  if (
+    value === undefined ||
+    value === null ||
+    value === ""
+  ) {
+    return 0;
   }
 
-  return {
-    ...row,
-    auditStatus: "INVALID",
-    auditReason:
-      "Failed baseline validation",
-    auditModel: "BASELINE",
-  };
+  const normalized = String(value)
+    .replace(/,/g, "")
+    .replace(/%/g, "")
+    .trim();
+
+  const parsed = Number(normalized);
+
+  return Number.isNaN(parsed)
+    ? 0
+    : parsed;
 }

@@ -1,4 +1,76 @@
+// Path: src/parsers/pensionFundParser.js
+// ─────────────────────────────────────────────────────────────────────────────
+// PENSION FUND PARSER — קריאה ונרמול קובץ פנסיה מדוח מנהל הסדר
+//
+// תיקונים לעומת הגרסה הקודמת:
+//   1. מיפוי עמודות לפי INDEX קבוע — לא לפי שם (כי יש כפל שם "סטטוס")
+//   2. סטטוס בדיקת ד.נ = col 44 (לא col 24 שהוא סטטוס פוליסה בלבד)
+//   3. סה"כ ערכי פידיון = col 45 (מספר לשורות תקינות, טקסט לתפעול)
+//   4. דמי ניהול: הקובץ שומר דצימלי (0.015) — ממירים ל-% (1.5)
+//   5. זיהוי "תפעול בלבד" לפי col 44 בלבד — מדויק ואמין
+// ─────────────────────────────────────────────────────────────────────────────
+
 import * as XLSX from "xlsx";
+
+// ─── Column index map (verified against real file 2025-10) ───────────────────
+// אם מנהל ההסדר ישנה את מבנה הקובץ — מעדכנים רק כאן.
+const COL = {
+  employeeCode:             0,  // קוד מזהה של העובד
+  idNumber:                 1,  // ת"ז
+  firstName:                2,  // שם פרטי
+  lastName:                 3,  // שם משפחה
+  marketingStatus:          4,  // סטטוס שיווקי
+  agencyCode:               5,  // קוד מזהה של הסוכנות
+  arrangementManager:       6,  // שם מנהל הסדר
+  policyIdCode:             7,  // קוד מזהה פוליסה
+  policyNumber:             8,  // מספר פוליסה
+  employerGroupId:          9,  // קוד מזהה קבוצת מעסיק
+  employerSpecificId:      10,  // קוד מזהה מעסיק ספציפי
+  issuer:                  11,  // קרן פנסיה (שם יצרן)
+  planType:                12,  // סוג תוכנית פנסיה
+  fundName:                13,  // שם קרן הפנסיה
+  joinDate:                14,  // תאריך הצטרפות
+  insuranceStartDate:      15,  // ת.ת.ביטוח
+  compensationPct:         16,  // אחוז פיצויים
+  employerRewardsPct:      17,  // אחוז תגמולי מעסיק
+  employerDisabilityPct:   18,  // אחוז אכ"ע מעסיק
+  employerMiscPct:         19,  // אחוז שונות מעסיק
+  employeeRewardsPct:      20,  // אחוז תגמולי עובד
+  employeeRewards47Pct:    21,  // אחוז תגמולי עובד (47)
+  employeeMiscPct:         22,  // אחוז שונות עובד
+  totalDepositPct:         23,  // סה"כ אחוזי הפקדה
+  policyStatus:            24,  // סטטוס פוליסה (פעיל / לא פעיל) — לא תוצאת בדיקה!
+  investmentTrackCodeR:    25,  // קוד מסלול השקעה - תגמולים
+  investmentTrackNameR:    26,  // שם מסלול השקעה - תגמולים
+  investmentTrackCodeC:    27,  // קוד מסלול השקעה - פיצויים
+  investmentTrackNameC:    28,  // שם מסלול השקעה - פיצויים
+  insuranceTrack:          29,  // מסלול ביטוח בקרן הפנסיה
+  pensionSalary:           30,  // שכר קובע לקרן פנסיה
+  disabilityPensionRate:   31,  // שיעור פנסיית נכות
+  disabilityNote:          32,  // הערות שיעור פנסיית נכות
+  survivorPensionRate:     33,  // שיעור פנסיית שארים מירבית
+  survivorNote:            34,  // הערות שיעור פנסיית שארים
+  disabilityAmountILS:     35,  // סכום בשקלים פנסיית נכות
+  survivorAmountILS:       36,  // סכום בשקלים פנסיית שארים מירבית
+  insuranceEndDate:        37,  // תום תקופת הביטוח בנכות
+  survivorWaiver:          38,  // וויתור על פנסיית שארים
+  depositFee:              39,  // דמי ניהול מפרמיה באחוזים   (דצימלי: 0.015 = 1.5%)
+  accumulationFee:         40,  // דמי ניהול מצבירה באחוזים  (דצימלי: 0.0012 = 0.12%)
+  compensationRedemption:  41,  // ערך פידיון פיצויים
+  depositFeeAgreement:     42,  // דמי ניהול מפרמיה באחוזים בהסכם
+  accumulationFeeAgreement:43,  // דמי ניהול מצבירה באחוזים בהסכם
+  auditStatus:             44,  // סטטוס (תוצאת בדיקה: תקין / לא תקין / תפעול בלבד)
+  totalAccumulation:       45,  // סה"כ ערכי פידיון (מספר לשורות רגילות, טקסט לתפעול)
+  salaryAgency:            46,  // שכר נתוני סוכנות
+  salaryClearinghouse:     47,  // שכר נתוני מסלקה
+  isArrangementAgent:      48,  // האם מנהל ההסדר סוכן בפוליסה
+  disabilityEndAge:        49,  // גיל תום תקופה לאכ"ע
+  policyStatusSource:      50,  // סטטוס פוליסה (מקור)
+  policyStatusClearinghouse:51, // סטטוס פוליסה מסלקה
+  validityMonth:           52,  // חודש נכונות
+};
+
+// ─── Normalizers ──────────────────────────────────────────────────────────────
 
 function normalizeText(value) {
   return String(value ?? "")
@@ -8,17 +80,8 @@ function normalizeText(value) {
 }
 
 function normalizeNumber(value) {
-  if (
-    value === null ||
-    value === undefined ||
-    value === ""
-  ) {
-    return null;
-  }
-
-  if (typeof value === "number") {
-    return value;
-  }
+  if (value === null || value === undefined || value === "") return null;
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
 
   const cleaned = String(value)
     .replace(/,/g, "")
@@ -26,360 +89,157 @@ function normalizeNumber(value) {
     .replace(/[^\d.-]/g, "");
 
   const parsed = Number(cleaned);
-
-  return Number.isFinite(parsed)
-    ? parsed
-    : null;
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
-function rowToText(row) {
-  return row.map(normalizeText).join(" ");
+// דמי ניהול — הקובץ שומר דצימלי (0.015).
+// מחזירים כאחוז (1.5) לעקביות עם כל המערכת.
+// כלל: אם |value| < 0.1 ו-value ≠ 0 → דצימלי → כפול 100
+function normalizeFeePercent(value) {
+  const num = normalizeNumber(value);
+  if (num === null) return null;
+  if (Math.abs(num) > 20) return null;           // ודאי לא דמי ניהול
+  if (num !== 0 && Math.abs(num) < 0.1) {
+    return Number((num * 100).toFixed(4));        // 0.015 → 1.5
+  }
+  return Number(num.toFixed(4));                 // כבר באחוזים
 }
 
-function sheetLooksLikePension(sheetName) {
-  return /פנסיה|מקיפה|משלימה|קרן/.test(
-    normalizeText(sheetName)
+function normalizeDate(value) {
+  if (!value) return null;
+  if (value instanceof Date) return value.toISOString().split("T")[0];
+  return normalizeText(value) || null;
+}
+
+// ─── Row helpers ──────────────────────────────────────────────────────────────
+
+function isDataRow(row) {
+  // שורה תקפה: חייבת קוד עובד + שם יצרן
+  const code = row[COL.employeeCode];
+  const issuer = row[COL.issuer];
+  return (
+    code !== null &&
+    code !== undefined &&
+    code !== "" &&
+    issuer !== null &&
+    issuer !== undefined &&
+    normalizeText(String(issuer)) !== ""
   );
 }
 
-function findHeaderIndex(rows) {
-  const maxRowsToScan = Math.min(
-    rows.length,
-    35
-  );
-
-  let bestIndex = 0;
-  let bestScore = -1;
-
-  for (
-    let i = 0;
-    i < maxRowsToScan;
-    i += 1
-  ) {
-    const text = rowToText(rows[i]);
-
-    let score = 0;
-
-    if (/שם.*עובד|עובד|ת\.?ז|זהות/.test(text)) score += 1;
-    if (/יצרן|חברה|גוף|מנהל|שם.*קרן|שם.*קופה/.test(text)) score += 3;
-    if (/מוצר|סוג.*מוצר|שם.*מוצר|תוכנית|תכנית|קרן|קופה/.test(text)) score += 2;
-    if (/פנסיה|מקיפה|משלימה/.test(text)) score += 2;
-    if (/דמי.*ניהול|ד\.?נ|צבירה|הפקדה|מצבירה|מהפקדה/.test(text)) score += 3;
-    if (/מסלול|שארים|ויתור/.test(text)) score += 1;
-
-    if (score > bestScore) {
-      bestScore = score;
-      bestIndex = i;
-    }
-  }
-
-  return bestIndex;
+// col 44 הוא מקור האמת לזיהוי תפעול בלבד
+function isOperationOnly(row) {
+  return normalizeText(row[COL.auditStatus]).includes("תפעול");
 }
 
-function makeObjects(rows, headerIndex) {
-  const headers = rows[headerIndex].map(
-    (header, index) => {
-      const cleanHeader =
-        normalizeText(header);
-
-      return cleanHeader || `עמודה_${index}`;
-    }
-  );
-
-  return rows
-    .slice(headerIndex + 1)
-    .map((row) => {
-      const obj = {};
-
-      headers.forEach((header, index) => {
-        obj[header] = row[index];
-      });
-
-      obj.__raw = row;
-      obj.__headers = headers;
-      obj.__text = rowToText(row);
-
-      return obj;
-    });
+function getEmployeeCode(row) {
+  const raw = row[COL.employeeCode];
+  if (raw === null || raw === undefined) return "";
+  return String(typeof raw === "number" ? Math.round(raw) : raw).trim();
 }
 
-function getByHeader(row, patterns) {
-  const entry = Object.entries(row).find(
-    ([header, value]) =>
-      patterns.some((pattern) =>
-        pattern.test(
-          normalizeText(header)
-        )
-      ) &&
-      normalizeText(value)
-  );
-
-  return entry ? entry[1] : "";
+// col 45 = סה"כ ערכי פידיון.
+// לשורות תפעול הערך הוא הטקסט "תפעול בלבד" — מחזירים null.
+function getTotalAccumulation(row) {
+  const raw = row[COL.totalAccumulation];
+  if (raw === null || raw === undefined) return null;
+  if (typeof raw === "string") return null;      // טקסט = תפעול בלבד
+  return normalizeNumber(raw);
 }
 
-function cleanManagerName(value) {
-  const text = normalizeText(value)
-    .replace(/^קרן\s+/g, "")
-    .replace(/^חברת\s+/g, "")
-    .replace(/^חברה\s+מנהלת\s*/g, "")
-    .replace(/בע"מ/g, "")
-    .replace(/בעמ/g, "")
-    .replace(/\s+-\s+.*$/g, "")
-    .trim();
+// ─── Main parser ──────────────────────────────────────────────────────────────
 
-  return text;
-}
-
-function detectOriginalManager(row) {
-  const directValue = getByHeader(row, [
-    /^יצרן$/,
-    /שם.*יצרן/,
-    /יצרן.*פנסיה/,
-    /חברה.*מנהלת/,
-    /^חברה$/,
-    /שם.*חברה/,
-    /גוף.*מנהל/,
-    /שם.*גוף/,
-    /שם.*קרן/,
-    /קרן.*פנסיה/,
-    /קופה/,
-  ]);
-
-  if (normalizeText(directValue)) {
-    return cleanManagerName(directValue);
-  }
-
-  const text = normalizeText(row.__text);
-
-  const knownMatch = [
-    "הפניקס",
-    "פניקס",
-    "הראל",
-    "כלל",
-    "מקפת",
-    "מגדל",
-    "מבטחים",
-    "מנורה",
-    "מיטב",
-    "אלטשולר",
-    "מור",
-    "אינפיניטי",
-    "ילין",
-    "אנליסט",
-    "איילון",
-    "הכשרה",
-    "פסגות",
-  ].find((name) => text.includes(name));
-
-  return knownMatch || "לא מזוהה";
-}
-
-function detectProductType(row, sheetName) {
-  const text = normalizeText(
-    `${sheetName} ${row.__text}`
-  );
-
-  if (/משלימה|כללית/.test(text)) {
-    return "משלימה";
-  }
-
-  if (/מקיפה/.test(text)) {
-    return "מקיפה";
-  }
-
-  return "קרן פנסיה";
-}
-
-function detectInsuranceWaiver(row) {
-  const waiverValue = getByHeader(row, [
-    /ויתור.*שארים/,
-    /שארים/,
-    /מסלול.*ביטוח/,
-    /כיסוי.*שארים/,
-  ]);
-
-  const text = normalizeText(
-    `${waiverValue} ${row.__text}`
-  );
-
-  if (
-    /ויתור.*מלא|קיים.*ויתור.*מלא|ויתור.*שארים.*מלא/.test(
-      text
-    )
-  ) {
-    return "קיים ויתור מלא";
-  }
-
-  if (
-    /בת זוג בלבד|בן זוג בלבד|ויתור.*בת זוג|ויתור.*בן זוג/.test(
-      text
-    )
-  ) {
-    return "ויתור על בת זוג בלבד";
-  }
-
-  if (
-    /לא קיים.*ויתור|אין.*ויתור|ללא.*ויתור/.test(
-      text
-    )
-  ) {
-    return "לא קיים ויתור שארים";
-  }
-
-  return "חסר נתון";
-}
-
-function detectAccumulation(row) {
-  const direct = getByHeader(row, [
-    /^סה.*כ.*ערכי.*פידיון$/,
-    /^סה.*כ.*ערכי.*פדיון$/,
-    /^ערך.*פדיון.*כולל$/,
-    /^צבירה$/,
-    /^יתרה$/,
-  ]);
-
-  return normalizeNumber(direct);
-}
-
-function detectDepositFee(row) {
-  return normalizeNumber(
-    getByHeader(row, [
-      /דמי.*ניהול.*מפרמיה/,
-      /דמי.*ניהול.*פרמיה/,
-      /דמי.*ניהול.*הפקדה/,
-      /ד\.?נ.*הפקדה/,
-      /מהפקדה/,
-    ])
-  );
-}
-
-function detectAccumulationFee(row) {
-  return normalizeNumber(
-    getByHeader(row, [
-      /דמי.*ניהול.*צבירה/,
-      /ד\.?נ.*צבירה/,
-      /מצבירה/,
-    ])
-  );
-}
-
-function detectTrack(row) {
-  const namedTrack = getByHeader(row, [
-    /שם.*מסלול.*תגמולים/,
-    /שם.*מסלול.*פיצויים/,
-    /שם.*מסלול/,
-    /מסלול.*השקעה(?!.*קוד)/,
-    /אפיק/,
-  ]);
-
-  return normalizeText(namedTrack);
-}
-
-function hasRealData(row) {
-  const text = normalizeText(row.__text);
-
-  if (!text) return false;
-
-  const nonEmptyCells = row.__raw.filter(
-    (cell) => normalizeText(cell)
-  ).length;
-
-  return nonEmptyCells >= 3;
-}
-
-function rowLooksLikePension(row, sheetName) {
-  if (sheetLooksLikePension(sheetName)) {
-    return hasRealData(row);
-  }
-
-  const text = normalizeText(row.__text);
-
-  return /פנסיה|מקיפה|משלימה|קרן פנסיה/.test(text);
-}
-
-export function parsePensionFund(
-  workbook
-) {
+export function parsePensionFund(workbook) {
   if (!workbook) return [];
 
   const allRows = [];
 
-  workbook.SheetNames.forEach(
-    (sheetName) => {
-      const sheet =
-        workbook.Sheets[sheetName];
+  workbook.SheetNames.forEach((sheetName) => {
+    // מעבדים רק גיליון שמכיל "פנסיה" בשמו — מדלגים על גיליון הסיכום
+    if (!normalizeText(sheetName).includes("פנסיה")) return;
 
-      const rows =
-        XLSX.utils.sheet_to_json(
-          sheet,
-          {
-            header: 1,
-            defval: "",
-          }
-        );
+    const sheet = workbook.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json(sheet, {
+      header: 1,
+      defval: null,
+      raw: true,
+    });
 
-      if (!rows.length) return;
+    if (rows.length < 2) return;
 
-      const headerIndex =
-        findHeaderIndex(rows);
+    // שורה 0 = כותרות, שורה 1+ = נתונים
+    rows.slice(1).forEach((row, idx) => {
+      if (!isDataRow(row)) return;
 
-      const objects = makeObjects(
-        rows,
-        headerIndex
-      );
+      const operationOnly = isOperationOnly(row);
 
-      objects
-        .filter((row) =>
-          rowLooksLikePension(
-            row,
-            sheetName
-          )
-        )
-        .forEach((row) => {
-          const originalManager =
-            detectOriginalManager(row);
+      allRows.push({
+        // ── זיהוי ──────────────────────────────────────────────────────
+        sheetName,
+        sourceRowIndex:  idx + 2,              // שורה ב-Excel (1-based + header)
+        employeeCode:    getEmployeeCode(row),
 
-          allRows.push({
-            sheetName,
+        // ── יצרן ────────────────────────────────────────────────────────
+        issuerOriginal:  normalizeText(row[COL.issuer]),
+        manager:         normalizeText(row[COL.issuer]), // alias לתאימות לאחור
 
-            manager: originalManager,
+        // ── מוצר ────────────────────────────────────────────────────────
+        policyNumber:    normalizeText(row[COL.policyNumber]),
+        fundName:        normalizeText(row[COL.fundName]),
+        planType:        normalizeText(row[COL.planType]),
 
-            originalManager,
+        // ── סטטוסים ─────────────────────────────────────────────────────
+        marketingStatus: normalizeText(row[COL.marketingStatus]),
+        policyStatus:    normalizeText(row[COL.policyStatus]),   // col 24
+        auditStatus:     normalizeText(row[COL.auditStatus]),    // col 44
+        isOperationOnly: operationOnly,
 
-            productType:
-              detectProductType(
-                row,
-                sheetName
-              ),
+        // ── מסלולים ─────────────────────────────────────────────────────
+        investmentTrackRewards:      normalizeText(row[COL.investmentTrackNameR]),
+        investmentTrackCompensation: normalizeText(row[COL.investmentTrackNameC]),
+        insuranceTrack:              normalizeText(row[COL.insuranceTrack]),
+        survivorWaiver:              normalizeText(row[COL.survivorWaiver]),
 
-            insuranceWaiver:
-              detectInsuranceWaiver(row),
+        // ── דמי ניהול בפועל (דצימלי → אחוז) ───────────────────────────
+        depositFee:      normalizeFeePercent(row[COL.depositFee]),
+        accumulationFee: normalizeFeePercent(row[COL.accumulationFee]),
 
-            accumulation:
-              detectAccumulation(row),
+        // ── דמי ניהול בהסכם (כפי שמנהל ההסדר רשם) ─────────────────────
+        depositFeeAgreement:      normalizeFeePercent(row[COL.depositFeeAgreement]),
+        accumulationFeeAgreement: normalizeFeePercent(row[COL.accumulationFeeAgreement]),
 
-            depositFee:
-              detectDepositFee(row),
+        // ── כספים ───────────────────────────────────────────────────────
+        accumulation:  getTotalAccumulation(row),  // col 45 — null לתפעול
+        pensionSalary: normalizeNumber(row[COL.pensionSalary]),
 
-            accumulationFee:
-              detectAccumulationFee(row),
+        // ── מידע מעסיק ──────────────────────────────────────────────────
+        arrangementManager: normalizeText(row[COL.arrangementManager]),
+        employerGroupId:    normalizeText(row[COL.employerGroupId]),
+        joinDate:           normalizeDate(row[COL.joinDate]),
+        validityMonth:      normalizeText(row[COL.validityMonth]),
 
-            track:
-              detectTrack(row),
+        // ── raw — לצורך debugging בלבד ──────────────────────────────────
+        raw: row,
+      });
+    });
+  });
 
-            raw: row,
-          });
-        });
-    }
-  );
-
-  console.log(
-    "parsePensionFund result:",
-    {
-      rows: allRows.length,
-      sample: allRows.slice(0, 5),
-    }
-  );
+  console.log("parsePensionFund:", {
+    total:         allRows.length,
+    operationOnly: allRows.filter((r) => r.isOperationOnly).length,
+    withFees:      allRows.filter((r) => r.depositFee !== null || r.accumulationFee !== null).length,
+    withAccum:     allRows.filter((r) => r.accumulation !== null).length,
+    sampleFees:    allRows
+      .filter((r) => r.depositFee !== null)
+      .slice(0, 3)
+      .map((r) => ({
+        emp: r.employeeCode,
+        issuer: r.issuerOriginal,
+        depositFee: r.depositFee + "%",
+        accumulationFee: r.accumulationFee + "%",
+        accumulation: r.accumulation,
+      })),
+  });
 
   return allRows;
 }

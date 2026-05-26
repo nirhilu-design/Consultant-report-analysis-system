@@ -16,6 +16,23 @@ import { buildPensionAnalytics }     from "../unified/analyticsEngine.js";
 import { DEFAULT_ISSUER_ALIASES }    from "../unified/issuerAliases.js";
 import { PRODUCT_TYPES }             from "../unified/unifiedSchema.js";
 
+function isPresent(value) {
+  return value !== null && value !== undefined && value !== "";
+}
+
+function hasAnyAgreement(row) {
+  return Boolean(
+    row.agreementIssuerFound ||
+    row.auditMatchRuleType === "INLINE_AGREEMENT" ||
+    row.auditMatchResult === "MATCH_INLINE_AGREEMENT" ||
+    row.auditMatchResult === "FAIL_INLINE_AGREEMENT" ||
+    isPresent(row.depositFeeAgreement) ||
+    isPresent(row.accumulationFeeAgreement) ||
+    isPresent(row.auditReferenceDepositFee) ||
+    isPresent(row.auditReferenceAccumulationFee)
+  );
+}
+
 export function buildPensionSummary(
   pensionRows = [],
   agreements = [],
@@ -54,6 +71,8 @@ export function buildPensionSummary(
   // שלב 4: analytics
   const analytics = buildPensionAnalytics(unifiedRows);
 
+  const auditedRows = unifiedRows.filter((r) => r.auditStatus !== "excluded");
+
   return {
     ...analytics,
 
@@ -67,13 +86,12 @@ export function buildPensionSummary(
     // סיכום עליון
     summary: {
       total: unifiedRows.length,
+      audited: auditedRows.length,
       valid: unifiedRows.filter((r) => r.auditStatus === "valid").length,
       invalid: unifiedRows.filter((r) => r.auditStatus === "invalid").length,
       excluded: unifiedRows.filter((r) => r.auditStatus === "excluded").length,
       tierPotential: unifiedRows.filter((r) => r.tierPotentialNotUsed).length,
-      noAgreement: unifiedRows.filter(
-        (r) => !r.agreementIssuerFound && r.auditStatus !== "excluded"
-      ).length,
+      noAgreement: auditedRows.filter((r) => !hasAnyAgreement(r)).length,
     },
   };
 }

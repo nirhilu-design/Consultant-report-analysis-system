@@ -59,7 +59,9 @@ export default function UploadPanel({ files, setFiles, onStart }) {
       </button>
 
       {!canStart && (
-        <p className="hint">יש להעלות דוח נתונים ודוח הסכמים לפני התחלת ניתוח.</p>
+        <p className="hint">
+          יש להעלות דוח נתונים ודוח הסכמים לפני התחלת ניתוח.
+        </p>
       )}
 
       {canStart && !files.personalDetailsFile && (

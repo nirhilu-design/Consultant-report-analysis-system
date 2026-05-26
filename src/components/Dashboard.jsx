@@ -158,11 +158,9 @@ function ManagementFeesTab({ audit }) {
                     ? "row-success"
                     : row.key === "total"
                       ? "row-total"
-                      : row.key === "tier"
+                      : row.key === "tier" || row.key === "noAgreement"
                         ? "row-warning"
-                        : row.key === "noAgreement"
-                          ? "row-warning"
-                          : ""
+                        : ""
               }
             >
               <td className="col-label">{row.label}</td>
@@ -226,33 +224,159 @@ function MatrixTab({ matrix, rowLabel }) {
 
 // ─── Investment Track Tab ─────────────────────────────────────────────────────
 
-function InvestmentTrackTab({ rewardsMatrix, compensationMatrix }) {
+function InvestmentTrackTab({
+  rewardsMatrix,
+  compensationMatrix,
+  comparison,
+}) {
   const [subTab, setSubTab] = useState("תגמולים");
+  const [showDetails, setShowDetails] = useState(false);
+
+  const data =
+    subTab === "תגמולים"
+      ? rewardsMatrix || []
+      : compensationMatrix || [];
+
+  const rowLabel =
+    subTab === "תגמולים"
+      ? "מסלול השקעה תגמולים"
+      : "מסלול השקעה פיצויים";
+
+  if (!data.length) return <EmptyState text="אין נתוני מסלולי השקעה" />;
 
   return (
     <div>
+      {comparison && (
+        <div className="kpi-grid" style={{ marginBottom: 18 }}>
+          <div className="kpi-card card-blue">
+            <span className="kpi-label">סה״כ עובדים שנבדקו</span>
+            <strong className="kpi-value">
+              {fmtNumber(comparison.totalEmployees)}
+            </strong>
+          </div>
+
+          <div className="kpi-card card-green">
+            <span className="kpi-label">תגמולים ופיצויים זהים</span>
+            <strong className="kpi-value">
+              {fmtNumber(comparison.sameCount)}
+            </strong>
+          </div>
+
+          <div className="kpi-card card-warning">
+            <span className="kpi-label">תגמולים ופיצויים שונים</span>
+            <strong className="kpi-value">
+              {fmtNumber(comparison.differentCount)}
+            </strong>
+          </div>
+
+          <div className="kpi-card card-neutral">
+            <span className="kpi-label">חסר מסלול פיצויים</span>
+            <strong className="kpi-value">
+              {fmtNumber(comparison.missingCompensationCount)}
+            </strong>
+          </div>
+        </div>
+      )}
+
       <div className="sub-tabs">
         {["תגמולים", "פיצויים"].map((t) => (
           <button
             key={t}
             className={`sub-tab-btn ${subTab === t ? "active" : ""}`}
-            onClick={() => setSubTab(t)}
+            onClick={() => {
+              setSubTab(t);
+              setShowDetails(false);
+            }}
           >
             {t}
           </button>
         ))}
+
+        {comparison?.details?.length > 0 && (
+          <button
+            className={`sub-tab-btn ${showDetails ? "active" : ""}`}
+            onClick={() => setShowDetails(!showDetails)}
+          >
+            השוואת עובדים
+          </button>
+        )}
       </div>
 
-      {subTab === "תגמולים" ? (
-        <MatrixTab
-          matrix={rewardsMatrix}
-          rowLabel="מסלול השקעה תגמולים"
-        />
+      {!showDetails ? (
+        <div className="table-wrap">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th className="col-label">{rowLabel}</th>
+                <th>כמות עובדים</th>
+                <th>כמות פוליסות</th>
+                <th>סך צבירה</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {data.map((row) => (
+                <tr key={row[rowLabel]}>
+                  <td className="col-label col-label-wrap">
+                    {row[rowLabel]}
+                  </td>
+                  <td>{fmtNumber(row["כמות עובדים"])}</td>
+                  <td>{fmtNumber(row["כמות פוליסות"])}</td>
+                  <td>{fmtMoney(row["סך צבירה"])}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       ) : (
-        <MatrixTab
-          matrix={compensationMatrix}
-          rowLabel="מסלול השקעה פיצויים"
-        />
+        <div className="table-wrap">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>קוד עובד</th>
+                <th>שם</th>
+                <th>מסלולי תגמולים</th>
+                <th>מסלולי פיצויים</th>
+                <th>סטטוס</th>
+                <th>כמות פוליסות</th>
+                <th>סך צבירה</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {comparison.details.map((row, index) => (
+                <tr
+                  key={`${row.employeeCode || row.clientName || "row"}-${index}`}
+                  className={
+                    row.status === "different"
+                      ? "row-warning"
+                      : row.status === "same"
+                        ? "row-success"
+                        : "row-muted"
+                  }
+                >
+                  <td>{row.employeeCode || "—"}</td>
+                  <td>{row.clientName || "—"}</td>
+                  <td className="col-track">{row.rewardsTracks}</td>
+                  <td className="col-track">{row.compensationTracks}</td>
+                  <td>
+                    {row.status === "same"
+                      ? "זהה"
+                      : row.status === "different"
+                        ? "שונה"
+                        : row.status === "missingCompensation"
+                          ? "חסר פיצויים"
+                          : row.status === "missingRewards"
+                            ? "חסר תגמולים"
+                            : "חסר מסלולים"}
+                  </td>
+                  <td>{fmtNumber(row.policies)}</td>
+                  <td>{fmtMoney(row.accumulation)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );
@@ -344,7 +468,7 @@ function ActionCenterTab({ items }) {
 
           <tbody>
             {items.map((item, i) => (
-              <FragmentRow
+              <ActionCenterRow
                 key={`${item.employeeCode || "row"}-${i}`}
                 item={item}
                 index={i}
@@ -359,7 +483,7 @@ function ActionCenterTab({ items }) {
   );
 }
 
-function FragmentRow({ item, index, selected, setSelected }) {
+function ActionCenterRow({ item, index, selected, setSelected }) {
   return (
     <>
       <tr
@@ -485,6 +609,7 @@ function UnifiedPreviewTab({ rows }) {
               <th>מאושר</th>
               <th>צבירה</th>
               <th>מסלול תגמולים</th>
+              <th>מסלול פיצויים</th>
               <th>גיל</th>
               <th>משפחתי</th>
               <th>סטטוס</th>
@@ -514,6 +639,9 @@ function UnifiedPreviewTab({ rows }) {
                 </td>
                 <td>{r.accumulation ? fmtMoney(r.accumulation) : "—"}</td>
                 <td className="col-track">{r.investmentTrackRewards || "—"}</td>
+                <td className="col-track">
+                  {r.investmentTrackCompensation || "—"}
+                </td>
                 <td>{r.personal_age ?? r.age ?? "—"}</td>
                 <td>{r.personal_maritalStatus || r.maritalStatus || "—"}</td>
                 <td>
@@ -556,6 +684,8 @@ function QaTraceTab({ rows }) {
         r.auditMatchResult,
         r.auditReason,
         r.issueCategory,
+        r.investmentTrackRewards,
+        r.investmentTrackCompensation,
       ]
         .filter(Boolean)
         .join(" ");
@@ -634,6 +764,8 @@ function QaTraceTab({ rows }) {
               <th>סטטוס</th>
               <th>מסלול החלטה</th>
               <th>תוצאה</th>
+              <th>תגמולים</th>
+              <th>פיצויים</th>
               <th>ד.נ הפקדה</th>
               <th>מאושר</th>
               <th>ד.נ צבירה</th>
@@ -672,6 +804,10 @@ function QaTraceTab({ rows }) {
                 </td>
                 <td>{safeText(r.auditMatchRuleType)}</td>
                 <td>{safeText(r.auditMatchResult)}</td>
+                <td className="col-track">{safeText(r.investmentTrackRewards)}</td>
+                <td className="col-track">
+                  {safeText(r.investmentTrackCompensation)}
+                </td>
                 <td>{fmtFee(r.depositFee)}</td>
                 <td className="col-approved">
                   {fmtFee(r.auditReferenceDepositFee ?? r.depositFeeAgreement)}
@@ -726,6 +862,7 @@ export default function Dashboard({ analysisData }) {
     insuranceTrackMarital,
     investmentTrackRewardsMarital,
     investmentTrackCompensationMarital,
+    investmentTrackComparison,
     accumulationTierAnalysis,
     actionCenter,
     unifiedRows,
@@ -757,6 +894,7 @@ export default function Dashboard({ analysisData }) {
           <InvestmentTrackTab
             rewardsMatrix={investmentTrackRewardsMarital}
             compensationMatrix={investmentTrackCompensationMarital}
+            comparison={investmentTrackComparison}
           />
         );
 

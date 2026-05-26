@@ -6,12 +6,12 @@ import {
   PRODUCT_TYPES,
   getProductConfig,
   createEmptyUnifiedRow,
-} from "./unifiedSchema";
+} from "./unifiedSchema.js";
 
 import {
   buildIssuerAliasLookup,
   canonicalIssuer,
-} from "./issuerAliases";
+} from "./issuerAliases.js";
 
 import {
   normalizeText,
@@ -23,7 +23,7 @@ import {
   firstNonEmpty,
   ageBucket,
   accumulationBucket,
-} from "./normalizers";
+} from "./normalizers.js";
 
 function getClientId(row) {
   const raw = getRaw(row);
@@ -182,19 +182,25 @@ function getInvestmentTrackCompensation(row) {
 function getAccumulation(row) {
   const raw = getRaw(row);
 
+  // Prefer the original redemption/accumulation columns from the consultant report.
+  // Earlier versions preferred row.accumulation, but the parser could accidentally
+  // populate it from a fee column because headers contain the word "צבירה".
+  const explicitAccumulation = getByKeys(raw, [
+    'סה"כ ערכי פידיון',
+    "סה״כ ערכי פידיון",
+    "סהכ ערכי פידיון",
+    "סך הכל ערכי פידיון",
+    "ערך פדיון כולל",
+    "ערך פדיון כולל ",
+    "ערך פדיון כולל ",
+    "צבירה",
+    "יתרה",
+  ]);
+
   return normalizeNumber(
     firstNonEmpty(
-      row.accumulation,
-      getByKeys(raw, [
-        "סה\"כ ערכי פידיון",
-        "סה״כ ערכי פידיון",
-        "ערך פדיון כולל",
-        "ערך פדיון כולל ",
-        "ערך פדיון כולל ",
-        "סהכ ערכי פידיון",
-        "צבירה",
-        "יתרה",
-      ])
+      explicitAccumulation,
+      row.accumulation
     )
   );
 }
@@ -313,9 +319,10 @@ export function buildBaseUnifiedRows({
   broker = DEFAULT_BROKER,
   productType = PRODUCT_TYPES.PENSION,
   issuerAliases = {},
+  aliases = null,
 } = {}) {
   const config = getProductConfig(productType);
-  const aliasLookup = buildIssuerAliasLookup(issuerAliases);
+  const aliasLookup = buildIssuerAliasLookup(aliases || issuerAliases);
   const personalMap = personalByClientId(personalRows);
 
   return rows.map((sourceRow, index) => {
@@ -326,10 +333,12 @@ export function buildBaseUnifiedRows({
     const issuerCanonical = canonicalIssuer(issuerOriginal, aliasLookup);
 
     const serviceStatus = getServiceStatus(sourceRow);
+    const raw = getRaw(sourceRow);
+    const sourceAuditStatus = normalizeText(getByKeys(raw, ["סטטוס", "סטטוס2"]));
 
     const excluded =
       config.excludeOperationOnlyFromFeeAudit &&
-      isOperationOnly(serviceStatus);
+      (isOperationOnly(serviceStatus) || isOperationOnly(sourceAuditStatus));
 
     const accumulation = getAccumulation(sourceRow);
 
@@ -349,6 +358,7 @@ export function buildBaseUnifiedRows({
       clientName: getClientName(sourceRow),
 
       serviceStatus,
+      sourceAuditStatus,
       age: personal.age,
       ageBucket: ageBucket(personal.age),
       maritalStatus: personal.maritalStatus,

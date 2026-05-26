@@ -1,29 +1,67 @@
-import React from "react";
-import { buildDrilldownKey } from "../unified/analyticsEngine.js";
+import React from "react";import React from "react";
+import {
+  buildDrilldownKey,
+} from "../unified/analyticsEngine.js";
+
+import "./managementFeesDrilldown.css";
+
+const LABEL_TO_STATUS_KEY = {
+  "תקין לפי מודל א": "MODEL_A",
+  "תקין לפי מודל ב": "MODEL_B",
+  "תקין לפי מודל צבירות גבוהות / מדרגה": "TIER",
+  "תקין לפי מצבירה מאושרת": "ACCUMULATION_FEE_ONLY",
+  "תקין לפי צבירה מאושרת": "ACCUMULATION_FEE_ONLY",
+  "תקין לפי כלל בסיס ללא הסדר": "BASELINE",
+  "ד.נ תקולים": "INVALID",
+  "חריג / לא תקין": "INVALID",
+  "הוחרגו - תפעול בלבד / חסר מידע": "EXCLUDED",
+};
 
 export default function ManagementFeesAuditDrilldown({
-  managementFeesAudit = [],
+  audit,
+  managementFeesAudit,
   managementFeesAuditDrilldown = {},
 }) {
   const [selectedCell, setSelectedCell] = React.useState(null);
 
-  const issuers = React.useMemo(() => {
-    const issuerSet = new Set();
+  const normalizedAudit = React.useMemo(() => {
+    if (audit?.issuers && audit?.rows) {
+      return audit;
+    }
 
-    managementFeesAudit.forEach((row) => {
-      Object.keys(row).forEach((key) => {
-        if (
-          key !== "key" &&
-          key !== "label" &&
-          key !== "total"
-        ) {
-          issuerSet.add(key);
-        }
+    if (managementFeesAudit?.issuers && managementFeesAudit?.rows) {
+      return managementFeesAudit;
+    }
+
+    if (Array.isArray(managementFeesAudit)) {
+      const issuers = new Set();
+
+      managementFeesAudit.forEach((row) => {
+        Object.keys(row).forEach((key) => {
+          if (
+            key !== "key" &&
+            key !== "label" &&
+            key !== "total"
+          ) {
+            issuers.add(key);
+          }
+        });
       });
-    });
 
-    return Array.from(issuerSet);
-  }, [managementFeesAudit]);
+      return {
+        issuers: Array.from(issuers),
+        rows: managementFeesAudit,
+      };
+    }
+
+    return {
+      issuers: [],
+      rows: [],
+    };
+  }, [audit, managementFeesAudit]);
+
+  const issuers = normalizedAudit.issuers || [];
+  const rows = normalizedAudit.rows || [];
 
   const selectedRows = React.useMemo(() => {
     if (!selectedCell) return [];
@@ -38,12 +76,18 @@ export default function ManagementFeesAuditDrilldown({
     );
   }, [selectedCell, managementFeesAuditDrilldown]);
 
-  function openDrilldown(statusKey, statusLabel, issuer, value) {
+  function openDrilldown(row, issuer, value) {
     if (!value || Number(value) === 0) return;
+
+    const statusKey =
+      row.key ||
+      LABEL_TO_STATUS_KEY[row.label];
+
+    if (!statusKey) return;
 
     setSelectedCell({
       statusKey,
-      statusLabel,
+      statusLabel: row.label,
       issuer,
       value,
     });
@@ -53,61 +97,77 @@ export default function ManagementFeesAuditDrilldown({
     setSelectedCell(null);
   }
 
+  if (!issuers.length || !rows.length) {
+    return (
+      <div className="emptyState">
+        <p>אין נתוני בקרת דמי ניהול להצגה</p>
+      </div>
+    );
+  }
+
   return (
     <section className="management-fees-audit-section">
       <div className="table-shell">
-        <table className="management-fees-audit-table">
+        <table className="management-fees-audit-table analysisTable">
           <thead>
             <tr>
               <th>מדד</th>
               {issuers.map((issuer) => (
                 <th key={issuer}>{issuer}</th>
               ))}
-              <th>סה״כ</th>
             </tr>
           </thead>
 
           <tbody>
-            {managementFeesAudit.map((row) => (
-              <tr key={row.key}>
-                <td className="row-label">{row.label}</td>
+            {rows.map((row) => (
+              <tr
+                key={row.key || row.label}
+                className={
+                  row.label?.includes("תקולים")
+                    ? "dangerRow"
+                    : row.label?.includes("תקין")
+                      ? "successRow"
+                      : row.label?.includes("סה״כ")
+                        ? "totalRow"
+                        : ""
+                }
+              >
+                <td className="rowTitle">{row.label}</td>
 
                 {issuers.map((issuer) => {
                   const value = row[issuer] || 0;
+                  const isPercent = row.label?.includes("אחוז");
+                  const canDrill =
+                    !isPercent &&
+                    !row.label?.includes("סה״כ") &&
+                    Number(value) > 0;
 
                   return (
-                    <td key={`${row.key}-${issuer}`}>
+                    <td key={`${row.key || row.label}-${issuer}`}>
                       <button
                         type="button"
                         className={
-                          value
+                          canDrill
                             ? "drilldown-cell active"
                             : "drilldown-cell"
                         }
                         onClick={() =>
-                          openDrilldown(
-                            row.key,
-                            row.label,
-                            issuer,
-                            value
-                          )
+                          openDrilldown(row, issuer, value)
                         }
-                        disabled={!value}
+                        disabled={!canDrill}
                         title={
-                          value
+                          canDrill
                             ? "לחץ לצפייה בפירוט"
                             : ""
                         }
                       >
-                        {value}
+                        {isPercent
+                          ? `${(Number(value || 0) * 100).toFixed(1)}%`
+                          : Number(value || 0).toLocaleString("he-IL")}
                       </button>
                     </td>
                   );
                 })}
-
-                <td className="total-cell">
-                  {row.total || 0}
-                </td>
               </tr>
             ))}
           </tbody>
@@ -148,9 +208,9 @@ export default function ManagementFeesAuditDrilldown({
                     <th>ת.ז</th>
                     <th>פוליסה</th>
                     <th>צבירה</th>
-                    <th>דמי ניהול מצבירה</th>
+                    <th>ד.נ מצבירה</th>
                     <th>מאושר מצבירה</th>
-                    <th>דמי ניהול מהפקדה</th>
+                    <th>ד.נ מהפקדה</th>
                     <th>מאושר מהפקדה</th>
                     <th>מודל</th>
                     <th>סיבת בקרה</th>
@@ -159,8 +219,8 @@ export default function ManagementFeesAuditDrilldown({
 
                 <tbody>
                   {selectedRows.map((row, index) => (
-                    <tr key={`${row.policyNumber}-${index}`}>
-                      <td>{row.fullName || "-"}</td>
+                    <tr key={`${row.auditRowId || row.policyNumber || row.clientId}-${index}`}>
+                      <td>{row.fullName || row.clientId || "-"}</td>
                       <td>{row.clientId || "-"}</td>
                       <td>{row.policyNumber || "-"}</td>
                       <td>{formatCurrency(row.accumulation)}</td>
@@ -168,7 +228,7 @@ export default function ManagementFeesAuditDrilldown({
                       <td>{formatPercent(row.approvedAccumulationFee)}</td>
                       <td>{formatPercent(row.actualDepositFee)}</td>
                       <td>{formatPercent(row.approvedDepositFee)}</td>
-                      <td>{formatModel(row.auditModel || row.matchedModel)}</td>
+                      <td>{row.matchedModel || row.auditModel || "-"}</td>
                       <td>
                         <div className="audit-reason">
                           <strong>{row.auditReason || "-"}</strong>
@@ -227,18 +287,5 @@ function formatPercent(value) {
     return "-";
   }
 
-  return `${numberValue}%`;
-}
-
-function formatModel(model) {
-  const map = {
-    MODEL_A: "מודל א",
-    MODEL_B: "מודל ב",
-    TIER_MODEL: "צבירות גבוהות",
-    BASELINE: "כלל בסיס",
-    APPROVED_ACCUMULATION: "צבירה מאושרת",
-    STANDARD_MODEL: "מודל הסכם",
-  };
-
-  return map[model] || model || "-";
+  return `${numberValue.toFixed(2)}%`;
 }

@@ -8,6 +8,10 @@ import { parsePensionFund } from "./parsers/pensionFundParser.js";
 import { parseAgreements } from "./parsers/agreementsParser.js";
 import { parsePersonalDetails } from "./parsers/personalDetailsParser.js";
 import { buildPensionSummary } from "./parsers/buildPensionSummary.js";
+import {
+  mergePersonalDetailsIntoPensionRows,
+  buildPersonalDetailsMerge,
+} from "./parsers/personalDetailsMergeEngine.js";
 
 import "./styles.css";
 
@@ -59,7 +63,7 @@ export default function App() {
       // Parsing
       // =========================
 
-      const pensionRows = parsePensionFund(dataWorkbook);
+      const rawPensionRows = parsePensionFund(dataWorkbook);
 
       const agreements = parseAgreements(
         agreementsWorkbook
@@ -67,6 +71,22 @@ export default function App() {
 
       const personalDetails = parsePersonalDetails(
         personalDetailsWorkbook
+      );
+
+      // =========================
+      // Personal Details Merge
+      // =========================
+
+      const personalDetailsMergeResult = mergePersonalDetailsIntoPensionRows(
+        rawPensionRows,
+        personalDetails
+      );
+
+      const pensionRows = personalDetailsMergeResult.pensionRows;
+
+      const personalDetailsMerge = buildPersonalDetailsMerge(
+        personalDetails,
+        rawPensionRows
       );
 
       // =========================
@@ -84,8 +104,10 @@ export default function App() {
 
       setAnalysisData({
         pensionRows,
+        rawPensionRows,
         agreements,
         personalDetails,
+        personalDetailsMerge,
         pensionSummary,
       });
 

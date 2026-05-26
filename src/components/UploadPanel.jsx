@@ -46,12 +46,26 @@ export default function UploadPanel({ files, setFiles, onStart }) {
         }
       />
 
+      <DropUpload
+        title="קובץ פרטים אישיים"
+        file={files.personalDetailsFile}
+        onFile={(file) =>
+          setFiles((prev) => ({ ...prev, personalDetailsFile: file }))
+        }
+      />
+
       <button className="primaryButton" disabled={!canStart} onClick={onStart}>
         התחל ניתוח
       </button>
 
       {!canStart && (
         <p className="hint">יש להעלות דוח נתונים ודוח הסכמים לפני התחלת ניתוח.</p>
+      )}
+
+      {canStart && !files.personalDetailsFile && (
+        <p className="hint">
+          קובץ פרטים אישיים הוא אופציונלי בשלב זה, אך מומלץ להעלות אותו כדי לאפשר העשרת נתוני לקוח בהמשך.
+        </p>
       )}
     </section>
   );

@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import ManagementFeesAuditDrilldown from "./ManagementFeesAuditDrilldown.jsx";
 
 const sheets = [
   "קרן פנסיה",
@@ -432,7 +433,12 @@ export default function Dashboard({
                   </div>
                 </div>
 
-                <ManagementFeesAuditTable audit={pensionSummary.managementAudit} />
+                <ManagementFeesAuditDrilldown
+                  audit={pensionSummary.managementAudit}
+                  managementFeesAuditDrilldown={
+                    pensionSummary.managementFeesAuditDrilldown
+                  }
+                />
               </div>
             )}
 

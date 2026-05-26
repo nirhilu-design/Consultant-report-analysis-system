@@ -6,6 +6,7 @@ import Dashboard from "./components/Dashboard.jsx";
 
 import { parsePensionFund } from "./parsers/pensionFundParser.js";
 import { parseAgreements } from "./parsers/agreementsParser.js";
+import { parsePersonalDetails } from "./parsers/personalDetailsParser.js";
 import { buildPensionSummary } from "./parsers/buildPensionSummary.js";
 
 import "./styles.css";
@@ -35,6 +36,7 @@ export default function App() {
   const [files, setFiles] = useState({
     dataFile: null,
     agreementsFile: null,
+    personalDetailsFile: null,
   });
 
   async function handleStartAnalysis() {
@@ -49,6 +51,10 @@ export default function App() {
         files.agreementsFile
       );
 
+      const personalDetailsWorkbook = await readWorkbook(
+        files.personalDetailsFile
+      );
+
       // =========================
       // Parsing
       // =========================
@@ -57,6 +63,10 @@ export default function App() {
 
       const agreements = parseAgreements(
         agreementsWorkbook
+      );
+
+      const personalDetails = parsePersonalDetails(
+        personalDetailsWorkbook
       );
 
       // =========================
@@ -75,6 +85,7 @@ export default function App() {
       setAnalysisData({
         pensionRows,
         agreements,
+        personalDetails,
         pensionSummary,
       });
 
@@ -105,7 +116,7 @@ export default function App() {
               </h1>
 
               <p>
-                העלה דוח נתונים ודוח הסכמים,
+                העלה דוח נתונים, דוח הסכמים וקובץ פרטים אישיים אופציונלי,
                 ולאחר מכן הפעל ניתוח.
               </p>
             </div>

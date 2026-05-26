@@ -8,6 +8,8 @@ function normalizeComparable(value) {
   return normalizeText(value)
     .replace(/[״"]/g, "")
     .replace(/[׳']/g, "")
+    .replace(/-/g, "")
+    .replace(/\s+/g, "")
     .toLowerCase();
 }
 
@@ -27,12 +29,47 @@ function getValueByAliases(row, aliases) {
   return "";
 }
 
+function findValueByKeyContains(row, keywords) {
+  if (!row || !Array.isArray(keywords)) return "";
+
+  const entries = Object.entries(row);
+
+  for (const [key, value] of entries) {
+    if (value === undefined || value === null || normalizeText(value) === "") {
+      continue;
+    }
+
+    const normalizedKey = normalizeComparable(key);
+
+    const hasAllKeywords = keywords.every((keyword) =>
+      normalizedKey.includes(normalizeComparable(keyword))
+    );
+
+    if (hasAllKeywords) {
+      return value;
+    }
+  }
+
+  return "";
+}
+
 const PENSION_EMPLOYEE_CODE_ALIASES = [
   "קוד מזהה של העובד",
+  "קוד מזהה עובד",
   "קוד עובד",
   "מספר עובד",
+  "clientId",
+  "clientID",
+  "clientCode",
+  "customerId",
+  "customerID",
+  "customerCode",
+  "memberId",
+  "memberID",
+  "memberCode",
   "employeeCode",
   "employeeId",
+  "employeeID",
   "workerCode",
   "memberEmployeeCode",
 ];
@@ -90,10 +127,30 @@ const PENSION_DEPOSIT_ALIASES = [
   "deposit",
 ];
 
+function getPensionEmployeeCodeRaw(row) {
+  const directValue = getValueByAliases(row, PENSION_EMPLOYEE_CODE_ALIASES);
+  if (directValue) return directValue;
+
+  const hebrewCodeValue =
+    findValueByKeyContains(row, ["קוד", "עובד"]) ||
+    findValueByKeyContains(row, ["מזהה", "עובד"]) ||
+    findValueByKeyContains(row, ["קוד", "מזהה"]);
+
+  if (hebrewCodeValue) return hebrewCodeValue;
+
+  const englishCodeValue =
+    findValueByKeyContains(row, ["employee", "code"]) ||
+    findValueByKeyContains(row, ["employee", "id"]) ||
+    findValueByKeyContains(row, ["client", "id"]) ||
+    findValueByKeyContains(row, ["client", "code"]) ||
+    findValueByKeyContains(row, ["member", "id"]) ||
+    findValueByKeyContains(row, ["member", "code"]);
+
+  return englishCodeValue || "";
+}
+
 function getPensionEmployeeCode(row) {
-  return normalizeComparable(
-    getValueByAliases(row, PENSION_EMPLOYEE_CODE_ALIASES)
-  );
+  return normalizeComparable(getPensionEmployeeCodeRaw(row));
 }
 
 function getProfileEmployeeCode(profile) {
@@ -122,7 +179,7 @@ function toNumber(value) {
 function summarizePensionRow(row) {
   return {
     auditRowId: row.auditRowId || row.rowId || row.id || "",
-    employeeCode: getValueByAliases(row, PENSION_EMPLOYEE_CODE_ALIASES),
+    employeeCode: getPensionEmployeeCodeRaw(row),
     clientName: getValueByAliases(row, PENSION_NAME_ALIASES),
     issuer:
       row.issuerCanonical ||
@@ -157,11 +214,15 @@ function summarizePensionRow(row) {
 
 function buildPersonalProfileIndexes(clientProfiles) {
   const byEmployeeCode = new Map();
+  const profilesWithoutEmployeeCode = [];
 
   for (const profile of clientProfiles || []) {
     const employeeCode = getProfileEmployeeCode(profile);
 
-    if (!employeeCode) continue;
+    if (!employeeCode) {
+      profilesWithoutEmployeeCode.push(profile);
+      continue;
+    }
 
     if (!byEmployeeCode.has(employeeCode)) {
       byEmployeeCode.set(employeeCode, []);
@@ -172,6 +233,7 @@ function buildPersonalProfileIndexes(clientProfiles) {
 
   return {
     byEmployeeCode,
+    profilesWithoutEmployeeCode,
   };
 }
 
@@ -226,9 +288,12 @@ function buildEmployeeTotals(pensionRows) {
 function buildUnifiedEmployeeRow(employeeCode, pensionRows, profiles) {
   const personalProfile = choosePersonalProfile(profiles);
   const totals = buildEmployeeTotals(pensionRows);
+  const pensionEmployeeCodeRaw = getPensionEmployeeCodeRaw(pensionRows[0]);
 
   return {
     employeeCode,
+    employeeCodeRaw: pensionEmployeeCodeRaw,
+
     match: {
       matchedPersonalProfile: Boolean(personalProfile),
       personalProfileCount: Array.isArray(profiles) ? profiles.length : 0,
@@ -241,6 +306,7 @@ function buildUnifiedEmployeeRow(employeeCode, pensionRows, profiles) {
 
     identity: {
       employeeCode,
+      employeeCodeRaw: pensionEmployeeCodeRaw,
       idNumber: personalProfile?.idNumber || "",
       firstName: personalProfile?.firstName || "",
       lastName: personalProfile?.lastName || "",
@@ -293,11 +359,26 @@ function buildUnifiedEmployeeRow(employeeCode, pensionRows, profiles) {
   };
 }
 
+function buildDebugSamples({
+  personalProfilesByEmployeeCode,
+  pensionRowsByEmployeeCode,
+  rowsWithoutEmployeeCode,
+  profilesWithoutEmployeeCode,
+}) {
+  return {
+    pensionEmployeeCodeSamples: [...pensionRowsByEmployeeCode.keys()].slice(0, 10),
+    personalEmployeeCodeSamples: [...personalProfilesByEmployeeCode.keys()].slice(0, 10),
+    pensionRowsWithoutEmployeeCodeSamples: rowsWithoutEmployeeCode.slice(0, 3),
+    profilesWithoutEmployeeCodeSamples: profilesWithoutEmployeeCode.slice(0, 3),
+  };
+}
+
 function buildMetadata({
   unifiedEmployees,
   personalProfilesByEmployeeCode,
   pensionRowsByEmployeeCode,
   rowsWithoutEmployeeCode,
+  profilesWithoutEmployeeCode,
 }) {
   const employeesWithPersonalProfile = unifiedEmployees.filter(
     (employee) => employee.match.matchedPersonalProfile
@@ -310,6 +391,10 @@ function buildMetadata({
     (employeeCode) => !pensionEmployeeCodes.has(employeeCode)
   );
 
+  const pensionWithoutPersonalProfile = [...pensionEmployeeCodes].filter(
+    (employeeCode) => !personalEmployeeCodes.has(employeeCode)
+  );
+
   return {
     employeeCount: unifiedEmployees.length,
     employeesWithPersonalProfile: employeesWithPersonalProfile.length,
@@ -320,7 +405,9 @@ function buildMetadata({
     personalEmployeeCodeCount: personalEmployeeCodes.size,
 
     pensionRowsWithoutEmployeeCode: rowsWithoutEmployeeCode.length,
+    personalProfilesWithoutEmployeeCode: profilesWithoutEmployeeCode.length,
     personalProfilesWithoutPensionRows: personalWithoutPensionRows.length,
+    pensionEmployeesWithoutPersonalProfile: pensionWithoutPersonalProfile.length,
 
     matchRate:
       unifiedEmployees.length > 0
@@ -332,6 +419,7 @@ function buildMetadata({
         : 0,
 
     personalWithoutPensionEmployeeCodes: personalWithoutPensionRows,
+    pensionWithoutPersonalEmployeeCodes: pensionWithoutPersonalProfile,
   };
 }
 
@@ -342,8 +430,10 @@ export function buildUnifiedEmployeeData(pensionRows, personalDetails) {
     ? personalDetails.clientProfiles
     : [];
 
-  const { byEmployeeCode: personalProfilesByEmployeeCode } =
-    buildPersonalProfileIndexes(clientProfiles);
+  const {
+    byEmployeeCode: personalProfilesByEmployeeCode,
+    profilesWithoutEmployeeCode,
+  } = buildPersonalProfileIndexes(clientProfiles);
 
   const {
     byEmployeeCode: pensionRowsByEmployeeCode,
@@ -365,16 +455,25 @@ export function buildUnifiedEmployeeData(pensionRows, personalDetails) {
       )
     );
 
+  const metadata = buildMetadata({
+    unifiedEmployees,
+    personalProfilesByEmployeeCode,
+    pensionRowsByEmployeeCode,
+    rowsWithoutEmployeeCode,
+    profilesWithoutEmployeeCode,
+  });
+
   return {
     source: "unifiedEmployeeData",
     joinKey: "employeeCode",
     rows: unifiedEmployees,
     employees: unifiedEmployees,
-    metadata: buildMetadata({
-      unifiedEmployees,
+    metadata,
+    debug: buildDebugSamples({
       personalProfilesByEmployeeCode,
       pensionRowsByEmployeeCode,
       rowsWithoutEmployeeCode,
+      profilesWithoutEmployeeCode,
     }),
   };
 }
@@ -392,7 +491,7 @@ export function enrichPensionRowsFromUnifiedEmployees(pensionRows, unifiedEmploy
 
     return {
       ...row,
-      employeeCode: getValueByAliases(row, PENSION_EMPLOYEE_CODE_ALIASES),
+      employeeCode: getPensionEmployeeCodeRaw(row),
       unifiedEmployee: employee,
       clientProfile: employee?.personal || null,
       personalProfileMatch: {

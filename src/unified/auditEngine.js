@@ -6,9 +6,9 @@ import {
   AUDIT_STATUS,
   AUDIT_STATUS_HE,
   ISSUE_CATEGORY,
-} from "./unifiedSchema";
+} from "./unifiedSchema.js";
 
-import { isEligibleOption } from "./agreementEngine";
+import { isEligibleOption } from "./agreementEngine.js";
 
 function optionMatchesFull(row, option, config) {
   const checks = [];
@@ -98,6 +98,7 @@ function evaluateRow(row, options, config) {
 
   // Rule 1: full match against any approved model.
   const fullMatch = options.find((option) =>
+    isEligibleOption(option, row.accumulation) &&
     optionMatchesFull(row, option, config)
   );
 

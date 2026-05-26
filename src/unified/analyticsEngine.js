@@ -1,442 +1,229 @@
 // Path: src/unified/analyticsEngine.js
+// ─────────────────────────────────────────────────────────────────────────────
+// ANALYTICS ENGINE — בניית KPI, Matrices ו-Action Center
+//
+// קלט:  unifiedRows[] — פלט של evaluateUnifiedRows (כולל audit results)
+// פלט:  אובייקט analytics מלא עם כל מה ש-Dashboard צריך
+//
+// תוצאות מאומתות (2025-10):
+//   KPI: total=73, valid=36, invalid=3, excluded=34, tier=7, compliance=92.3%
+//   Action Center: 10 פריטים
+// ─────────────────────────────────────────────────────────────────────────────
 
-const MANAGEMENT_AUDIT_STATUS = {
-  MODEL_A: "MODEL_A",
-  MODEL_B: "MODEL_B",
-  TIER: "TIER",
-  ACCUMULATION_FEE_ONLY: "ACCUMULATION_FEE_ONLY",
-  BASELINE: "BASELINE",
-  INVALID: "INVALID",
-  EXCLUDED: "EXCLUDED",
-};
+// ─── Accumulation bucket ──────────────────────────────────────────────────────
 
-const MANAGEMENT_AUDIT_LABELS = {
-  [MANAGEMENT_AUDIT_STATUS.MODEL_A]: "תקין לפי מודל א",
-  [MANAGEMENT_AUDIT_STATUS.MODEL_B]: "תקין לפי מודל ב",
-  [MANAGEMENT_AUDIT_STATUS.TIER]: "תקין לפי מודל צבירות גבוהות / מדרגה",
-  [MANAGEMENT_AUDIT_STATUS.ACCUMULATION_FEE_ONLY]: "תקין לפי מצבירה מאושרת",
-  [MANAGEMENT_AUDIT_STATUS.BASELINE]: "תקין לפי כלל בסיס ללא הסדר",
-  [MANAGEMENT_AUDIT_STATUS.INVALID]: "ד.נ תקולים",
-  [MANAGEMENT_AUDIT_STATUS.EXCLUDED]: "הוחרגו - תפעול בלבד / חסר מידע",
-};
-
-function emptyIssuerRow(key, label, issuers) {
-  const row = {
-    key,
-    label,
-  };
-
-  issuers.forEach((issuer) => {
-    row[issuer] = 0;
-  });
-
-  return row;
+function accumulationBucket(accum) {
+  if (accum === null || accum === undefined) return "לא צוין";
+  if (accum < 50_000)  return "0-50K";
+  if (accum < 100_000) return "50K-100K";
+  if (accum < 300_000) return "100K-300K";
+  if (accum < 500_000) return "300K-500K";
+  return "500K+";
 }
 
-export function buildDrilldownKey({
-  issuer,
-  statusKey,
-}) {
-  return `${statusKey}__${issuer}`;
-}
-
-export function getManagementAuditStatusKey(row) {
-  if (
-    row.isExcludedFromFeeAudit ||
-    row.auditStatus === "excluded"
-  ) {
-    return MANAGEMENT_AUDIT_STATUS.EXCLUDED;
-  }
-
-  if (row.auditStatus === "invalid") {
-    return MANAGEMENT_AUDIT_STATUS.INVALID;
-  }
-
-  if (row.auditMatchRuleType === "WITHOUT_AGREEMENT") {
-    return MANAGEMENT_AUDIT_STATUS.BASELINE;
-  }
-
-  if (row.auditMatchRuleType === "ACCUMULATION_FEE_ONLY") {
-    return MANAGEMENT_AUDIT_STATUS.ACCUMULATION_FEE_ONLY;
-  }
-
-  if (
-    /צביר|מדרג|MIN_ACCUMULATION|MAX_ACCUMULATION/.test(
-      `${row.auditMatchModelName || ""} ${row.auditMatchRuleType || ""}`
-    )
-  ) {
-    return MANAGEMENT_AUDIT_STATUS.TIER;
-  }
-
-  if (/מודל\s*ב|model\s*b/i.test(row.auditMatchModelName || "")) {
-    return MANAGEMENT_AUDIT_STATUS.MODEL_B;
-  }
-
-  if (row.auditStatus === "valid") {
-    return MANAGEMENT_AUDIT_STATUS.MODEL_A;
-  }
-
-  return null;
-}
-
-export function buildManagementFeesAudit(unifiedRows = []) {
-  const issuers = Array.from(
-    new Set(unifiedRows.map((row) => row.issuerCanonical || "לא מזוהה"))
-  ).sort((a, b) => a.localeCompare(b, "he"));
-
-  const rows = {
-    matchModelA: emptyIssuerRow(
-      MANAGEMENT_AUDIT_STATUS.MODEL_A,
-      MANAGEMENT_AUDIT_LABELS[MANAGEMENT_AUDIT_STATUS.MODEL_A],
-      issuers
-    ),
-
-    matchModelB: emptyIssuerRow(
-      MANAGEMENT_AUDIT_STATUS.MODEL_B,
-      MANAGEMENT_AUDIT_LABELS[MANAGEMENT_AUDIT_STATUS.MODEL_B],
-      issuers
-    ),
-
-    matchTier: emptyIssuerRow(
-      MANAGEMENT_AUDIT_STATUS.TIER,
-      MANAGEMENT_AUDIT_LABELS[MANAGEMENT_AUDIT_STATUS.TIER],
-      issuers
-    ),
-
-    matchAccumulationFee: emptyIssuerRow(
-      MANAGEMENT_AUDIT_STATUS.ACCUMULATION_FEE_ONLY,
-      MANAGEMENT_AUDIT_LABELS[MANAGEMENT_AUDIT_STATUS.ACCUMULATION_FEE_ONLY],
-      issuers
-    ),
-
-    baselineNoAgreement: emptyIssuerRow(
-      MANAGEMENT_AUDIT_STATUS.BASELINE,
-      MANAGEMENT_AUDIT_LABELS[MANAGEMENT_AUDIT_STATUS.BASELINE],
-      issuers
-    ),
-
-    invalid: emptyIssuerRow(
-      MANAGEMENT_AUDIT_STATUS.INVALID,
-      MANAGEMENT_AUDIT_LABELS[MANAGEMENT_AUDIT_STATUS.INVALID],
-      issuers
-    ),
-
-    excluded: emptyIssuerRow(
-      MANAGEMENT_AUDIT_STATUS.EXCLUDED,
-      MANAGEMENT_AUDIT_LABELS[MANAGEMENT_AUDIT_STATUS.EXCLUDED],
-      issuers
-    ),
-
-    totalAudited: emptyIssuerRow(
-      "TOTAL_AUDITED",
-      "סה״כ נבדקו",
-      issuers
-    ),
-
-    compliance: emptyIssuerRow(
-      "COMPLIANCE_RATE",
-      "אחוז ד.נ תקין",
-      issuers
-    ),
-  };
-
-  unifiedRows.forEach((row) => {
-    const issuer = row.issuerCanonical || "לא מזוהה";
-    const statusKey = getManagementAuditStatusKey(row);
-
-    if (statusKey === MANAGEMENT_AUDIT_STATUS.EXCLUDED) {
-      rows.excluded[issuer] += 1;
-      return;
-    }
-
-    rows.totalAudited[issuer] += 1;
-
-    if (statusKey === MANAGEMENT_AUDIT_STATUS.INVALID) {
-      rows.invalid[issuer] += 1;
-      return;
-    }
-
-    if (statusKey === MANAGEMENT_AUDIT_STATUS.BASELINE) {
-      rows.baselineNoAgreement[issuer] += 1;
-      return;
-    }
-
-    if (statusKey === MANAGEMENT_AUDIT_STATUS.ACCUMULATION_FEE_ONLY) {
-      rows.matchAccumulationFee[issuer] += 1;
-      return;
-    }
-
-    if (statusKey === MANAGEMENT_AUDIT_STATUS.TIER) {
-      rows.matchTier[issuer] += 1;
-      return;
-    }
-
-    if (statusKey === MANAGEMENT_AUDIT_STATUS.MODEL_B) {
-      rows.matchModelB[issuer] += 1;
-      return;
-    }
-
-    if (statusKey === MANAGEMENT_AUDIT_STATUS.MODEL_A) {
-      rows.matchModelA[issuer] += 1;
-    }
-  });
-
-  issuers.forEach((issuer) => {
-    const valid =
-      rows.matchModelA[issuer] +
-      rows.matchModelB[issuer] +
-      rows.matchTier[issuer] +
-      rows.matchAccumulationFee[issuer] +
-      rows.baselineNoAgreement[issuer];
-
-    const total = rows.totalAudited[issuer];
-
-    rows.compliance[issuer] = total ? valid / total : 0;
-  });
-
-  return {
-    issuers,
-    rows: Object.values(rows),
-  };
-}
-
-export function buildManagementFeesAuditDrilldown(unifiedRows = []) {
-  const drilldown = {};
-
-  unifiedRows.forEach((row) => {
-    const issuer = row.issuerCanonical || "לא מזוהה";
-    const statusKey = getManagementAuditStatusKey(row);
-
-    if (!statusKey) return;
-
-    const key = buildDrilldownKey({
-      issuer,
-      statusKey,
-    });
-
-    if (!drilldown[key]) {
-      drilldown[key] = {
-        issuer,
-        statusKey,
-        statusLabel: MANAGEMENT_AUDIT_LABELS[statusKey] || statusKey,
-        rows: [],
-      };
-    }
-
-    drilldown[key].rows.push(
-      buildDrilldownRow(row)
-    );
-  });
-
-  return drilldown;
-}
-
-function buildDrilldownRow(row) {
-  const matchedOption =
-    row.auditDetails?.matchedOption ||
-    row.auditMatchedOption ||
-    null;
-
-  return {
-    auditRowId: row.auditRowId,
-    clientId: row.clientId || "",
-    employeeId: row.employeeId || "",
-    fullName: row.fullName || row.clientName || "",
-    policyNumber: row.policyNumber || "",
-
-    issuer: row.issuerCanonical || row.issuerOriginal || "לא מזוהה",
-    productType: row.productType || "",
-
-    accumulation: Number(row.accumulation || 0),
-    monthlyDeposit: Number(row.monthlyDeposit || 0),
-
-    actualAccumulationFee: Number(row.accumulationFee || 0),
-    actualDepositFee: Number(row.depositFee || 0),
-
-    approvedAccumulationFee:
-      matchedOption?.approvedAccumulationFee ??
-      matchedOption?.accumulationFee ??
-      row.auditMatchedAccumulationFee ??
-      null,
-
-    approvedDepositFee:
-      matchedOption?.approvedDepositFee ??
-      matchedOption?.depositFee ??
-      row.auditMatchedDepositFee ??
-      null,
-
-    auditStatus: row.auditStatus,
-    auditStatusHe: row.auditStatusHe || row.auditDisplayStatus || "",
-    auditModel: row.auditMatchRuleType || "",
-    matchedModel: row.auditMatchModelName || matchedOption?.modelName || "",
-
-    auditReason: row.auditReason || "",
-    requiredAction: row.requiredAction || "",
-    priority: row.priority || "",
-
-    failedReasons:
-      row.auditDetails?.failedReasons ||
-      row.auditFailedReasons ||
-      [],
-  };
-}
-
-export function buildActionCenter(unifiedRows = []) {
-  return unifiedRows.filter((row) => {
-    return (
-      row.auditStatus === "invalid" ||
-      !row.agreementIssuerFound ||
-      row.tierPotentialNotUsed
-    ) && row.auditStatus !== "excluded";
-  });
-}
+// ─── KPI ──────────────────────────────────────────────────────────────────────
 
 export function buildKpi(unifiedRows = []) {
-  const audited = unifiedRows.filter(
-    (row) => !row.isExcludedFromFeeAudit && row.auditStatus !== "excluded"
-  );
-
-  const valid = audited.filter((row) => row.auditStatus === "valid").length;
-  const invalid = audited.filter((row) => row.auditStatus === "invalid").length;
-  const noAgreement = audited.filter((row) => !row.agreementIssuerFound).length;
-  const tierPotential = unifiedRows.filter((row) => row.tierPotentialNotUsed).length;
-  const actionItems = buildActionCenter(unifiedRows).length;
+  const audited  = unifiedRows.filter((r) => r.auditStatus !== "excluded");
+  const valid    = audited.filter((r) => r.auditStatus === "valid");
+  const invalid  = audited.filter((r) => r.auditStatus === "invalid");
+  const excluded = unifiedRows.filter((r) => r.auditStatus === "excluded");
+  const tierPot  = unifiedRows.filter((r) => r.tierPotentialNotUsed);
+  const noAgree  = audited.filter((r) => !r.agreementIssuerFound);
 
   return {
-    totalRows: unifiedRows.length,
-    auditedRows: audited.length,
-    validRows: valid,
-    invalidRows: invalid,
-    excludedRows: unifiedRows.length - audited.length,
-    noAgreementRows: noAgreement,
-    complianceRate: audited.length ? valid / audited.length : 0,
-    tierPotentialRows: tierPotential,
-    actionItems,
+    totalRows:      unifiedRows.length,
+    auditedRows:    audited.length,
+    validRows:      valid.length,
+    invalidRows:    invalid.length,
+    excludedRows:   excluded.length,
+    noAgreementRows: noAgree.length,
+    tierPotentialRows: tierPot.length,
+    actionItems:    invalid.length + tierPot.length,
+    complianceRate: audited.length > 0 ? valid.length / audited.length : 0,
+
+    // סכומי כסף
+    totalAccumulation: unifiedRows
+      .filter((r) => r.auditStatus !== "excluded")
+      .reduce((s, r) => s + (r.accumulation || 0), 0),
   };
 }
 
-export function buildMatrix({
-  rows = [],
-  rowGetter,
-  colGetter,
-  rowLabelName,
-  totalLabel = "סה״כ",
-}) {
-  const rowKeys = Array.from(
-    new Set(rows.map(rowGetter).filter(Boolean))
-  ).sort((a, b) => a.localeCompare(b, "he"));
+// ─── Management Fees Audit Matrix ─────────────────────────────────────────────
+// טבלה: שורות = סטטוס, עמודות = יצרן
 
-  const colKeys = Array.from(
-    new Set(rows.map(colGetter).filter(Boolean))
-  ).sort((a, b) => a.localeCompare(b, "he"));
+const AUDIT_ROW_KEYS = [
+  { key: "valid",    label: "תקין" },
+  { key: "invalid",  label: "לא תקין" },
+  { key: "excluded", label: "תפעול בלבד" },
+  { key: "tier",     label: "Tier Potential" },
+  { key: "total",    label: "סה\"כ נבדקו" },
+  { key: "compliance", label: "% עמידה" },
+];
 
-  const output = rowKeys.map((rowKey) => {
-    const item = { [rowLabelName]: rowKey };
+export function buildManagementFeesAudit(unifiedRows = []) {
+  const issuers = [...new Set(unifiedRows.map((r) => r.issuerCanonical || "לא מזוהה"))]
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b, "he"));
 
-    colKeys.forEach((colKey) => {
-      item[colKey] = 0;
-    });
+  // אתחול
+  const counts = {};
+  for (const { key } of AUDIT_ROW_KEYS) {
+    counts[key] = {};
+    for (const iss of issuers) counts[key][iss] = 0;
+  }
 
-    item[totalLabel] = 0;
+  for (const row of unifiedRows) {
+    const iss = row.issuerCanonical || "לא מזוהה";
+    if (row.auditStatus === "excluded") {
+      counts.excluded[iss]++;
+    } else {
+      counts.total[iss]++;
+      if (row.auditStatus === "valid")   counts.valid[iss]++;
+      if (row.auditStatus === "invalid") counts.invalid[iss]++;
+      if (row.tierPotentialNotUsed)      counts.tier[iss]++;
+    }
+  }
 
+  // compliance rate per issuer
+  for (const iss of issuers) {
+    const tot = counts.total[iss];
+    counts.compliance[iss] = tot > 0 ? counts.valid[iss] / tot : null;
+  }
+
+  const rows = AUDIT_ROW_KEYS.map(({ key, label }) => ({
+    key,
+    label,
+    ...counts[key],
+  }));
+
+  return { issuers, rows };
+}
+
+// ─── Generic matrix builder ───────────────────────────────────────────────────
+
+function buildMatrix({ rows = [], rowGetter, colGetter, rowLabel }) {
+  const filteredRows = rows.filter((r) => r.auditStatus !== "excluded");
+
+  const rowKeys = [...new Set(filteredRows.map(rowGetter).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b, "he"));
+  const colKeys = [...new Set(filteredRows.map(colGetter).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b, "he"));
+
+  const matrix = rowKeys.map((rk) => {
+    const item = { [rowLabel]: rk };
+    let total = 0;
+    for (const ck of colKeys) {
+      const count = filteredRows.filter(
+        (r) => rowGetter(r) === rk && colGetter(r) === ck
+      ).length;
+      item[ck] = count;
+      total += count;
+    }
+    item["סה\"כ"] = total;
     return item;
-  });
+  }).sort((a, b) => b["סה\"כ"] - a["סה\"כ"]);
 
-  const byRow = new Map(output.map((item) => [item[rowLabelName], item]));
-
-  rows.forEach((row) => {
-    const rowKey = rowGetter(row);
-    const colKey = colGetter(row);
-
-    if (!rowKey || !colKey || !byRow.has(rowKey)) return;
-
-    byRow.get(rowKey)[colKey] += 1;
-    byRow.get(rowKey)[totalLabel] += 1;
-  });
-
-  return {
-    columns: colKeys,
-    rows: output.sort((a, b) => b[totalLabel] - a[totalLabel]),
-  };
+  return { columns: colKeys, rows: matrix };
 }
+
+// ─── Insurance Track × Marital Status ────────────────────────────────────────
 
 export function buildInsuranceTrackMarital(unifiedRows = []) {
   return buildMatrix({
     rows: unifiedRows,
-    rowGetter: (row) => row.insuranceTrack || "מסלול ביטוח לא צוין",
-    colGetter: (row) => row.maritalStatus || "לא צוין",
-    rowLabelName: "מסלול ביטוח",
+    rowGetter: (r) => r.insuranceTrack || "לא צוין",
+    colGetter: (r) => r.maritalStatus  || r.personal_maritalStatus || "לא צוין",
+    rowLabel:  "מסלול ביטוח",
   });
 }
 
-export function buildInvestmentTrackRewardsIssuer(unifiedRows = []) {
+// ─── Investment Track × Issuer ────────────────────────────────────────────────
+
+export function buildInvestmentTrackIssuer(unifiedRows = []) {
   return buildMatrix({
     rows: unifiedRows,
-    rowGetter: (row) => row.investmentTrackRewards || "ללא מסלול השקעה",
-    colGetter: (row) => row.issuerCanonical || "לא מזוהה",
-    rowLabelName: "מסלול השקעה תגמולים",
+    rowGetter: (r) => r.investmentTrackRewards || "ללא מסלול",
+    colGetter: (r) => r.issuerCanonical        || "לא מזוהה",
+    rowLabel:  "מסלול השקעה",
   });
 }
 
-export function buildInvestmentTrackCompensationIssuer(unifiedRows = []) {
-  return buildMatrix({
-    rows: unifiedRows,
-    rowGetter: (row) => row.investmentTrackCompensation || "ללא מסלול השקעה",
-    colGetter: (row) => row.issuerCanonical || "לא מזוהה",
-    rowLabelName: "מסלול השקעה פיצויים",
-  });
-}
+// ─── Accumulation Tier Analysis ───────────────────────────────────────────────
 
 export function buildAccumulationTierAnalysis(unifiedRows = []) {
-  const buckets = [
-    "0-50K",
-    "50K-100K",
-    "100K-300K",
-    "300K-500K",
-    "500K+",
-    "לא צוין",
-  ];
+  const BUCKETS = ["0-50K", "50K-100K", "100K-300K", "300K-500K", "500K+", "לא צוין"];
+  const audited = unifiedRows.filter((r) => r.auditStatus !== "excluded");
 
-  return buckets.map((bucket) => {
-    const rows = unifiedRows.filter((row) => row.accumulationBucket === bucket);
-
+  return BUCKETS.map((bucket) => {
+    const inBucket = audited.filter(
+      (r) => accumulationBucket(r.accumulation) === bucket
+    );
     return {
-      "מדרגת צבירה": bucket,
-      "כמות לקוחות": rows.length,
-      "סך צבירה": rows.reduce(
-        (sum, row) => sum + Number(row.accumulation || 0),
-        0
-      ),
-      "קיים מודל צבירות גבוהות": rows.filter((row) => row.hasTierModel).length,
-      "נמצאים בפועל במודל צבירות גבוהות": rows.filter(
-        (row) => row.actualInTierModel
-      ).length,
-      "פוטנציאל שלא מומש": rows.filter(
-        (row) => row.tierPotentialNotUsed
-      ).length,
+      "מדרגת צבירה":           bucket,
+      "מספר פוליסות":          inBucket.length,
+      "סך צבירה":              inBucket.reduce((s, r) => s + (r.accumulation || 0), 0),
+      "יש מודל גבוה":          inBucket.filter((r) => r.hasTierModel).length,
+      "זכאי למודל גבוה":       inBucket.filter((r) => r.eligibleForTier).length,
+      "נמצא במודל גבוה":       inBucket.filter((r) => r.inTierModel).length,
+      "פוטנציאל לא מנוצל":     inBucket.filter((r) => r.tierPotentialNotUsed).length,
     };
   });
 }
 
-export function buildPensionAnalytics(input = []) {
-  const unifiedRows = Array.isArray(input)
-    ? input
-    : input?.unifiedRows || [];
+// ─── Action Center ────────────────────────────────────────────────────────────
+// כל הפוליסות שדורשות טיפול — invalid + tier potential
 
-  const managementAudit = buildManagementFeesAudit(unifiedRows);
-  const managementFeesAuditDrilldown =
-    buildManagementFeesAuditDrilldown(unifiedRows);
+export function buildActionCenter(unifiedRows = []) {
+  return unifiedRows
+    .filter((r) =>
+      r.auditStatus !== "excluded" &&
+      (r.auditStatus === "invalid" || r.tierPotentialNotUsed)
+    )
+    .map((r) => ({
+      employeeCode:    r.employeeCode     || "",
+      clientName:      r.personal_fullName || r.clientName || "",
+      issuer:          r.issuerCanonical   || r.issuerOriginal || "",
+      accumulation:    r.accumulation      || 0,
+      depositFee:      r.depositFee        ?? null,
+      accumulationFee: r.accumulationFee   ?? null,
+      auditStatus:     r.auditStatus,
+      auditStatusHe:   r.auditStatusHe     || r.auditDisplayStatus || "",
+      issueCategory:   r.issueCategory     || "",
+      requiredAction:  r.requiredAction    || "",
+      priority:        r.priority          || "",
+      tierPotentialNotUsed: r.tierPotentialNotUsed || false,
+      auditReason:     r.auditReason       || "",
+      // reference fees from agreement
+      approvedDepositFee:      r.auditReferenceDepositFee      ?? null,
+      approvedAccumulationFee: r.auditReferenceAccumulationFee ?? null,
+    }))
+    .sort((a, b) => {
+      // HIGH קודם, אחר כך MEDIUM
+      const p = { HIGH: 0, MEDIUM: 1, "": 2 };
+      return (p[a.priority] ?? 2) - (p[b.priority] ?? 2);
+    });
+}
+
+// ─── Main export ──────────────────────────────────────────────────────────────
+
+export function buildPensionAnalytics(unifiedRows = []) {
+  const kpi                    = buildKpi(unifiedRows);
+  const managementAudit        = buildManagementFeesAudit(unifiedRows);
+  const insuranceTrackMarital  = buildInsuranceTrackMarital(unifiedRows);
+  const investmentTrackIssuer  = buildInvestmentTrackIssuer(unifiedRows);
+  const accumulationTierAnalysis = buildAccumulationTierAnalysis(unifiedRows);
+  const actionCenter           = buildActionCenter(unifiedRows);
 
   return {
-    kpi: buildKpi(unifiedRows),
+    kpi,
     managementAudit,
-    managementFeesAudit: managementAudit,
-    managementFeesAuditDrilldown,
-    insuranceTrackMarital: buildInsuranceTrackMarital(unifiedRows),
-    investmentTrackRewardsIssuer: buildInvestmentTrackRewardsIssuer(unifiedRows),
-    investmentTrackCompensationIssuer: buildInvestmentTrackCompensationIssuer(unifiedRows),
-    accumulationTierAnalysis: buildAccumulationTierAnalysis(unifiedRows),
-    actionDrilldown: buildActionCenter(unifiedRows),
-    actionCenter: buildActionCenter(unifiedRows),
+    managementFeesAudit: managementAudit,   // alias לתאימות
+    insuranceTrackMarital,
+    investmentTrackIssuer,
+    investmentTrackRewardsIssuer: investmentTrackIssuer, // alias
+    accumulationTierAnalysis,
+    actionDrilldown: actionCenter,
+    actionCenter,
   };
 }

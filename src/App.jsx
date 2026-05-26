@@ -9,9 +9,9 @@ import { parseAgreements } from "./parsers/agreementsParser.js";
 import { parsePersonalDetails } from "./parsers/personalDetailsParser.js";
 import { buildPensionSummary } from "./parsers/buildPensionSummary.js";
 import {
-  mergePersonalDetailsIntoPensionRows,
-  buildPersonalDetailsMerge,
-} from "./parsers/personalDetailsMergeEngine.js";
+  buildUnifiedEmployeeData,
+  enrichPensionRowsFromUnifiedEmployees,
+} from "./parsers/unifiedEmployeeDataBuilder.js";
 
 import "./styles.css";
 
@@ -74,20 +74,43 @@ export default function App() {
       );
 
       // =========================
-      // Personal Details Merge
+      // Unified Employee Data
       // =========================
 
-      const personalDetailsMergeResult = mergePersonalDetailsIntoPensionRows(
+      const unifiedEmployeeData = buildUnifiedEmployeeData(
         rawPensionRows,
         personalDetails
       );
 
-      const pensionRows = personalDetailsMergeResult.pensionRows;
-
-      const personalDetailsMerge = buildPersonalDetailsMerge(
-        personalDetails,
-        rawPensionRows
+      const pensionRows = enrichPensionRowsFromUnifiedEmployees(
+        rawPensionRows,
+        unifiedEmployeeData
       );
+
+      const personalDetailsMerge = {
+        source: "unifiedEmployeeData",
+        hasPersonalDetailsFile: Boolean(personalDetails?.hasFile),
+        joinKey: "employeeCode",
+        metadata: {
+          pensionRowCount: rawPensionRows.length,
+          clientProfileCount: personalDetails?.clientProfiles?.length || 0,
+          matchedPensionRows: pensionRows.filter(
+            (row) => row.personalProfileMatch?.matched
+          ).length,
+          unmatchedPensionRows: pensionRows.filter(
+            (row) => !row.personalProfileMatch?.matched
+          ).length,
+          matchedClientProfiles:
+            unifiedEmployeeData.metadata.employeesWithPersonalProfile,
+          unmatchedClientProfiles:
+            unifiedEmployeeData.metadata.personalProfilesWithoutPensionRows,
+          matchRate: unifiedEmployeeData.metadata.matchRate,
+          matchMethods: {
+            employeeCode:
+              unifiedEmployeeData.metadata.employeesWithPersonalProfile,
+          },
+        },
+      };
 
       // =========================
       // Summary
@@ -108,6 +131,7 @@ export default function App() {
         agreements,
         personalDetails,
         personalDetailsMerge,
+        unifiedEmployeeData,
         pensionSummary,
       });
 

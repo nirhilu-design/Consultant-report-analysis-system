@@ -1,5 +1,8 @@
 import { useMemo, useState } from "react";
 import ManagementFeesAuditDrilldown from "./ManagementFeesAuditDrilldown.jsx";
+import PersonalDetailsQaCard from "./PersonalDetailsQaCard.jsx";
+import PersonalDetailsMergeQaCard from "./PersonalDetailsMergeQaCard.jsx";
+import "./personalDetailsQaCard.css";
 
 const sheets = [
   "קרן פנסיה",
@@ -379,7 +382,8 @@ export default function Dashboard({
 
             <p>
               דוח נתונים: {files?.dataFile?.name || "לא הועלה"} | דוח הסכמים:{" "}
-              {files?.agreementsFile?.name || "לא הועלה"}
+              {files?.agreementsFile?.name || "לא הועלה"} | פרטים אישיים:{" "}
+              {files?.personalDetailsFile?.name || "לא הועלה"}
             </p>
           </div>
 
@@ -387,11 +391,23 @@ export default function Dashboard({
             <span>שורות: {formatNumber(totals.rows)}</span>
             <span>הסכמים: {formatNumber(totals.agreements)}</span>
             <span>ללא הסכם: {formatNumber(totals.noAgreement)}</span>
+            <span>
+              פרטים אישיים:{" "}
+              {analysisData?.personalDetails?.hasFile ? "כן" : "לא"}
+            </span>
           </div>
         </div>
 
         {activeSheet === "קרן פנסיה" && (
           <>
+            <PersonalDetailsQaCard
+              personalDetails={analysisData?.personalDetails}
+            />
+
+            <PersonalDetailsMergeQaCard
+              personalDetailsMerge={analysisData?.personalDetailsMerge}
+            />
+
             <div className="topTabs">
               {pensionTabs.map((tab) => (
                 <button

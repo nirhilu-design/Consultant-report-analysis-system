@@ -1,138 +1,54 @@
-// NEW FILE
 // Path: src/unified/agreementEngine.js
+// ─────────────────────────────────────────────────────────────────────────────
+// AGREEMENT ENGINE — נרמול הסכמי דמי ניהול לפורמט אחיד
+//
+// קלט:  agreements[] — פלט של agreementsParser
+// פלט:  agreementOptionsByIssuer — Map: שם יצרן קנוני → [options]
+//
+// כל option:
+//   { issuer, optionName, depositFee, accumulationFee, conditionType, conditionValue }
+// ─────────────────────────────────────────────────────────────────────────────
 
-import {
-  canonicalIssuer,
-  buildIssuerAliasLookup,
-} from "./issuerAliases.js";
+import { buildIssuerAliasLookup, canonicalIssuer } from "./issuerAliases.js";
+import { normalizePercent } from "./normalizers.js";
 
-import {
-  normalizePercent,
-  normalizeNumber,
-  normalizeText,
-} from "./normalizers.js";
-
-function getAgreementIssuer(agreement = {}) {
-  return (
-    agreement.issuer ||
-    agreement.originalManager ||
-    agreement.manager ||
-    agreement.raw?.issuer ||
-    agreement.raw?.["שם יצרן"] ||
-    agreement.raw?.["יצרן"] ||
-    "לא מזוהה"
-  );
-}
-
-function detectOptionName(agreement = {}, index = 0) {
-  return (
-    agreement.optionName ||
-    agreement.modelName ||
-    agreement.raw?.["מודל"] ||
-    agreement.raw?.["אפשרות"] ||
-    agreement.raw?.["שם מודל"] ||
-    `מודל ${index + 1}`
-  );
-}
-
-function detectConditionType(agreement = {}) {
+function normalizeConditionType(agreement) {
   if (agreement.conditionType) return agreement.conditionType;
 
-  const text = normalizeText(
-    `${agreement.optionName || ""} ${agreement.modelName || ""} ${agreement.raw?.["מודל"] || ""} ${agreement.raw?.["הערות"] || ""}`
-  );
-
-  if (/צביר|גבוה|מעל|MIN_ACCUMULATION/.test(text)) {
-    return "MIN_ACCUMULATION";
-  }
-
-  if (/עד|MAX_ACCUMULATION/.test(text)) {
-    return "MAX_ACCUMULATION";
-  }
-
-  if (/בחירת|עובד|EMPLOYEE_CHOICE/.test(text)) {
-    return "EMPLOYEE_CHOICE";
-  }
-
+  const text = String(agreement.optionName || "").toLowerCase();
+  if (/צביר|גבוה|min_accumulation/.test(text)) return "MIN_ACCUMULATION";
+  if (/עד|max_accumulation/.test(text))         return "MAX_ACCUMULATION";
   return "DEFAULT";
 }
 
-function detectConditionValue(agreement = {}) {
-  if (
-    agreement.conditionValue !== undefined &&
-    agreement.conditionValue !== null
-  ) {
-    return normalizeNumber(agreement.conditionValue);
-  }
-
-  const text = normalizeText(
-    `${agreement.optionName || ""} ${agreement.modelName || ""} ${agreement.raw?.["מודל"] || ""} ${agreement.raw?.["הערות"] || ""}`
-  );
-
-  const match = text.match(/(\d{2,3}(?:,\d{3})+|\d{5,})/);
-
-  return match ? normalizeNumber(match[1]) : null;
-}
-
-export function normalizeAgreementOptions({
-  agreements = [],
-  issuerAliases = {},
-} = {}) {
+export function normalizeAgreementOptions({ agreements = [], issuerAliases = {} } = {}) {
   const aliasLookup = buildIssuerAliasLookup(issuerAliases);
   const optionsByIssuer = {};
 
-  agreements.forEach((agreement, index) => {
-    const issuer = canonicalIssuer(
-      getAgreementIssuer(agreement),
-      aliasLookup
-    );
-
-    const conditionType = detectConditionType(agreement);
+  for (const agreement of agreements) {
+    const issuerRaw = agreement.issuer || agreement.issuerOriginal || "";
+    const issuer    = canonicalIssuer(issuerRaw, aliasLookup);
 
     const option = {
       issuer,
-      optionName: detectOptionName(agreement, index),
-      depositFee: normalizePercent(
-        agreement.depositFee ?? agreement.premiumFee
-      ),
-      accumulationFee: normalizePercent(
-        agreement.accumulationFee ?? agreement.assetFee
-      ),
-      conditionType,
-      conditionValue: detectConditionValue(agreement),
-      isDefault:
-        Boolean(agreement.isDefault) ||
-        conditionType === "DEFAULT",
-      raw: agreement,
+      optionName:      agreement.optionName || "מודל א",
+      depositFee:      normalizePercent(agreement.depositFee),
+      accumulationFee: normalizePercent(agreement.accumulationFee),
+      conditionType:   normalizeConditionType(agreement),
+      conditionValue:  agreement.conditionValue ?? null,
+      isDefault:       Boolean(agreement.isDefault) || agreement.conditionType === "DEFAULT" || !agreement.conditionType,
     };
 
-    if (!optionsByIssuer[issuer]) {
-      optionsByIssuer[issuer] = [];
-    }
-
+    if (!optionsByIssuer[issuer]) optionsByIssuer[issuer] = [];
     optionsByIssuer[issuer].push(option);
+  }
+
+  console.log("normalizeAgreementOptions:", {
+    issuers: Object.keys(optionsByIssuer),
+    counts:  Object.fromEntries(
+      Object.entries(optionsByIssuer).map(([k, v]) => [k, v.length])
+    ),
   });
 
-  return {
-    optionsByIssuer,
-    aliasLookup,
-  };
-}
-
-export function isEligibleOption(option, accumulation) {
-  const acc = Number(accumulation || 0);
-
-  if (option.conditionType === "MIN_ACCUMULATION") {
-    return option.conditionValue === null
-      ? true
-      : acc >= option.conditionValue;
-  }
-
-  if (option.conditionType === "MAX_ACCUMULATION") {
-    return option.conditionValue === null
-      ? true
-      : acc <= option.conditionValue;
-  }
-
-  return true;
+  return { optionsByIssuer, aliasLookup };
 }

@@ -13,6 +13,13 @@ function isPresent(value) {
   return value !== null && value !== undefined && value !== "";
 }
 
+function normalizeTrack(value) {
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .replace(/[״"]/g, "")
+    .trim();
+}
+
 function hasAnyAgreement(row) {
   return Boolean(
     row.agreementIssuerFound ||
@@ -79,21 +86,10 @@ export function buildManagementFeesAudit(rows = []) {
 
     counts.total[iss]++;
 
-    if (row.auditStatus === "valid") {
-      counts.valid[iss]++;
-    }
-
-    if (row.auditStatus === "invalid") {
-      counts.invalid[iss]++;
-    }
-
-    if (!hasAnyAgreement(row)) {
-      counts.noAgreement[iss]++;
-    }
-
-    if (row.tierPotentialNotUsed) {
-      counts.tier[iss]++;
-    }
+    if (row.auditStatus === "valid") counts.valid[iss]++;
+    if (row.auditStatus === "invalid") counts.invalid[iss]++;
+    if (!hasAnyAgreement(row)) counts.noAgreement[iss]++;
+    if (row.tierPotentialNotUsed) counts.tier[iss]++;
   }
 
   for (const iss of issuers) {
@@ -106,7 +102,7 @@ export function buildManagementFeesAudit(rows = []) {
     { key: "invalid",     label: "לא תקין" },
     { key: "excluded",    label: "תפעול בלבד" },
     { key: "noAgreement", label: "ללא הסכם" },
-    { key: "tier",        label: "Tier Potential" },
+    { key: "tier",        label: "פוטנציאל מודל צבירה" },
     { key: "total",       label: "סה\"כ נבדקו" },
     { key: "compliance",  label: "% עמידה" },
   ];
@@ -165,50 +161,140 @@ export function buildInsuranceTrackMarital(rows = []) {
   };
 }
 
-// ─── Investment Track × Marital Status ────────────────────────────────────────
+// ─── Investment Track Summary ─────────────────────────────────────────────────
 
-function buildInvestmentMatrix(rows, trackGetter, rowLabel) {
+function buildInvestmentTrackSummary(rows, trackGetter, rowLabel) {
   const active = rows.filter((r) => r.auditStatus !== "excluded");
+  const byTrack = new Map();
 
-  const maritalVals = [...new Set(active.map((r) =>
-    r.personal_maritalStatus || r.maritalStatus || "לא צוין"
-  ))]
-    .filter(Boolean)
-    .sort((a, b) => a.localeCompare(b, "he"));
+  for (const row of active) {
+    const track = normalizeTrack(trackGetter(row)) || "ללא מסלול";
 
-  const tracks = [...new Set(active.map(trackGetter))]
-    .filter(Boolean)
-    .sort((a, b) => a.localeCompare(b, "he"));
+    if (!byTrack.has(track)) {
+      byTrack.set(track, {
+        [rowLabel]: track,
+        "כמות פוליסות": 0,
+        "כמות עובדים": 0,
+        "סך צבירה": 0,
+        _employees: new Set(),
+      });
+    }
 
-  const matrixRows = tracks
-    .map((track) => {
-      const item = { [rowLabel]: track };
-      let total = 0;
+    const item = byTrack.get(track);
+    item["כמות פוליסות"] += 1;
+    item["סך צבירה"] += Number(row.accumulation || 0);
 
-      for (const m of maritalVals) {
-        const count = active.filter(
-          (r) =>
-            trackGetter(r) === track &&
-            (r.personal_maritalStatus || r.maritalStatus || "לא צוין") === m
-        ).length;
+    if (row.employeeCode || row.clientId) {
+      item._employees.add(row.employeeCode || row.clientId);
+    }
+  }
 
-        item[m] = count;
-        total += count;
-      }
-
-      item["סה\"כ"] = total;
-      return item;
+  return [...byTrack.values()]
+    .map((item) => {
+      const { _employees, ...clean } = item;
+      return {
+        ...clean,
+        "כמות עובדים": _employees.size,
+      };
     })
-    .sort((a, b) => b["סה\"כ"] - a["סה\"כ"]);
+    .sort((a, b) => b["סך צבירה"] - a["סך צבירה"]);
+}
+
+function buildInvestmentTrackComparison(rows = []) {
+  const active = rows.filter((r) => r.auditStatus !== "excluded");
+  const byEmployee = new Map();
+
+  for (const row of active) {
+    const employeeKey = row.employeeCode || row.clientId || row.personal_fullName || row.clientName;
+    if (!employeeKey) continue;
+
+    if (!byEmployee.has(employeeKey)) {
+      byEmployee.set(employeeKey, {
+        employeeCode: row.employeeCode || row.clientId || "",
+        clientName: row.personal_fullName || row.clientName || "",
+        rewardsTracks: new Set(),
+        compensationTracks: new Set(),
+        accumulation: 0,
+        policies: 0,
+      });
+    }
+
+    const item = byEmployee.get(employeeKey);
+
+    const rewardsTrack = normalizeTrack(row.investmentTrackRewards);
+    const compensationTrack = normalizeTrack(row.investmentTrackCompensation);
+
+    if (rewardsTrack && rewardsTrack !== "ללא מסלול") {
+      item.rewardsTracks.add(rewardsTrack);
+    }
+
+    if (compensationTrack && compensationTrack !== "ללא מסלול") {
+      item.compensationTracks.add(compensationTrack);
+    }
+
+    item.accumulation += Number(row.accumulation || 0);
+    item.policies += 1;
+  }
+
+  const details = [...byEmployee.values()].map((item) => {
+    const rewards = [...item.rewardsTracks].sort();
+    const compensation = [...item.compensationTracks].sort();
+
+    const rewardsKey = rewards.join(" | ");
+    const compensationKey = compensation.join(" | ");
+
+    let status = "missing";
+
+    if (rewards.length && compensation.length) {
+      status = rewardsKey === compensationKey ? "same" : "different";
+    } else if (rewards.length && !compensation.length) {
+      status = "missingCompensation";
+    } else if (!rewards.length && compensation.length) {
+      status = "missingRewards";
+    }
+
+    return {
+      employeeCode: item.employeeCode,
+      clientName: item.clientName,
+      rewardsTracks: rewardsKey || "ללא מסלול",
+      compensationTracks: compensationKey || "ללא מסלול",
+      status,
+      policies: item.policies,
+      accumulation: item.accumulation,
+    };
+  });
+
+  const same = details.filter((d) => d.status === "same");
+  const different = details.filter((d) => d.status === "different");
+  const missingCompensation = details.filter((d) => d.status === "missingCompensation");
+  const missingRewards = details.filter((d) => d.status === "missingRewards");
+  const missingBoth = details.filter((d) => d.status === "missing");
 
   return {
-    columns: maritalVals,
-    rows: matrixRows,
+    totalEmployees: details.length,
+    sameCount: same.length,
+    differentCount: different.length,
+    missingCompensationCount: missingCompensation.length,
+    missingRewardsCount: missingRewards.length,
+    missingBothCount: missingBoth.length,
+    sameAccumulation: same.reduce((s, d) => s + d.accumulation, 0),
+    differentAccumulation: different.reduce((s, d) => s + d.accumulation, 0),
+    details: details.sort((a, b) => {
+      const order = {
+        different: 0,
+        missingCompensation: 1,
+        missingRewards: 2,
+        same: 3,
+        missing: 4,
+      };
+
+      return (order[a.status] ?? 9) - (order[b.status] ?? 9);
+    }),
   };
 }
 
 export function buildInvestmentTrackRewardsMarital(rows = []) {
-  return buildInvestmentMatrix(
+  return buildInvestmentTrackSummary(
     rows,
     (r) => r.investmentTrackRewards || "ללא מסלול",
     "מסלול השקעה תגמולים"
@@ -216,7 +302,7 @@ export function buildInvestmentTrackRewardsMarital(rows = []) {
 }
 
 export function buildInvestmentTrackCompensationMarital(rows = []) {
-  return buildInvestmentMatrix(
+  return buildInvestmentTrackSummary(
     rows,
     (r) => r.investmentTrackCompensation || "ללא מסלול",
     "מסלול השקעה פיצויים"
@@ -310,6 +396,7 @@ export function buildActionCenter(rows = []) {
 export function buildPensionAnalytics(rows = []) {
   const managementAudit = buildManagementFeesAudit(rows);
   const actionCenter = buildActionCenter(rows);
+  const investmentTrackComparison = buildInvestmentTrackComparison(rows);
 
   return {
     kpi: buildKpi(rows),
@@ -321,6 +408,7 @@ export function buildPensionAnalytics(rows = []) {
 
     investmentTrackRewardsMarital: buildInvestmentTrackRewardsMarital(rows),
     investmentTrackCompensationMarital: buildInvestmentTrackCompensationMarital(rows),
+    investmentTrackComparison,
 
     // alias ישן לתאימות אחורה
     investmentTrackRewardsIssuer: buildInvestmentTrackRewardsMarital(rows),

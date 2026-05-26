@@ -1,4 +1,3 @@
-// NEW FILE
 // Path: src/unified/unifiedSchema.js
 
 export const PRODUCT_TYPES = {
@@ -6,142 +5,95 @@ export const PRODUCT_TYPES = {
   HISHTALMUT: "hishtalmut",
 };
 
-export const PRODUCT_LABELS = {
-  [PRODUCT_TYPES.PENSION]: "קרן פנסיה",
-  [PRODUCT_TYPES.HISHTALMUT]: "קרן השתלמות",
-};
-
-export const DEFAULT_BROKER = {
-  brokerId: "broker_001",
-  brokerName: "מנהל הסדר 1",
-};
-
 export const AUDIT_STATUS = {
   VALID: "valid",
   INVALID: "invalid",
   EXCLUDED: "excluded",
+  VALID_BASELINE: "valid_baseline",
 };
 
 export const AUDIT_STATUS_HE = {
   VALID: "תקין",
   INVALID: "חריג",
   EXCLUDED: "הוחרג",
+  VALID_BASELINE: "תקין לפי כלל בסיס",
+};
+
+export const AUDIT_MODELS = {
+  MODEL_A: "MODEL_A",
+  MODEL_B: "MODEL_B",
+  TIER_MODEL: "TIER_MODEL",
+  STANDARD_MODEL: "STANDARD_MODEL",
+  BASELINE: "BASELINE",
+  NONE: "NONE",
 };
 
 export const ISSUE_CATEGORY = {
   NONE: "NONE",
-  FEE_MISMATCH: "FEE_MISMATCH",
-  MISSING_AGREEMENT: "MISSING_AGREEMENT",
-  LARGE_BALANCE_NOT_OPTIMIZED: "LARGE_BALANCE_NOT_OPTIMIZED",
+  MANAGEMENT_FEES: "MANAGEMENT_FEES",
+  NO_AGREEMENT: "NO_AGREEMENT",
+  UNKNOWN_ISSUER: "UNKNOWN_ISSUER",
   MISSING_DATA: "MISSING_DATA",
+  OPERATIONAL_ONLY: "OPERATIONAL_ONLY",
 };
 
 export const PRODUCT_CONFIGS = {
   [PRODUCT_TYPES.PENSION]: {
+    productType: PRODUCT_TYPES.PENSION,
     label: "קרן פנסיה",
-    hasDepositFee: true,
-    hasAccumulationFee: true,
-    hasInsuranceTrack: true,
-    hasInvestmentTracks: true,
-    hasRewardsTrack: true,
-    hasCompensationTrack: true,
-
-    excludeOperationOnlyFromFeeAudit: true,
-
-    withoutAgreementBaseline: {
-      depositFee: 1,
-      accumulationFee: 0.2,
-    },
+    supportsDepositFees: true,
+    supportsAccumulationFees: true,
+    supportsInsuranceTracks: true,
+    supportsRewardsTrack: true,
+    supportsCompensationTrack: true,
+    baselineDepositFee: 1,
+    baselineAccumulationFee: 0.2,
   },
 
   [PRODUCT_TYPES.HISHTALMUT]: {
+    productType: PRODUCT_TYPES.HISHTALMUT,
     label: "קרן השתלמות",
-    hasDepositFee: false,
-    hasAccumulationFee: true,
-    hasInsuranceTrack: false,
-    hasInvestmentTracks: true,
-    hasRewardsTrack: true,
-    hasCompensationTrack: false,
-
-    excludeOperationOnlyFromFeeAudit: false,
-
-    withoutAgreementBaseline: {
-      depositFee: null,
-      accumulationFee: 0.8,
-    },
+    supportsDepositFees: false,
+    supportsAccumulationFees: true,
+    supportsInsuranceTracks: false,
+    supportsRewardsTrack: true,
+    supportsCompensationTrack: false,
+    baselineDepositFee: 0,
+    baselineAccumulationFee: 0.2,
   },
 };
 
 export function getProductConfig(productType) {
-  return PRODUCT_CONFIGS[productType] || PRODUCT_CONFIGS[PRODUCT_TYPES.PENSION];
+  return (
+    PRODUCT_CONFIGS[productType] ||
+    PRODUCT_CONFIGS[PRODUCT_TYPES.PENSION]
+  );
 }
 
-export function createEmptyUnifiedRow() {
-  return {
-    brokerId: "",
-    brokerName: "",
-    batchId: "",
-    productType: "",
+export function normalizeProductType(value) {
+  const normalized = String(value || "").trim().toLowerCase();
 
-    sourceRowNumber: null,
-    sourceSheetName: "",
-    sourceFileName: "",
+  if (
+    normalized === PRODUCT_TYPES.HISHTALMUT ||
+    normalized.includes("השתלמות")
+  ) {
+    return PRODUCT_TYPES.HISHTALMUT;
+  }
 
-    clientId: "",
-    clientName: "",
+  return PRODUCT_TYPES.PENSION;
+}
 
-    serviceStatus: "",
-    age: null,
-    ageBucket: "לא צוין",
-    maritalStatus: "לא צוין",
-    gender: "",
-    childrenCount: null,
-    personalDetailsFound: false,
+export function isValidAuditStatus(status) {
+  return (
+    status === AUDIT_STATUS.VALID ||
+    status === AUDIT_STATUS.VALID_BASELINE
+  );
+}
 
-    issuerOriginal: "",
-    issuerCanonical: "",
+export function isInvalidAuditStatus(status) {
+  return status === AUDIT_STATUS.INVALID;
+}
 
-    policyNumber: "",
-    fundName: "",
-
-    insuranceTrack: "מסלול ביטוח לא צוין",
-
-    investmentTrackRewards: "ללא מסלול השקעה",
-    investmentTrackCompensation: "ללא מסלול השקעה",
-
-    accumulation: null,
-    accumulationBucket: "לא צוין",
-
-    depositFee: null,
-    accumulationFee: null,
-
-    agreementIssuerFound: false,
-    agreementOptions: [],
-    agreementOptionsCount: 0,
-
-    isExcludedFromFeeAudit: false,
-
-    auditStatus: "",
-    auditStatusHe: "",
-
-    auditMatchResult: "",
-    auditMatchModelName: "",
-    auditMatchRuleType: "",
-
-    auditReferenceDepositFee: null,
-    auditReferenceAccumulationFee: null,
-
-    auditReason: "",
-
-    hasTierModel: false,
-    eligibleTierModel: false,
-    actualInTierModel: false,
-    tierPotentialNotUsed: false,
-
-    issueCategory: ISSUE_CATEGORY.NONE,
-    requiredAction: "",
-    priority: "",
-
-    raw: null,
-  };
+export function isExcludedAuditStatus(status) {
+  return status === AUDIT_STATUS.EXCLUDED;
 }

@@ -31,6 +31,7 @@ function getClientId(row) {
   return normalizeText(
     firstNonEmpty(
       row.clientId,
+      row.employeeCode,
       row.employeeId,
       getByKeys(raw, [
         "קוד מזהה של העובד",
@@ -69,6 +70,8 @@ function getClientName(row) {
   return normalizeText(
     firstNonEmpty(
       row.clientName,
+      row.personal_fullName,
+      [row.personal_firstName, row.personal_lastName].filter(Boolean).join(" "),
       getByKeys(raw, [
         "שם עובד",
         "שם הלקוח",
@@ -85,6 +88,8 @@ function getServiceStatus(row) {
   return normalizeText(
     firstNonEmpty(
       row.serviceStatus,
+      row.marketingStatus,
+      row.personal_marketingStatus,
       getByKeys(raw, [
         "סטטוס שיווקי",
         "סטטוס לקוח",
@@ -282,34 +287,44 @@ function getPersonalFields(personalRow) {
 
   const age = normalizeNumber(
     firstNonEmpty(
+      personalRow.personal_age,
       personalRow.age,
       getByKeys(raw, ["גיל מחושב", "גיל"])
     )
   );
 
+  const maritalStatus = normalizeText(
+    firstNonEmpty(
+      personalRow.personal_maritalStatus,
+      personalRow.maritalStatus,
+      getByKeys(raw, ["מצב משפחתי", "סטטוס משפחתי"])
+    )
+  ) || "לא צוין";
+
+  const gender = normalizeText(
+    firstNonEmpty(
+      personalRow.personal_gender,
+      personalRow.gender,
+      getByKeys(raw, ["מין", "מגדר"])
+    )
+  ) || "";
+
+  const childrenCount = normalizeNumber(
+    firstNonEmpty(
+      personalRow.personal_childrenCount,
+      personalRow.childrenCount,
+      getByKeys(raw, ["מספר ילדים", "ילדים"])
+    )
+  );
+
   return {
     age,
-    maritalStatus:
-      normalizeText(
-        firstNonEmpty(
-          personalRow.maritalStatus,
-          getByKeys(raw, ["מצב משפחתי", "סטטוס משפחתי"])
-        )
-      ) || "לא צוין",
-    gender:
-      normalizeText(
-        firstNonEmpty(
-          personalRow.gender,
-          getByKeys(raw, ["מין", "מגדר"])
-        )
-      ) || "",
-    childrenCount: normalizeNumber(
-      firstNonEmpty(
-        personalRow.childrenCount,
-        getByKeys(raw, ["מספר ילדים", "ילדים"])
-      )
+    maritalStatus,
+    gender,
+    childrenCount,
+    personalDetailsFound: Boolean(
+      personalRow.personalMatched || personalRow.personal_age || personalRow.personal_maritalStatus || personalRow.employeeJoinKey
     ),
-    personalDetailsFound: true,
   };
 }
 
@@ -327,7 +342,8 @@ export function buildBaseUnifiedRows({
 
   return rows.map((sourceRow, index) => {
     const clientId = getClientId(sourceRow);
-    const personal = getPersonalFields(personalMap.get(clientId));
+    const personalSource = personalMap.get(clientId) || sourceRow;
+    const personal = getPersonalFields(personalSource);
 
     const issuerOriginal = getIssuerOriginal(sourceRow);
     const issuerCanonical = canonicalIssuer(issuerOriginal, aliasLookup);
@@ -355,7 +371,14 @@ export function buildBaseUnifiedRows({
       sourceFileName: sourceRow.sourceFileName || "",
 
       clientId,
+      employeeCode: sourceRow.employeeCode || clientId,
       clientName: getClientName(sourceRow),
+      personal_fullName: sourceRow.personal_fullName || getClientName(sourceRow),
+      personal_age: sourceRow.personal_age ?? personal.age,
+      personal_maritalStatus: sourceRow.personal_maritalStatus || personal.maritalStatus,
+      personal_gender: sourceRow.personal_gender || personal.gender,
+      personal_childrenCount: sourceRow.personal_childrenCount ?? personal.childrenCount,
+      personalMatched: Boolean(sourceRow.personalMatched || personal.personalDetailsFound),
 
       serviceStatus,
       sourceAuditStatus,
@@ -395,11 +418,14 @@ export function buildBaseUnifiedRows({
         ? getAccumulationFee(sourceRow)
         : null,
 
-      isExcludedFromFeeAudit: excluded,
+      depositFeeAgreement: normalizePercent(sourceRow.depositFeeAgreement),
+      accumulationFeeAgreement: normalizePercent(sourceRow.accumulationFeeAgreement),
+      isOperationOnly: Boolean(sourceRow.isOperationOnly || excluded),
+      isExcludedFromFeeAudit: excluded || Boolean(sourceRow.isOperationOnly),
 
-      auditStatus: excluded ? "excluded" : "",
-      auditStatusHe: excluded ? "הוחרג" : "",
-      auditReason: excluded
+      auditStatus: (excluded || sourceRow.isOperationOnly) ? "excluded" : "",
+      auditStatusHe: (excluded || sourceRow.isOperationOnly) ? "הוחרג" : "",
+      auditReason: (excluded || sourceRow.isOperationOnly)
         ? "תפעול בלבד / ללא שיווק — הוחרג מבדיקת דמי ניהול"
         : "",
 

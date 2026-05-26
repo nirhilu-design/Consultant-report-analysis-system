@@ -230,24 +230,25 @@ function detectInsuranceWaiver(row) {
 }
 
 function detectAccumulation(row) {
-  return normalizeNumber(
-    getByHeader(row, [
-      /צבירה/,
-      /יתרה/,
-      /חיסכון/,
-      /ערך.*פדיון/,
-      /סה.*כ.*חיסכון/,
-    ])
-  );
+  const direct = getByHeader(row, [
+    /^סה.*כ.*ערכי.*פידיון$/,
+    /^סה.*כ.*ערכי.*פדיון$/,
+    /^ערך.*פדיון.*כולל$/,
+    /^צבירה$/,
+    /^יתרה$/,
+  ]);
+
+  return normalizeNumber(direct);
 }
 
 function detectDepositFee(row) {
   return normalizeNumber(
     getByHeader(row, [
+      /דמי.*ניהול.*מפרמיה/,
+      /דמי.*ניהול.*פרמיה/,
       /דמי.*ניהול.*הפקדה/,
       /ד\.?נ.*הפקדה/,
       /מהפקדה/,
-      /הפקדות/,
     ])
   );
 }
@@ -263,13 +264,15 @@ function detectAccumulationFee(row) {
 }
 
 function detectTrack(row) {
-  return normalizeText(
-    getByHeader(row, [
-      /מסלול/,
-      /אפיק/,
-      /שם.*מסלול/,
-    ])
-  );
+  const namedTrack = getByHeader(row, [
+    /שם.*מסלול.*תגמולים/,
+    /שם.*מסלול.*פיצויים/,
+    /שם.*מסלול/,
+    /מסלול.*השקעה(?!.*קוד)/,
+    /אפיק/,
+  ]);
+
+  return normalizeText(namedTrack);
 }
 
 function hasRealData(row) {

@@ -98,17 +98,32 @@ function detectAccumulationThreshold(rows) {
 
 // ─── Row validator ────────────────────────────────────────────────────────────
 
+function detectAgreementLayout(row) {
+  // תומך בשני מבנים נפוצים:
+  // 1) [יצרן, מודל א הפקדה, מודל א צבירה, מודל גבוה הפקדה, מודל גבוה צבירה, הערות]
+  // 2) [ריק, יצרן, מודל א הפקדה, מודל א צבירה, מודל גבוה הפקדה, מודל גבוה צבירה, הערות]
+  const candidates = [
+    { issuerIndex: 0, feeStartIndex: 1 },
+    { issuerIndex: 1, feeStartIndex: 2 },
+  ];
+
+  for (const layout of candidates) {
+    const issuer = normalizeText(row[layout.issuerIndex]);
+    if (!issuer || issuer.startsWith("*") || /^\d+(?:\.\d+)?$/.test(issuer)) continue;
+
+    const feeIndexes = [0, 1, 2, 3].map((offset) => layout.feeStartIndex + offset);
+    const hasFee = feeIndexes.some(
+      (i) => row[i] !== null && row[i] !== undefined && typeof row[i] === "number"
+    );
+
+    if (hasFee) return { ...layout, issuer };
+  }
+
+  return null;
+}
+
 function isAgreementRow(row) {
-  // שורת נתון תקפה: col 1 = שם יצרן, ולפחות ערך אחד של דמי ניהול
-  const issuer = normalizeText(row[1]);
-  if (!issuer || issuer.startsWith("*")) return false;
-
-  // מקור הנתון: מספרים קטנים (< 1) שמייצגים דמי ניהול דצימליים
-  const hasFee = [2, 3, 4, 5].some(
-    (i) => row[i] !== null && row[i] !== undefined && typeof row[i] === "number"
-  );
-
-  return Boolean(issuer) && hasFee;
+  return Boolean(detectAgreementLayout(row));
 }
 
 // ─── Main parser ──────────────────────────────────────────────────────────────
@@ -134,12 +149,16 @@ export function parseAgreements(workbook) {
     rows.forEach((row) => {
       if (!isAgreementRow(row)) return;
 
-      const issuerRaw = normalizeText(row[1]);
+      const layout = detectAgreementLayout(row);
+      if (!layout) return;
+
+      const issuerRaw = layout.issuer;
       const issuer    = canonicalIssuer(issuerRaw) || issuerRaw;
+      const feeStart  = layout.feeStartIndex;
 
       // מודל א — כולם זכאים
-      const modelADepositFee      = normalizeFeePercent(row[2]);
-      const modelAAccumulationFee = normalizeFeePercent(row[3]);
+      const modelADepositFee      = normalizeFeePercent(row[feeStart]);
+      const modelAAccumulationFee = normalizeFeePercent(row[feeStart + 1]);
 
       if (modelADepositFee !== null || modelAAccumulationFee !== null) {
         agreements.push({
@@ -156,8 +175,8 @@ export function parseAgreements(workbook) {
       }
 
       // מודל צבירות גבוהות — רק אם יש ערכים
-      const highDepositFee      = normalizeFeePercent(row[4]);
-      const highAccumulationFee = normalizeFeePercent(row[5]);
+      const highDepositFee      = normalizeFeePercent(row[feeStart + 2]);
+      const highAccumulationFee = normalizeFeePercent(row[feeStart + 3]);
 
       if (
         (highDepositFee !== null || highAccumulationFee !== null) &&

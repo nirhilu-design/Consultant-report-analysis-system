@@ -194,7 +194,7 @@ function buildTierFlags(row, options, auditMatchModelName) {
 // ─── Single row ───────────────────────────────────────────────────────────────
 
 function evaluateRow(row, agreementOptionsByIssuer) {
-  if (row.isOperationOnly) {
+  if (row.isOperationOnly || row.isExcludedFromFeeAudit || row.auditStatus === AUDIT_STATUS.EXCLUDED) {
     return {
       agreementIssuerFound: false,
       agreementOptions:     [],
@@ -230,7 +230,7 @@ function evaluateRow(row, agreementOptionsByIssuer) {
   }
 
   return {
-    agreementIssuerFound: options.length > 0 || row.depositFeeAgreement !== null,
+    agreementIssuerFound: options.length > 0 || row.depositFeeAgreement !== null || row.accumulationFeeAgreement !== null,
     agreementOptions:     options,
     ...evaluation,
     ...tierFlags,

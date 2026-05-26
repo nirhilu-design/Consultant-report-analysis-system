@@ -14,6 +14,7 @@ function normalizePercent(value) {
   if (value === null || value === undefined || value === "") return null;
 
   if (typeof value === "number") {
+    if (!Number.isFinite(value)) return null;
     return value > 1 ? value : value * 100;
   }
 
@@ -25,10 +26,23 @@ function normalizePercent(value) {
   if (!text) return null;
 
   const parsed = Number(text);
-
   if (!Number.isFinite(parsed)) return null;
 
   return parsed > 1 ? parsed : parsed * 100;
+}
+
+function normalizeMoney(value) {
+  if (value === null || value === undefined || value === "") return null;
+
+  const text = String(value)
+    .replace(/,/g, "")
+    .replace(/[^\d.-]/g, "")
+    .trim();
+
+  if (!text) return null;
+
+  const parsed = Number(text);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function rowToText(row) {
@@ -53,61 +67,6 @@ function canonicalIssuerFromText(text) {
   return "";
 }
 
-function detectModelName(index, numbers) {
-  if (index === 0) return "מודל א";
-  if (index === 1) return "מודל ב";
-  return `מודל ${index + 1}`;
-}
-
-function extractNumbersFromRow(row) {
-  return row
-    .map((cell, index) => ({
-      index,
-      raw: cell,
-      value: normalizePercent(cell),
-    }))
-    .filter((item) => item.value !== null);
-}
-
-function buildOptionsFromNumbers(numbers) {
-  if (!numbers.length) return [];
-
-  const values = numbers.map((item) => item.value);
-
-  // Most common agreement matrix:
-  // [1.00, 0.15, 2.00, 0.05] = deposit A, asset A, deposit B, asset B
-  // Sometimes Hebrew Excel extraction reverses visual order:
-  // [0.05, 2.00, 0.15, 1.00] = asset B, deposit B, asset A, deposit A
-  const looksReversed =
-    values.length >= 4 &&
-    values[0] <= 0.3 &&
-    values[1] >= 0.5 &&
-    values[2] <= 0.3 &&
-    values[3] >= 0.5;
-
-  const ordered = looksReversed ? [...values].reverse() : values;
-
-  const options = [];
-
-  for (let i = 0; i < ordered.length; i += 2) {
-    const depositFee = ordered[i] ?? null;
-    const accumulationFee = ordered[i + 1] ?? null;
-
-    if (depositFee === null && accumulationFee === null) continue;
-
-    options.push({
-      optionName: detectModelName(options.length, ordered),
-      depositFee,
-      accumulationFee,
-      conditionType: "DEFAULT",
-      conditionValue: null,
-      isDefault: options.length === 0,
-    });
-  }
-
-  return options;
-}
-
 function detectThresholdFromSheet(rows) {
   const text = rows.map(rowToText).join(" ");
   const matches = text.match(/(\d{2,3}(?:,\d{3})+|\d{5,})/g);
@@ -115,20 +74,28 @@ function detectThresholdFromSheet(rows) {
   if (!matches) return null;
 
   const values = matches
-    .map((value) => Number(String(value).replace(/,/g, "")))
+    .map((value) => normalizeMoney(value))
     .filter((value) => Number.isFinite(value) && value >= 100000);
 
   return values.length ? Math.min(...values) : null;
 }
 
-function shouldSkipRow(row) {
-  const text = rowToText(row);
+function isAgreementDataRow(row) {
+  const issuer = canonicalIssuerFromText(rowToText(row));
+  if (!issuer) return false;
 
-  if (!text) return true;
-  if (/שם.*יצרן|יצרן|חברה.*מנהלת/.test(text) && /דמי.*ניהול|הפקדה|צבירה/.test(text)) return true;
-  if (/הערה|כפוף|בקשה|חתימה|פגישה/.test(text) && !canonicalIssuerFromText(text)) return true;
+  const feeCells = row.slice(1, 5).map(normalizePercent).filter((v) => v !== null);
+  return feeCells.length >= 2;
+}
 
-  return false;
+function getCellPercent(row, index) {
+  const value = normalizePercent(row[index]);
+
+  // Fee percentages in this business table should be small values such as 1, 1.75, 0.15, 0.05.
+  // Large numbers are usually thresholds inside notes, not fees.
+  if (value !== null && value > 20) return null;
+
+  return value;
 }
 
 export function parseAgreements(workbook) {
@@ -149,49 +116,45 @@ export function parseAgreements(workbook) {
     const sheetThreshold = detectThresholdFromSheet(rows);
 
     rows.forEach((row) => {
-      if (shouldSkipRow(row)) return;
+      if (!isAgreementDataRow(row)) return;
 
       const text = rowToText(row);
       const issuer = canonicalIssuerFromText(text);
-
       if (!issuer) return;
 
-      const numbers = extractNumbersFromRow(row);
-      const options = buildOptionsFromNumbers(numbers);
+      const modelADepositFee = getCellPercent(row, 1);
+      const modelAAccumulationFee = getCellPercent(row, 2);
+      const highAccumulationDepositFee = getCellPercent(row, 3);
+      const highAccumulationAccumulationFee = getCellPercent(row, 4);
 
-      options.forEach((option) => {
+      if (modelADepositFee !== null || modelAAccumulationFee !== null) {
         agreements.push({
           sheetName,
           manager: issuer,
           originalManager: issuer,
           issuer,
-          optionName: option.optionName,
-          depositFee: option.depositFee,
-          accumulationFee: option.accumulationFee,
-          conditionType: option.conditionType,
-          conditionValue: option.conditionValue,
-          isDefault: option.isDefault,
-          raw: {
-            row,
-            text,
-          },
+          optionName: "מודל א",
+          depositFee: modelADepositFee,
+          accumulationFee: modelAAccumulationFee,
+          conditionType: "DEFAULT",
+          conditionValue: null,
+          isDefault: true,
+          raw: { row, text },
         });
-      });
+      }
 
-      // If a second option exists and the sheet mentions high accumulation threshold,
-      // mark it as a tier option as well. The audit engine still checks all options,
-      // but this enables the "מודל צבירות גבוהות" analysis.
-      if (options.length >= 2 && sheetThreshold) {
-        const second = options[1];
-
+      if (
+        (highAccumulationDepositFee !== null || highAccumulationAccumulationFee !== null) &&
+        sheetThreshold
+      ) {
         agreements.push({
           sheetName,
           manager: issuer,
           originalManager: issuer,
           issuer,
           optionName: "מודל צבירות גבוהות",
-          depositFee: second.depositFee,
-          accumulationFee: second.accumulationFee,
+          depositFee: highAccumulationDepositFee,
+          accumulationFee: highAccumulationAccumulationFee,
           conditionType: "MIN_ACCUMULATION",
           conditionValue: sheetThreshold,
           isDefault: false,

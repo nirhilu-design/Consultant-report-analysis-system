@@ -4,7 +4,7 @@
 //
 // סדר עבודה:
 //   1. normalizeAgreementOptions  → agreementOptionsByIssuer
-//   2. buildBaseUnifiedRows       → unified rows עם issuerCanonical
+//   2. buildBaseUnifiedRows       → unified rows עם issuerCanonical + personalRows
 //   3. evaluateUnifiedRows        → audit per row
 //   4. buildPensionAnalytics      → KPI, matrices, action center
 // ─────────────────────────────────────────────────────────────────────────────
@@ -16,25 +16,32 @@ import { buildPensionAnalytics }     from "../unified/analyticsEngine.js";
 import { DEFAULT_ISSUER_ALIASES }    from "../unified/issuerAliases.js";
 import { PRODUCT_TYPES }             from "../unified/unifiedSchema.js";
 
-export function buildPensionSummary(pensionRows = [], agreements = [], options = {}) {
+export function buildPensionSummary(
+  pensionRows = [],
+  agreements = [],
+  options = {}
+) {
   const productType   = options.productType   || PRODUCT_TYPES.PENSION;
   const issuerAliases = options.issuerAliases || DEFAULT_ISSUER_ALIASES;
   const broker        = options.broker        || {};
+  const personalRows  = options.personalRows  || [];
 
   // שלב 1: נרמול הסכמים
-  const { optionsByIssuer: agreementOptionsByIssuer } = normalizeAgreementOptions({
-    agreements,
-    issuerAliases,
-    productType,
-  });
+  const { optionsByIssuer: agreementOptionsByIssuer } =
+    normalizeAgreementOptions({
+      agreements,
+      issuerAliases,
+      productType,
+    });
 
-  // שלב 2: בנה unified rows (issuerCanonical, normalization)
+  // שלב 2: בנה unified rows
   const baseRows = buildBaseUnifiedRows({
-    rows:           pensionRows,
+    rows: pensionRows,
+    personalRows,
     issuerAliases,
     productType,
     broker,
-    batchId:        options.batchId || "",
+    batchId: options.batchId || "",
   });
 
   // שלב 3: הרץ audit
@@ -49,21 +56,24 @@ export function buildPensionSummary(pensionRows = [], agreements = [], options =
 
   return {
     ...analytics,
+
     unifiedRows,
     agreementOptionsByIssuer,
 
-    // שדות תאימות לאחור עבור Dashboard
+    // תאימות לאחור עבור Dashboard
     managementFeesAudit: analytics.managementAudit,
-    actionCenter:        analytics.actionDrilldown,
+    actionCenter: analytics.actionDrilldown,
 
     // סיכום עליון
     summary: {
-      total:       unifiedRows.length,
-      valid:       unifiedRows.filter((r) => r.auditStatus === "valid").length,
-      invalid:     unifiedRows.filter((r) => r.auditStatus === "invalid").length,
-      excluded:    unifiedRows.filter((r) => r.auditStatus === "excluded").length,
+      total: unifiedRows.length,
+      valid: unifiedRows.filter((r) => r.auditStatus === "valid").length,
+      invalid: unifiedRows.filter((r) => r.auditStatus === "invalid").length,
+      excluded: unifiedRows.filter((r) => r.auditStatus === "excluded").length,
       tierPotential: unifiedRows.filter((r) => r.tierPotentialNotUsed).length,
-      noAgreement: unifiedRows.filter((r) => !r.agreementIssuerFound && r.auditStatus !== "excluded").length,
+      noAgreement: unifiedRows.filter(
+        (r) => !r.agreementIssuerFound && r.auditStatus !== "excluded"
+      ).length,
     },
   };
 }

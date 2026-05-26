@@ -1,71 +1,40 @@
 // Path: src/components/Dashboard.jsx
 import { useState, useMemo } from "react";
 
-// ─── Formatters ───────────────────────────────────────────────────────────────
-
-function fmtNumber(v) {
-  return Number(v || 0).toLocaleString("he-IL");
-}
-function fmtMoney(v) {
-  return "₪" + Number(v || 0).toLocaleString("he-IL", { maximumFractionDigits: 0 });
-}
-function fmtPercent(v) {
-  if (v === null || v === undefined) return "—";
-  return `${(Number(v) * 100).toFixed(1)}%`;
-}
-function fmtFee(v) {
-  if (v === null || v === undefined || v === "") return "—";
-  return `${Number(v).toFixed(2)}%`;
-}
-function fmtAccum(v) {
-  if (!v) return "—";
-  return "₪" + Number(v).toLocaleString("he-IL", { maximumFractionDigits: 0 });
-}
-
-// ─── Status badge ─────────────────────────────────────────────────────────────
+function fmtNumber(v) { return Number(v || 0).toLocaleString("he-IL"); }
+function fmtMoney(v)  { return "₪" + Number(v || 0).toLocaleString("he-IL", { maximumFractionDigits: 0 }); }
+function fmtFee(v)    { if (v === null || v === undefined) return "—"; return `${Number(v).toFixed(2)}%`; }
+function fmtPct(v)    { if (v === null || v === undefined) return "—"; return `${(Number(v) * 100).toFixed(1)}%`; }
 
 function StatusBadge({ status }) {
-  const map = {
-    "תקין":       "badge-success",
-    "valid":      "badge-success",
-    "לא תקין":    "badge-danger",
-    "invalid":    "badge-danger",
-    "תפעול בלבד": "badge-neutral",
-    "excluded":   "badge-neutral",
-  };
-  const cls = map[status] || "badge-neutral";
-  const label = status === "valid" ? "תקין"
-    : status === "invalid" ? "לא תקין"
-    : status === "excluded" ? "תפעול"
-    : status;
+  const map = { valid: ["badge-success","תקין"], invalid: ["badge-danger","לא תקין"], excluded: ["badge-neutral","תפעול"] };
+  const [cls, label] = map[status] || ["badge-neutral", status];
   return <span className={`badge ${cls}`}>{label}</span>;
 }
-
 function PriorityBadge({ priority }) {
   if (!priority) return null;
   const cls = priority === "HIGH" ? "badge-danger" : "badge-warning";
-  const label = priority === "HIGH" ? "גבוה" : "בינוני";
-  return <span className={`badge ${cls}`}>{label}</span>;
+  return <span className={`badge ${cls}`}>{priority === "HIGH" ? "גבוה" : "בינוני"}</span>;
+}
+function EmptyState({ text = "אין נתונים" }) {
+  return <div className="empty-state"><p>{text}</p></div>;
 }
 
-// ─── KPI Tab ──────────────────────────────────────────────────────────────────
-
+// ─── KPI ──────────────────────────────────────────────────────────────────────
 function KpiTab({ kpi }) {
   if (!kpi) return <EmptyState text="אין נתוני KPI" />;
-
   const cards = [
-    { label: "סה\"כ פוליסות",        value: fmtNumber(kpi.totalRows),          color: "card-blue" },
-    { label: "נבדקו",                 value: fmtNumber(kpi.auditedRows),         color: "card-blue" },
-    { label: "תקין",                  value: fmtNumber(kpi.validRows),           color: "card-green" },
-    { label: "לא תקין",              value: fmtNumber(kpi.invalidRows),          color: "card-red" },
-    { label: "תפעול בלבד",           value: fmtNumber(kpi.excludedRows),         color: "card-neutral" },
-    { label: "% עמידה",              value: fmtPercent(kpi.complianceRate),       color: kpi.complianceRate >= 0.9 ? "card-green" : "card-red" },
-    { label: "ללא הסכם",             value: fmtNumber(kpi.noAgreementRows),       color: "card-red" },
-    { label: "Tier Potential",        value: fmtNumber(kpi.tierPotentialRows),    color: "card-warning" },
-    { label: "Action Center",         value: fmtNumber(kpi.actionItems),          color: "card-warning" },
-    { label: "סך צבירה מנוהלת",       value: fmtMoney(kpi.totalAccumulation),    color: "card-blue" },
+    { label: "סה\"כ פוליסות",   value: fmtNumber(kpi.totalRows),       color: "card-blue" },
+    { label: "נבדקו",            value: fmtNumber(kpi.auditedRows),      color: "card-blue" },
+    { label: "תקין",             value: fmtNumber(kpi.validRows),        color: "card-green" },
+    { label: "לא תקין",         value: fmtNumber(kpi.invalidRows),       color: "card-red" },
+    { label: "תפעול בלבד",      value: fmtNumber(kpi.excludedRows),      color: "card-neutral" },
+    { label: "% עמידה",         value: fmtPct(kpi.complianceRate),       color: kpi.complianceRate >= 0.9 ? "card-green" : "card-red" },
+    { label: "ללא הסכם",        value: fmtNumber(kpi.noAgreementRows),   color: "card-red" },
+    { label: "Tier Potential",   value: fmtNumber(kpi.tierPotentialRows), color: "card-warning" },
+    { label: "Action Center",    value: fmtNumber(kpi.actionItems),       color: "card-warning" },
+    { label: "סך צבירה מנוהלת", value: fmtMoney(kpi.totalAccumulation), color: "card-blue" },
   ];
-
   return (
     <div className="kpi-grid">
       {cards.map(({ label, value, color }) => (
@@ -78,40 +47,33 @@ function KpiTab({ kpi }) {
   );
 }
 
-// ─── Management Fees Audit Tab ────────────────────────────────────────────────
-
+// ─── Management Fees ──────────────────────────────────────────────────────────
 function ManagementFeesTab({ audit }) {
-  if (!audit?.issuers?.length) return <EmptyState text="אין נתוני בקרת דמי ניהול" />;
-
+  if (!audit?.issuers?.length) return <EmptyState />;
   const { issuers, rows } = audit;
-
   return (
     <div className="table-wrap">
       <table className="data-table">
         <thead>
           <tr>
             <th className="col-label">מדד</th>
-            {issuers.map((iss) => <th key={iss}>{iss}</th>)}
+            {issuers.map((i) => <th key={i}>{i}</th>)}
           </tr>
         </thead>
         <tbody>
           {rows.map((row) => (
-            <tr
-              key={row.key}
-              className={
-                row.key === "invalid"    ? "row-danger"
-                : row.key === "valid"   ? "row-success"
-                : row.key === "total"   ? "row-total"
-                : row.key === "tier"    ? "row-warning"
-                : ""
-              }
-            >
+            <tr key={row.key} className={
+              row.key === "invalid" ? "row-danger" :
+              row.key === "valid"   ? "row-success" :
+              row.key === "total"   ? "row-total" :
+              row.key === "tier"    ? "row-warning" : ""
+            }>
               <td className="col-label">{row.label}</td>
-              {issuers.map((iss) => (
-                <td key={iss} className={row[iss] > 0 ? "has-value" : ""}>
+              {issuers.map((i) => (
+                <td key={i} className={row[i] > 0 ? "has-value" : ""}>
                   {row.key === "compliance"
-                    ? row[iss] === null ? "—" : `${(row[iss] * 100).toFixed(0)}%`
-                    : fmtNumber(row[iss])}
+                    ? row[i] === null ? "—" : `${(row[i] * 100).toFixed(0)}%`
+                    : fmtNumber(row[i])}
                 </td>
               ))}
             </tr>
@@ -122,12 +84,10 @@ function ManagementFeesTab({ audit }) {
   );
 }
 
-// ─── Generic Matrix Tab ───────────────────────────────────────────────────────
-
+// ─── Generic Matrix (ציר X = עמודות, ציר Y = שורות) ──────────────────────────
 function MatrixTab({ matrix, rowLabel }) {
-  if (!matrix?.rows?.length) return <EmptyState text="אין נתונים" />;
+  if (!matrix?.rows?.length) return <EmptyState />;
   const { columns, rows } = matrix;
-
   return (
     <div className="table-wrap">
       <table className="data-table">
@@ -154,31 +114,43 @@ function MatrixTab({ matrix, rowLabel }) {
   );
 }
 
-// ─── Accumulation Tier Tab ────────────────────────────────────────────────────
+// ─── Investment Track Tab — תגמולים ופיצויים בנפרד ───────────────────────────
+function InvestmentTrackTab({ rewardsMatrix, compensationMatrix }) {
+  const [subTab, setSubTab] = useState("תגמולים");
+  return (
+    <div>
+      <div className="sub-tabs">
+        {["תגמולים", "פיצויים"].map((t) => (
+          <button
+            key={t}
+            className={`sub-tab-btn ${subTab === t ? "active" : ""}`}
+            onClick={() => setSubTab(t)}
+          >{t}</button>
+        ))}
+      </div>
+      {subTab === "תגמולים"
+        ? <MatrixTab matrix={rewardsMatrix}      rowLabel="מסלול השקעה תגמולים" />
+        : <MatrixTab matrix={compensationMatrix} rowLabel="מסלול השקעה פיצויים" />
+      }
+    </div>
+  );
+}
 
+// ─── Accumulation Tier — רק עמודות רלוונטיות ─────────────────────────────────
 function AccumulationTierTab({ data }) {
-  if (!data?.length) return <EmptyState text="אין נתוני צבירה" />;
-
-  const cols = [
-    "מדרגת צבירה", "מספר פוליסות", "סך צבירה",
-    "יש מודל גבוה", "זכאי למודל גבוה", "נמצא במודל גבוה", "פוטנציאל לא מנוצל",
-  ];
-
+  if (!data?.length) return <EmptyState />;
+  const COLS = ["מדרגת צבירה", "סה\"כ פוליסות", "יש מודל גבוה", "זכאי למודל גבוה", "נמצא במודל גבוה", "פוטנציאל לא מנוצל"];
   return (
     <div className="table-wrap">
       <table className="data-table">
         <thead>
-          <tr>{cols.map((c) => <th key={c}>{c}</th>)}</tr>
+          <tr>{COLS.map((c) => <th key={c}>{c}</th>)}</tr>
         </thead>
         <tbody>
           {data.map((row) => (
-            <tr
-              key={row["מדרגת צבירה"]}
-              className={row["פוטנציאל לא מנוצל"] > 0 ? "row-warning" : ""}
-            >
+            <tr key={row["מדרגת צבירה"]} className={row["פוטנציאל לא מנוצל"] > 0 ? "row-warning" : ""}>
               <td className="col-label">{row["מדרגת צבירה"]}</td>
-              <td>{fmtNumber(row["מספר פוליסות"])}</td>
-              <td>{fmtMoney(row["סך צבירה"])}</td>
+              <td>{fmtNumber(row["סה\"כ פוליסות"])}</td>
               <td>{fmtNumber(row["יש מודל גבוה"])}</td>
               <td>{fmtNumber(row["זכאי למודל גבוה"])}</td>
               <td>{fmtNumber(row["נמצא במודל גבוה"])}</td>
@@ -193,31 +165,20 @@ function AccumulationTierTab({ data }) {
   );
 }
 
-// ─── Action Center Tab ────────────────────────────────────────────────────────
-
+// ─── Action Center ────────────────────────────────────────────────────────────
 function ActionCenterTab({ items }) {
   const [selected, setSelected] = useState(null);
-
   if (!items?.length) return <EmptyState text="אין פריטים לטיפול — הכל תקין 🎉" />;
-
   return (
     <div>
-      <p className="section-note">
-        {items.length} פריטים דורשים טיפול · לחץ על שורה לפרטים
-      </p>
+      <p className="section-note">{items.length} פריטים דורשים טיפול · לחץ על שורה לפרטים</p>
       <div className="table-wrap">
         <table className="data-table">
           <thead>
             <tr>
-              <th>קוד עובד</th>
-              <th>שם</th>
-              <th>יצרן</th>
-              <th>צבירה</th>
-              <th>ד.נ הפקדה</th>
-              <th>ד.נ צבירה</th>
-              <th>סטטוס</th>
-              <th>עדיפות</th>
-              <th>פעולה נדרשת</th>
+              <th>קוד עובד</th><th>שם</th><th>יצרן</th><th>צבירה</th>
+              <th>ד.נ הפקדה</th><th>מאושר</th><th>ד.נ צבירה</th><th>מאושר</th>
+              <th>סטטוס</th><th>עדיפות</th><th>פעולה נדרשת</th>
             </tr>
           </thead>
           <tbody>
@@ -231,39 +192,21 @@ function ActionCenterTab({ items }) {
                   <td>{item.employeeCode}</td>
                   <td>{item.clientName || "—"}</td>
                   <td>{item.issuer}</td>
-                  <td>{fmtAccum(item.accumulation)}</td>
-                  <td className={item.depositFee > (item.approvedDepositFee || 999) ? "cell-danger" : ""}>
-                    {fmtFee(item.depositFee)}
-                  </td>
-                  <td className={item.accumulationFee > (item.approvedAccumulationFee || 999) ? "cell-danger" : ""}>
-                    {fmtFee(item.accumulationFee)}
-                  </td>
+                  <td>{fmtMoney(item.accumulation)}</td>
+                  <td className={item.depositFee > (item.approvedDepositFee ?? 999) ? "cell-danger" : ""}>{fmtFee(item.depositFee)}</td>
+                  <td className="col-approved">{fmtFee(item.approvedDepositFee)}</td>
+                  <td className={item.accumulationFee > (item.approvedAccumulationFee ?? 999) ? "cell-danger" : ""}>{fmtFee(item.accumulationFee)}</td>
+                  <td className="col-approved">{fmtFee(item.approvedAccumulationFee)}</td>
                   <td><StatusBadge status={item.auditStatus} /></td>
                   <td><PriorityBadge priority={item.priority} /></td>
                   <td className="action-text">{item.requiredAction}</td>
                 </tr>
                 {selected === i && (
-                  <tr key={`detail-${i}`} className="detail-row">
-                    <td colSpan={9}>
+                  <tr key={`d${i}`} className="detail-row">
+                    <td colSpan={11}>
                       <div className="detail-box">
-                        <div className="detail-grid">
-                          <div>
-                            <span className="detail-label">סיבה:</span>
-                            <span>{item.auditReason}</span>
-                          </div>
-                          <div>
-                            <span className="detail-label">ד.נ מאושר הפקדה:</span>
-                            <span>{fmtFee(item.approvedDepositFee)}</span>
-                          </div>
-                          <div>
-                            <span className="detail-label">ד.נ מאושר צבירה:</span>
-                            <span>{fmtFee(item.approvedAccumulationFee)}</span>
-                          </div>
-                          <div>
-                            <span className="detail-label">קטגוריית בעיה:</span>
-                            <span>{item.issueCategory}</span>
-                          </div>
-                        </div>
+                        <span className="detail-label">סיבה: </span>{item.auditReason}
+                        <span className="detail-label" style={{marginRight:16}}>קטגוריה: </span>{item.issueCategory}
                       </div>
                     </td>
                   </tr>
@@ -277,11 +220,10 @@ function ActionCenterTab({ items }) {
   );
 }
 
-// ─── Unified Preview Tab ──────────────────────────────────────────────────────
-
+// ─── Unified Preview ──────────────────────────────────────────────────────────
 function UnifiedPreviewTab({ rows }) {
-  const [search, setSearch] = useState("");
-  const [filterStatus, setFilterStatus] = useState("הכל");
+  const [search, setSearch]       = useState("");
+  const [filterStatus, setFilter] = useState("הכל");
 
   const filtered = useMemo(() => {
     if (!rows) return [];
@@ -290,7 +232,8 @@ function UnifiedPreviewTab({ rows }) {
         String(r.employeeCode).includes(search) ||
         (r.personal_fullName || "").includes(search) ||
         (r.issuerOriginal || "").includes(search);
-      const matchStatus = filterStatus === "הכל" ||
+      const matchStatus =
+        filterStatus === "הכל" ||
         (filterStatus === "תקין"    && r.auditStatus === "valid") ||
         (filterStatus === "לא תקין" && r.auditStatus === "invalid") ||
         (filterStatus === "תפעול"   && r.auditStatus === "excluded");
@@ -301,21 +244,12 @@ function UnifiedPreviewTab({ rows }) {
   return (
     <div>
       <div className="filter-bar">
-        <input
-          className="search-input"
-          placeholder="חפש לפי קוד / שם / יצרן…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          dir="rtl"
-        />
-        {["הכל", "תקין", "לא תקין", "תפעול"].map((s) => (
-          <button
-            key={s}
+        <input className="search-input" placeholder="חפש קוד / שם / יצרן…"
+          value={search} onChange={(e) => setSearch(e.target.value)} dir="rtl" />
+        {["הכל","תקין","לא תקין","תפעול"].map((s) => (
+          <button key={s}
             className={`filter-btn ${filterStatus === s ? "active" : ""}`}
-            onClick={() => setFilterStatus(s)}
-          >
-            {s}
-          </button>
+            onClick={() => setFilter(s)}>{s}</button>
         ))}
         <span className="filter-count">{filtered.length} שורות</span>
       </div>
@@ -323,17 +257,10 @@ function UnifiedPreviewTab({ rows }) {
         <table className="data-table">
           <thead>
             <tr>
-              <th>קוד עובד</th>
-              <th>שם</th>
-              <th>יצרן</th>
-              <th>ד.נ הפקדה</th>
-              <th>ד.נ צבירה</th>
-              <th>צבירה</th>
-              <th>מסלול השקעה</th>
-              <th>גיל</th>
-              <th>מצב משפחתי</th>
-              <th>סטטוס</th>
-              <th>Tier</th>
+              <th>קוד</th><th>שם</th><th>יצרן</th>
+              <th>ד.נ הפקדה</th><th>מאושר</th><th>ד.נ צבירה</th><th>מאושר</th>
+              <th>צבירה</th><th>מסלול תגמולים</th><th>גיל</th><th>משפחתי</th>
+              <th>סטטוס</th><th>Tier</th>
             </tr>
           </thead>
           <tbody>
@@ -343,8 +270,10 @@ function UnifiedPreviewTab({ rows }) {
                 <td>{r.personal_fullName || "—"}</td>
                 <td>{r.issuerOriginal || r.issuerCanonical}</td>
                 <td>{fmtFee(r.depositFee)}</td>
+                <td className="col-approved">{fmtFee(r.depositFeeAgreement ?? r.auditReferenceDepositFee)}</td>
                 <td>{fmtFee(r.accumulationFee)}</td>
-                <td>{fmtAccum(r.accumulation)}</td>
+                <td className="col-approved">{fmtFee(r.accumulationFeeAgreement ?? r.auditReferenceAccumulationFee)}</td>
+                <td>{r.accumulation ? fmtMoney(r.accumulation) : "—"}</td>
                 <td className="col-track">{r.investmentTrackRewards || "—"}</td>
                 <td>{r.personal_age ?? "—"}</td>
                 <td>{r.personal_maritalStatus || "—"}</td>
@@ -359,14 +288,7 @@ function UnifiedPreviewTab({ rows }) {
   );
 }
 
-// ─── Empty state ──────────────────────────────────────────────────────────────
-
-function EmptyState({ text }) {
-  return <div className="empty-state"><p>{text}</p></div>;
-}
-
-// ─── Tab definitions ──────────────────────────────────────────────────────────
-
+// ─── Tabs ─────────────────────────────────────────────────────────────────────
 const TABS = [
   { id: "kpi",        label: "KPI" },
   { id: "fees",       label: "בקרת דמי ניהול" },
@@ -378,32 +300,31 @@ const TABS = [
 ];
 
 // ─── Main Dashboard ───────────────────────────────────────────────────────────
-
 export default function Dashboard({ analysisData }) {
   const [activeTab, setActiveTab] = useState("kpi");
-
   const { pensionSummary, pensionRows } = analysisData || {};
   const {
     kpi, managementAudit, managementFeesAudit,
-    insuranceTrackMarital, investmentTrackIssuer,
-    investmentTrackRewardsIssuer, accumulationTierAnalysis,
-    actionCenter, unifiedRows,
+    insuranceTrackMarital,
+    investmentTrackRewardsMarital, investmentTrackCompensationMarital,
+    accumulationTierAnalysis, actionCenter, unifiedRows,
   } = pensionSummary || {};
 
-  // aliases
-  const feesAudit  = managementAudit || managementFeesAudit;
-  const invMatrix  = investmentTrackIssuer || investmentTrackRewardsIssuer;
-  const actions    = actionCenter || [];
-
-  // Summary bar
-  const summary = pensionSummary?.summary;
+  const feesAudit = managementAudit || managementFeesAudit;
+  const actions   = actionCenter || [];
+  const summary   = pensionSummary?.summary;
 
   function renderTab() {
     switch (activeTab) {
       case "kpi":        return <KpiTab kpi={kpi} />;
       case "fees":       return <ManagementFeesTab audit={feesAudit} />;
       case "insurance":  return <MatrixTab matrix={insuranceTrackMarital} rowLabel="מסלול ביטוח" />;
-      case "investment": return <MatrixTab matrix={invMatrix} rowLabel="מסלול השקעה" />;
+      case "investment": return (
+        <InvestmentTrackTab
+          rewardsMatrix={investmentTrackRewardsMarital}
+          compensationMatrix={investmentTrackCompensationMarital}
+        />
+      );
       case "tier":       return <AccumulationTierTab data={accumulationTierAnalysis} />;
       case "action":     return <ActionCenterTab items={actions} />;
       case "preview":    return <UnifiedPreviewTab rows={unifiedRows || pensionRows} />;
@@ -413,12 +334,10 @@ export default function Dashboard({ analysisData }) {
 
   return (
     <div className="dashboard" dir="rtl">
-
-      {/* Header */}
       <header className="dashboard-header">
         <div>
           <h1 className="dashboard-title">ניתוח דוח פנסיוני</h1>
-          <p className="dashboard-subtitle">קרן פנסיה · {pensionRows?.length || 0} פוליסות · {analysisData?.files?.dataFile?.name || ""}</p>
+          <p className="dashboard-subtitle">קרן פנסיה · {pensionRows?.length || 0} פוליסות</p>
         </div>
         {summary && (
           <div className="summary-pills">
@@ -432,7 +351,6 @@ export default function Dashboard({ analysisData }) {
         )}
       </header>
 
-      {/* Tabs */}
       <nav className="tab-bar">
         {TABS.map((tab) => (
           <button
@@ -448,10 +366,7 @@ export default function Dashboard({ analysisData }) {
         ))}
       </nav>
 
-      {/* Content */}
-      <main className="dashboard-content">
-        {renderTab()}
-      </main>
+      <main className="dashboard-content">{renderTab()}</main>
     </div>
   );
 }

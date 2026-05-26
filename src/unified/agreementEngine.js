@@ -4,13 +4,13 @@
 import {
   canonicalIssuer,
   buildIssuerAliasLookup,
-} from "./issuerAliases";
+} from "./issuerAliases.js";
 
 import {
   normalizePercent,
   normalizeNumber,
   normalizeText,
-} from "./normalizers";
+} from "./normalizers.js";
 
 function getAgreementIssuer(agreement = {}) {
   return (
@@ -125,7 +125,7 @@ export function isEligibleOption(option, accumulation) {
   if (option.conditionType === "MIN_ACCUMULATION") {
     return option.conditionValue === null
       ? true
-      : acc > option.conditionValue;
+      : acc >= option.conditionValue;
   }
 
   if (option.conditionType === "MAX_ACCUMULATION") {

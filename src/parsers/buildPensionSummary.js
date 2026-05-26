@@ -7,16 +7,20 @@ import { buildPensionAnalytics } from "../unified/analyticsEngine.js";
 
 export function buildPensionSummary(pensionRows = [], agreements = [], options = {}) {
   const productType = options.productType || PRODUCT_TYPES.PENSION;
+  const issuerAliases = options.aliases || options.issuerAliases || DEFAULT_ISSUER_ALIASES;
 
-  const agreementOptionsByIssuer = normalizeAgreementOptions({
+  const agreementNormalization = normalizeAgreementOptions({
     agreements,
-    aliases: options.aliases || DEFAULT_ISSUER_ALIASES,
+    issuerAliases,
     productType,
   });
 
+  const agreementOptionsByIssuer =
+    agreementNormalization?.optionsByIssuer || agreementNormalization || {};
+
   const baseUnifiedRows = buildBaseUnifiedRows({
     rows: pensionRows,
-    aliases: options.aliases || DEFAULT_ISSUER_ALIASES,
+    issuerAliases,
     productType,
     broker: options.broker,
     batchId: options.batchId,
@@ -35,6 +39,10 @@ export function buildPensionSummary(pensionRows = [], agreements = [], options =
     unifiedRows,
     agreementOptionsByIssuer,
     noAgreementPolicies: unifiedRows.filter((row) => !row.agreementIssuerFound).length,
+
+    // Backward-compatible aliases for Dashboard variants that use older names.
+    managementFeesAudit: analytics.managementAudit,
+    actionCenter: analytics.actionDrilldown,
   };
 }
 

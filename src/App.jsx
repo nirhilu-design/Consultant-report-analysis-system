@@ -8,10 +8,7 @@ import { parsePensionFund } from "./parsers/pensionFundParser.js";
 import { parseAgreements } from "./parsers/agreementsParser.js";
 import { parsePersonalDetails } from "./parsers/personalDetailsParser.js";
 import { buildPensionSummary } from "./parsers/buildPensionSummary.js";
-import {
-  buildUnifiedEmployeeData,
-  enrichPensionRowsFromUnifiedEmployees,
-} from "./parsers/unifiedEmployeeDataBuilder.js";
+import { buildUnifiedPensionPersonalData } from "./parsers/unifiedPensionPersonalDataBuilder.js";
 
 import "./styles.css";
 
@@ -30,11 +27,8 @@ async function readWorkbook(file) {
 
 export default function App() {
   const [analysisStarted, setAnalysisStarted] = useState(false);
-
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-
   const [analysisError, setAnalysisError] = useState("");
-
   const [analysisData, setAnalysisData] = useState(null);
 
   const [files, setFiles] = useState({
@@ -45,93 +39,53 @@ export default function App() {
 
   async function handleStartAnalysis() {
     setIsAnalyzing(true);
-
     setAnalysisError("");
 
     try {
       const dataWorkbook = await readWorkbook(files.dataFile);
+      const agreementsWorkbook = await readWorkbook(files.agreementsFile);
+      const personalDetailsWorkbook = await readWorkbook(files.personalDetailsFile);
 
-      const agreementsWorkbook = await readWorkbook(
-        files.agreementsFile
-      );
+      const pensionRowsRaw = parsePensionFund(dataWorkbook);
+      const agreements = parseAgreements(agreementsWorkbook);
+      const personalDetails = parsePersonalDetails(personalDetailsWorkbook);
 
-      const personalDetailsWorkbook = await readWorkbook(
-        files.personalDetailsFile
-      );
-
-      // =========================
-      // Parsing
-      // =========================
-
-      const rawPensionRows = parsePensionFund(dataWorkbook);
-
-      const agreements = parseAgreements(
-        agreementsWorkbook
-      );
-
-      const personalDetails = parsePersonalDetails(
-        personalDetailsWorkbook
-      );
-
-      // =========================
-      // Unified Employee Data
-      // =========================
-
-      const unifiedEmployeeData = buildUnifiedEmployeeData(
-        rawPensionRows,
+      const unifiedPensionPersonalData = buildUnifiedPensionPersonalData(
+        pensionRowsRaw,
         personalDetails
       );
 
-      const pensionRows = enrichPensionRowsFromUnifiedEmployees(
-        rawPensionRows,
-        unifiedEmployeeData
-      );
+      const pensionRows = unifiedPensionPersonalData.rows;
 
       const personalDetailsMerge = {
-        source: "unifiedEmployeeData",
+        source: "unifiedPensionPersonalData",
         hasPersonalDetailsFile: Boolean(personalDetails?.hasFile),
         joinKey: "employeeCode",
         metadata: {
-          pensionRowCount: rawPensionRows.length,
-          clientProfileCount: personalDetails?.clientProfiles?.length || 0,
-          matchedPensionRows: pensionRows.filter(
-            (row) => row.personalProfileMatch?.matched
-          ).length,
-          unmatchedPensionRows: pensionRows.filter(
-            (row) => !row.personalProfileMatch?.matched
-          ).length,
-          matchedClientProfiles:
-            unifiedEmployeeData.metadata.employeesWithPersonalProfile,
+          pensionRowCount: unifiedPensionPersonalData.metadata.pensionRows,
+          clientProfileCount: unifiedPensionPersonalData.metadata.personalProfiles,
+          matchedPensionRows: unifiedPensionPersonalData.metadata.matchedPensionRows,
+          unmatchedPensionRows: unifiedPensionPersonalData.metadata.unmatchedPensionRows,
+          matchedClientProfiles: unifiedPensionPersonalData.metadata.matchedEmployees,
           unmatchedClientProfiles:
-            unifiedEmployeeData.metadata.personalProfilesWithoutPensionRows,
-          matchRate: unifiedEmployeeData.metadata.matchRate,
+            unifiedPensionPersonalData.metadata.personalProfilesWithoutPensionRows,
+          matchRate: unifiedPensionPersonalData.metadata.rowMatchRate,
           matchMethods: {
-            employeeCode:
-              unifiedEmployeeData.metadata.employeesWithPersonalProfile,
+            employeeCode: unifiedPensionPersonalData.metadata.matchedPensionRows,
           },
         },
       };
 
-      // =========================
-      // Summary
-      // =========================
-
-      const pensionSummary = buildPensionSummary(
-        pensionRows,
-        agreements
-      );
-
-      // =========================
-      // Final Object
-      // =========================
+      const pensionSummary = buildPensionSummary(pensionRows, agreements);
 
       setAnalysisData({
         pensionRows,
-        rawPensionRows,
+        rawPensionRows: pensionRowsRaw,
         agreements,
         personalDetails,
         personalDetailsMerge,
-        unifiedEmployeeData,
+        unifiedPensionPersonalData,
+        unifiedEmployeeData: unifiedPensionPersonalData,
         pensionSummary,
       });
 
@@ -195,3 +149,4 @@ export default function App() {
     </main>
   );
 }
+

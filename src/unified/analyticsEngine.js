@@ -56,17 +56,17 @@ export function buildManagementFeesAudit(unifiedRows = []) {
       return;
     }
 
-    if (/ב|B/i.test(row.auditMatchModelName || "")) {
-      rows.matchModelB[issuer] += 1;
-      return;
-    }
-
     if (
       /צביר|מדרג|MIN_ACCUMULATION|MAX_ACCUMULATION/.test(
         `${row.auditMatchModelName || ""} ${row.auditMatchRuleType || ""}`
       )
     ) {
       rows.matchTier[issuer] += 1;
+      return;
+    }
+
+    if (/מודל\s*ב|model\s*b/i.test(row.auditMatchModelName || "")) {
+      rows.matchModelB[issuer] += 1;
       return;
     }
 

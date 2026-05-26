@@ -1,229 +1,332 @@
-// NEW FILE
-// Path: src/unified/auditEngine.js
-
 import {
-  getProductConfig,
   AUDIT_STATUS,
   AUDIT_STATUS_HE,
+  AUDIT_MODELS,
   ISSUE_CATEGORY,
+  getProductConfig,
 } from "./unifiedSchema.js";
 
-import { isEligibleOption } from "./agreementEngine.js";
-
-function optionMatchesFull(row, option, config) {
-  const checks = [];
-
-  if (
-    config.hasDepositFee &&
-    row.depositFee !== null &&
-    option.depositFee !== null
-  ) {
-    checks.push(row.depositFee <= option.depositFee);
-  }
-
-  if (
-    config.hasAccumulationFee &&
-    row.accumulationFee !== null &&
-    option.accumulationFee !== null
-  ) {
-    checks.push(row.accumulationFee <= option.accumulationFee);
-  }
-
-  return checks.length > 0 && checks.every(Boolean);
-}
-
-function optionMatchesAccumulationOnly(row, option, config) {
-  if (!config.hasAccumulationFee) return false;
-  if (row.accumulationFee === null || option.accumulationFee === null) {
-    return false;
-  }
-
-  return row.accumulationFee <= option.accumulationFee;
-}
-
-function baselineEvaluation(row, config) {
-  const baseline = config.withoutAgreementBaseline || {};
-
-  const depositOk =
-    baseline.depositFee === null ||
-    row.depositFee === null ||
-    row.depositFee <= baseline.depositFee;
-
-  const accumulationOk =
-    baseline.accumulationFee === null ||
-    row.accumulationFee === null ||
-    row.accumulationFee <= baseline.accumulationFee;
-
-  const pass = depositOk && accumulationOk;
-
-  return {
-    auditStatus: pass ? AUDIT_STATUS.VALID : AUDIT_STATUS.INVALID,
-    auditStatusHe: pass ? AUDIT_STATUS_HE.VALID : AUDIT_STATUS_HE.INVALID,
-    auditMatchResult: pass ? "BASELINE_NO_AGREEMENT" : "BASELINE_FAILURE",
-    auditMatchModelName: "כלל בסיס ללא הסכם",
-    auditMatchRuleType: "WITHOUT_AGREEMENT",
-    auditReason: pass
-      ? "אין הסכם, אך דמי הניהול עומדים בכלל הבסיס"
-      : "אין הסכם ודמי הניהול חורגים מכלל הבסיס",
-    issueCategory: pass
-      ? ISSUE_CATEGORY.NONE
-      : ISSUE_CATEGORY.MISSING_AGREEMENT,
-    requiredAction: pass
-      ? ""
-      : "להשלים/לעדכן הסכם דמי ניהול ליצרן",
-    priority: pass ? "" : "HIGH",
-    auditReferenceDepositFee: baseline.depositFee,
-    auditReferenceAccumulationFee: baseline.accumulationFee,
-  };
-}
-
-function evaluateRow(row, options, config) {
-  if (row.isExcludedFromFeeAudit) {
-    return {
-      auditStatus: AUDIT_STATUS.EXCLUDED,
-      auditStatusHe: AUDIT_STATUS_HE.EXCLUDED,
-      auditMatchResult: "EXCLUDED_OPERATION_ONLY",
-      auditMatchModelName: "",
-      auditMatchRuleType: "EXCLUDED",
-      auditReason: row.auditReason || "הוחרג מבדיקת דמי ניהול",
-      issueCategory: ISSUE_CATEGORY.NONE,
-      requiredAction: "",
-      priority: "",
-    };
-  }
-
-  if (!options.length) {
-    return baselineEvaluation(row, config);
-  }
-
-  // Rule 1: full match against any approved model.
-  const fullMatch = options.find((option) =>
-    isEligibleOption(option, row.accumulation) &&
-    optionMatchesFull(row, option, config)
-  );
-
-  if (fullMatch) {
-    return {
-      auditStatus: AUDIT_STATUS.VALID,
-      auditStatusHe: AUDIT_STATUS_HE.VALID,
-      auditMatchResult: `MATCH_${fullMatch.optionName}`,
-      auditMatchModelName: fullMatch.optionName,
-      auditMatchRuleType: fullMatch.conditionType,
-      auditReason: `דמי הניהול עומדים במודל: ${fullMatch.optionName}`,
-      issueCategory: ISSUE_CATEGORY.NONE,
-      requiredAction: "",
-      priority: "",
-      auditReferenceDepositFee: fullMatch.depositFee,
-      auditReferenceAccumulationFee: fullMatch.accumulationFee,
-    };
-  }
-
-  // Rule 2: approved business rule:
-  // If actual accumulation fee is <= any approved accumulation fee option,
-  // the row is valid.
-  const accumulationMatch = options.find((option) =>
-    optionMatchesAccumulationOnly(row, option, config)
-  );
-
-  if (accumulationMatch) {
-    return {
-      auditStatus: AUDIT_STATUS.VALID,
-      auditStatusHe: AUDIT_STATUS_HE.VALID,
-      auditMatchResult: "MATCH_ACCUMULATION_FEE_APPROVED",
-      auditMatchModelName: accumulationMatch.optionName,
-      auditMatchRuleType: "ACCUMULATION_FEE_ONLY",
-      auditReason: `אושר לפי דמי ניהול מצבירה: בפועל נמוך/שווה למודל ${accumulationMatch.optionName}`,
-      issueCategory: ISSUE_CATEGORY.NONE,
-      requiredAction: "",
-      priority: "",
-      auditReferenceDepositFee: accumulationMatch.depositFee,
-      auditReferenceAccumulationFee: accumulationMatch.accumulationFee,
-    };
-  }
-
-  const reference = options[0] || {};
-
-  return {
-    auditStatus: AUDIT_STATUS.INVALID,
-    auditStatusHe: AUDIT_STATUS_HE.INVALID,
-    auditMatchResult: "NO_MATCHING_MODEL",
-    auditMatchModelName: reference.optionName || "",
-    auditMatchRuleType: reference.conditionType || "",
-    auditReason: "דמי הניהול אינם עומדים באף מודל מאושר",
-    issueCategory: ISSUE_CATEGORY.FEE_MISMATCH,
-    requiredAction: "בדיקת דמי ניהול מול היצרן/מנהל ההסדר",
-    priority: "HIGH",
-    auditReferenceDepositFee: reference.depositFee ?? null,
-    auditReferenceAccumulationFee: reference.accumulationFee ?? null,
-  };
-}
-
-function tierFlags(row, options = []) {
-  const tierOptions = options.filter((option) =>
-    ["MIN_ACCUMULATION", "MAX_ACCUMULATION"].includes(option.conditionType)
-  );
-
-  const eligibleTierOptions = tierOptions.filter((option) =>
-    isEligibleOption(option, row.accumulation)
-  );
-
-  const actualInTierModel = eligibleTierOptions.some((option) => {
-    if (row.accumulationFee === null || option.accumulationFee === null) {
-      return false;
-    }
-
-    return row.accumulationFee <= option.accumulationFee;
-  });
-
-  return {
-    hasTierModel: tierOptions.length > 0,
-    eligibleTierModel: eligibleTierOptions.length > 0,
-    actualInTierModel,
-    tierPotentialNotUsed:
-      eligibleTierOptions.length > 0 && !actualInTierModel,
-  };
-}
+import {
+  isEligibleOption,
+  getEligibleAgreementOptions,
+} from "./agreementEngine.js";
 
 export function evaluateUnifiedRows({
   unifiedRows = [],
-  agreementOptionsByIssuer = {},
-  productType,
+  agreementOptions = [],
 } = {}) {
-  const config = getProductConfig(productType);
+  return unifiedRows.map((row) =>
+    evaluateUnifiedRow({
+      row,
+      agreementOptions,
+    })
+  );
+}
 
-  return unifiedRows.map((row) => {
-    const options = agreementOptionsByIssuer[row.issuerCanonical] || [];
+export function auditUnifiedRows({
+  unifiedRows = [],
+  agreements = [],
+} = {}) {
+  return evaluateUnifiedRows({
+    unifiedRows,
+    agreementOptions: agreements,
+  });
+}
 
-    const evaluation = evaluateRow(row, options, config);
-    const tier = tierFlags(row, options);
+function evaluateUnifiedRow({
+  row,
+  agreementOptions,
+}) {
+  const config = getProductConfig(row.productType);
 
-    let issueCategory = evaluation.issueCategory;
-    let requiredAction = evaluation.requiredAction;
-    let priority = evaluation.priority;
+  if (isOperationalOnlyRow(row)) {
+    return buildAuditResult(row, {
+      auditStatus: AUDIT_STATUS.EXCLUDED,
+      auditStatusHe: AUDIT_STATUS_HE.EXCLUDED,
+      auditModel: AUDIT_MODELS.NONE,
+      auditReason: "שורת תפעול בלבד - לא נכללת בבקרת דמי ניהול",
+      issueCategory: ISSUE_CATEGORY.NONE,
+      auditDetails: {
+        ruleUsed: "OPERATIONAL_ONLY",
+        checkedOptions: [],
+        matchedOption: null,
+        failedReasons: [],
+      },
+    });
+  }
 
-    if (
-      tier.tierPotentialNotUsed &&
-      evaluation.auditStatus !== AUDIT_STATUS.INVALID &&
-      !row.isExcludedFromFeeAudit
-    ) {
-      issueCategory = ISSUE_CATEGORY.LARGE_BALANCE_NOT_OPTIMIZED;
-      requiredAction = "לבחון מעבר למודל צבירות גבוהות / מדרגה מוזלת";
-      priority = "MEDIUM";
+  const eligibleOptions = getEligibleAgreementOptions(
+    row,
+    agreementOptions
+  );
+
+  const checkedOptions = eligibleOptions.map((option) =>
+    buildCheckedOption(row, option, config)
+  );
+
+  const fullMatch = checkedOptions.find(
+    (option) => option.fullPass
+  );
+
+  if (fullMatch) {
+    return buildAuditResult(row, {
+      auditStatus: AUDIT_STATUS.VALID,
+      auditStatusHe: AUDIT_STATUS_HE.VALID,
+      auditModel: fullMatch.modelName || AUDIT_MODELS.STANDARD_MODEL,
+      auditReason: `תקין לפי ${formatModelLabel(fullMatch.modelName)}`,
+      issueCategory: ISSUE_CATEGORY.NONE,
+      auditDetails: {
+        ruleUsed: "FULL_MODEL_MATCH",
+        checkedOptions,
+        matchedOption: fullMatch,
+        failedReasons: [],
+      },
+    });
+  }
+
+  const tierMatch = checkedOptions.find(
+    (option) =>
+      option.isTierModel &&
+      option.accumulationPass &&
+      option.depositPass
+  );
+
+  if (tierMatch) {
+    return buildAuditResult(row, {
+      auditStatus: AUDIT_STATUS.VALID,
+      auditStatusHe: AUDIT_STATUS_HE.VALID,
+      auditModel: AUDIT_MODELS.TIER_MODEL,
+      auditReason: "תקין לפי מודל צבירות גבוהות / מדרגה",
+      issueCategory: ISSUE_CATEGORY.NONE,
+      auditDetails: {
+        ruleUsed: "HIGH_ACCUMULATION_TIER",
+        checkedOptions,
+        matchedOption: tierMatch,
+        failedReasons: [],
+      },
+    });
+  }
+
+  const accumulationOnlyMatch = checkedOptions.find(
+    (option) => option.accumulationPass
+  );
+
+  if (accumulationOnlyMatch) {
+    return buildAuditResult(row, {
+      auditStatus: AUDIT_STATUS.VALID,
+      auditStatusHe: AUDIT_STATUS_HE.VALID,
+      auditModel: "APPROVED_ACCUMULATION",
+      auditReason: "תקין לפי צבירה מאושרת",
+      issueCategory: ISSUE_CATEGORY.NONE,
+      auditDetails: {
+        ruleUsed: "APPROVED_ACCUMULATION_ONLY",
+        checkedOptions,
+        matchedOption: accumulationOnlyMatch,
+        failedReasons: collectFailedReasons(checkedOptions),
+      },
+    });
+  }
+
+  if (!eligibleOptions.length) {
+    return applyBaselineAudit(row, config, checkedOptions);
+  }
+
+  return buildAuditResult(row, {
+    auditStatus: AUDIT_STATUS.INVALID,
+    auditStatusHe: AUDIT_STATUS_HE.INVALID,
+    auditModel: AUDIT_MODELS.NONE,
+    auditReason: "דמי הניהול גבוהים מההסכמים המאושרים",
+    issueCategory: ISSUE_CATEGORY.MANAGEMENT_FEES,
+    auditDetails: {
+      ruleUsed: "FAILED_ALL_AGREEMENT_OPTIONS",
+      checkedOptions,
+      matchedOption: null,
+      failedReasons: collectFailedReasons(checkedOptions),
+    },
+  });
+}
+
+function buildCheckedOption(row, option, config) {
+  const actualAccumulationFee = normalizeNumber(row.accumulationFee);
+  const actualDepositFee = normalizeNumber(row.depositFee);
+
+  const approvedAccumulationFee = normalizeNumber(option.accumulationFee);
+  const approvedDepositFee = normalizeNumber(option.depositFee);
+
+  const supportsDepositFee = config.supportsDepositFees;
+
+  const accumulationPass =
+    actualAccumulationFee <= approvedAccumulationFee;
+
+  const depositPass =
+    !supportsDepositFee ||
+    approvedDepositFee === 0 ||
+    actualDepositFee <= approvedDepositFee;
+
+  const eligible = isEligibleOption(row, option);
+
+  const minAccumulation = normalizeNumber(option.minAccumulation);
+  const isTierModel =
+    option.modelName === AUDIT_MODELS.TIER_MODEL ||
+    minAccumulation > 0;
+
+  return {
+    eligible,
+    modelName: option.modelName || AUDIT_MODELS.STANDARD_MODEL,
+    issuerCanonical: option.issuerCanonical,
+    productType: option.productType,
+
+    minAccumulation,
+
+    actualAccumulation: normalizeNumber(row.accumulation),
+
+    actualAccumulationFee,
+    approvedAccumulationFee,
+    accumulationPass,
+
+    actualDepositFee,
+    approvedDepositFee,
+    depositPass,
+
+    isTierModel,
+
+    fullPass:
+      eligible &&
+      accumulationPass &&
+      depositPass,
+  };
+}
+
+function applyBaselineAudit(row, config, checkedOptions) {
+  const actualAccumulationFee = normalizeNumber(row.accumulationFee);
+  const actualDepositFee = normalizeNumber(row.depositFee);
+
+  const baselineAccumulationFee = normalizeNumber(
+    config.baselineAccumulationFee
+  );
+
+  const baselineDepositFee = normalizeNumber(
+    config.baselineDepositFee
+  );
+
+  const accumulationPass =
+    actualAccumulationFee <= baselineAccumulationFee;
+
+  const depositPass =
+    !config.supportsDepositFees ||
+    actualDepositFee <= baselineDepositFee;
+
+  if (accumulationPass && depositPass) {
+    return buildAuditResult(row, {
+      auditStatus: AUDIT_STATUS.VALID_BASELINE,
+      auditStatusHe: AUDIT_STATUS_HE.VALID_BASELINE,
+      auditModel: AUDIT_MODELS.BASELINE,
+      auditReason: "תקין לפי כלל ברירת מחדל ליצרן ללא הסכם",
+      issueCategory: ISSUE_CATEGORY.NONE,
+      auditDetails: {
+        ruleUsed: "BASELINE_VALID",
+        checkedOptions,
+        matchedOption: {
+          modelName: AUDIT_MODELS.BASELINE,
+          actualAccumulationFee,
+          approvedAccumulationFee: baselineAccumulationFee,
+          accumulationPass,
+          actualDepositFee,
+          approvedDepositFee: baselineDepositFee,
+          depositPass,
+        },
+        failedReasons: [],
+      },
+    });
+  }
+
+  return buildAuditResult(row, {
+    auditStatus: AUDIT_STATUS.INVALID,
+    auditStatusHe: AUDIT_STATUS_HE.INVALID,
+    auditModel: AUDIT_MODELS.BASELINE,
+    auditReason: "חריגה מכלל ברירת מחדל ליצרן ללא הסכם",
+    issueCategory: ISSUE_CATEGORY.NO_AGREEMENT,
+    auditDetails: {
+      ruleUsed: "BASELINE_INVALID",
+      checkedOptions,
+      matchedOption: null,
+      failedReasons: [
+        !accumulationPass
+          ? `דמי ניהול מצבירה ${actualAccumulationFee}% גבוהים מהמאושר ${baselineAccumulationFee}%`
+          : null,
+        !depositPass
+          ? `דמי ניהול מהפקדה ${actualDepositFee}% גבוהים מהמאושר ${baselineDepositFee}%`
+          : null,
+      ].filter(Boolean),
+    },
+  });
+}
+
+function buildAuditResult(row, auditFields) {
+  return {
+    ...row,
+    ...auditFields,
+  };
+}
+
+function collectFailedReasons(checkedOptions) {
+  const reasons = [];
+
+  checkedOptions.forEach((option) => {
+    if (!option.accumulationPass) {
+      reasons.push(
+        `${formatModelLabel(option.modelName)}: דמי ניהול מצבירה בפועל ${option.actualAccumulationFee}% גבוהים מהמאושר ${option.approvedAccumulationFee}%`
+      );
     }
 
-    return {
-      ...row,
-
-      agreementIssuerFound: options.length > 0,
-      agreementOptions: options,
-      agreementOptionsCount: options.length,
-
-      ...evaluation,
-      ...tier,
-
-      issueCategory,
-      requiredAction,
-      priority,
-    };
+    if (!option.depositPass) {
+      reasons.push(
+        `${formatModelLabel(option.modelName)}: דמי ניהול מהפקדה בפועל ${option.actualDepositFee}% גבוהים מהמאושר ${option.approvedDepositFee}%`
+      );
+    }
   });
+
+  return [...new Set(reasons)];
+}
+
+function formatModelLabel(modelName) {
+  if (!modelName) return "מודל הסכם";
+
+  const modelMap = {
+    [AUDIT_MODELS.MODEL_A]: "מודל א",
+    [AUDIT_MODELS.MODEL_B]: "מודל ב",
+    [AUDIT_MODELS.TIER_MODEL]: "מודל צבירות גבוהות / מדרגה",
+    [AUDIT_MODELS.BASELINE]: "כלל ברירת מחדל",
+    [AUDIT_MODELS.STANDARD_MODEL]: "מודל הסכם",
+    APPROVED_ACCUMULATION: "צבירה מאושרת",
+  };
+
+  return modelMap[modelName] || modelName;
+}
+
+function isOperationalOnlyRow(row) {
+  return (
+    row?.isOperationalOnly === true ||
+    row?.auditStatus === AUDIT_STATUS.EXCLUDED ||
+    String(row?.productType || "").toLowerCase() === "operational"
+  );
+}
+
+function normalizeNumber(value) {
+  if (
+    value === undefined ||
+    value === null ||
+    value === ""
+  ) {
+    return 0;
+  }
+
+  const normalized = String(value)
+    .replace(/,/g, "")
+    .replace(/%/g, "")
+    .trim();
+
+  const parsed = Number(normalized);
+
+  return Number.isNaN(parsed) ? 0 : parsed;
 }

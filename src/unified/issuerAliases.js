@@ -1,7 +1,7 @@
 // NEW FILE
 // Path: src/unified/issuerAliases.js
 
-import { normalizeLooseText } from "./normalizers";
+import { normalizeLooseText } from "./normalizers.js";
 
 export const DEFAULT_ISSUER_ALIASES = {
   "הפניקס": [

@@ -7,12 +7,14 @@
 //   2. buildBaseUnifiedRows       → unified rows עם issuerCanonical + personalRows
 //   3. evaluateUnifiedRows        → audit per row
 //   4. buildPensionAnalytics      → KPI, matrices, action center
+//   5. buildDataQuality           → בקרת איכות נתונים
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { normalizeAgreementOptions } from "../unified/agreementEngine.js";
 import { buildBaseUnifiedRows }      from "../unified/rawToUnifiedRows.js";
 import { evaluateUnifiedRows }       from "../unified/auditEngine.js";
 import { buildPensionAnalytics }     from "../unified/analyticsEngine.js";
+import { buildDataQuality }          from "../unified/dataQualityEngine.js";
 import { DEFAULT_ISSUER_ALIASES }    from "../unified/issuerAliases.js";
 import { PRODUCT_TYPES }             from "../unified/unifiedSchema.js";
 
@@ -43,7 +45,6 @@ export function buildPensionSummary(
   const broker        = options.broker        || {};
   const personalRows  = options.personalRows  || [];
 
-  // שלב 1: נרמול הסכמים
   const { optionsByIssuer: agreementOptionsByIssuer } =
     normalizeAgreementOptions({
       agreements,
@@ -51,7 +52,6 @@ export function buildPensionSummary(
       productType,
     });
 
-  // שלב 2: בנה unified rows
   const baseRows = buildBaseUnifiedRows({
     rows: pensionRows,
     personalRows,
@@ -61,15 +61,14 @@ export function buildPensionSummary(
     batchId: options.batchId || "",
   });
 
-  // שלב 3: הרץ audit
   const unifiedRows = evaluateUnifiedRows({
     unifiedRows: baseRows,
     agreementOptionsByIssuer,
     productType,
   });
 
-  // שלב 4: analytics
   const analytics = buildPensionAnalytics(unifiedRows);
+  const dataQuality = buildDataQuality(unifiedRows);
 
   const auditedRows = unifiedRows.filter((r) => r.auditStatus !== "excluded");
 
@@ -78,12 +77,11 @@ export function buildPensionSummary(
 
     unifiedRows,
     agreementOptionsByIssuer,
+    dataQuality,
 
-    // תאימות לאחור עבור Dashboard
     managementFeesAudit: analytics.managementAudit,
     actionCenter: analytics.actionDrilldown,
 
-    // סיכום עליון
     summary: {
       total: unifiedRows.length,
       audited: auditedRows.length,
@@ -92,6 +90,8 @@ export function buildPensionSummary(
       excluded: unifiedRows.filter((r) => r.auditStatus === "excluded").length,
       tierPotential: unifiedRows.filter((r) => r.tierPotentialNotUsed).length,
       noAgreement: auditedRows.filter((r) => !hasAnyAgreement(r)).length,
+      dataQualityIssues: dataQuality.summary.issueCount,
+      dataQualityHighIssues: dataQuality.summary.highIssues,
     },
   };
 }

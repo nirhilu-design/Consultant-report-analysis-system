@@ -45,7 +45,14 @@ function PriorityBadge({ priority }) {
   if (!priority) return null;
 
   const cls = priority === "HIGH" ? "badge-danger" : "badge-warning";
-  const label = priority === "HIGH" ? "גבוה" : "בינוני";
+  const label =
+    priority === "HIGH"
+      ? "גבוה"
+      : priority === "MEDIUM"
+        ? "בינוני"
+        : priority === "LOW"
+          ? "נמוך"
+          : priority;
 
   return <span className={`badge ${cls}`}>{label}</span>;
 }
@@ -835,6 +842,169 @@ function QaTraceTab({ rows }) {
   );
 }
 
+// ─── Data Quality Tab ─────────────────────────────────────────────────────────
+
+function DataQualityTab({ dataQuality }) {
+  const [severityFilter, setSeverityFilter] = useState("הכל");
+  const [categoryFilter, setCategoryFilter] = useState("הכל");
+  const [search, setSearch] = useState("");
+
+  if (!dataQuality) {
+    return <EmptyState text="אין נתוני איכות" />;
+  }
+
+  const { summary, issues = [], byCategory = {} } = dataQuality;
+
+  const categories = ["הכל", ...Object.keys(byCategory)];
+
+  const filteredIssues = issues.filter((issue) => {
+    const matchSeverity =
+      severityFilter === "הכל" || issue.severity === severityFilter;
+
+    const matchCategory =
+      categoryFilter === "הכל" || issue.category === categoryFilter;
+
+    const haystack = [
+      issue.issueLabel,
+      issue.issueCode,
+      issue.category,
+      issue.employeeCode,
+      issue.clientName,
+      issue.issuer,
+      issue.recommendation,
+    ]
+      .filter(Boolean)
+      .join(" ");
+
+    const matchSearch = !search || haystack.includes(search);
+
+    return matchSeverity && matchCategory && matchSearch;
+  });
+
+  return (
+    <div>
+      <div className="kpi-grid" style={{ marginBottom: 20 }}>
+        <div className="kpi-card card-blue">
+          <span className="kpi-label">סה״כ בעיות</span>
+          <strong className="kpi-value">{fmtNumber(summary.issueCount)}</strong>
+        </div>
+
+        <div className="kpi-card card-red">
+          <span className="kpi-label">בעיות קריטיות</span>
+          <strong className="kpi-value">{fmtNumber(summary.highIssues)}</strong>
+        </div>
+
+        <div className="kpi-card card-warning">
+          <span className="kpi-label">בעיות בינוניות</span>
+          <strong className="kpi-value">{fmtNumber(summary.mediumIssues)}</strong>
+        </div>
+
+        <div className="kpi-card card-neutral">
+          <span className="kpi-label">בעיות קלות</span>
+          <strong className="kpi-value">{fmtNumber(summary.lowIssues)}</strong>
+        </div>
+
+        <div className="kpi-card card-warning">
+          <span className="kpi-label">דמיון תגמולים/פיצויים</span>
+          <strong className="kpi-value">
+            {fmtPct(summary.trackSimilarity?.sameTrackRate || 0)}
+          </strong>
+        </div>
+      </div>
+
+      <div className="filter-bar">
+        <input
+          className="search-input"
+          placeholder="חפש בעיה / עובד / יצרן…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          dir="rtl"
+        />
+
+        {["הכל", "HIGH", "MEDIUM", "LOW"].map((f) => (
+          <button
+            key={f}
+            className={`filter-btn ${severityFilter === f ? "active" : ""}`}
+            onClick={() => setSeverityFilter(f)}
+          >
+            {f === "HIGH"
+              ? "קריטי"
+              : f === "MEDIUM"
+                ? "בינוני"
+                : f === "LOW"
+                  ? "נמוך"
+                  : "הכל"}
+          </button>
+        ))}
+
+        <select
+          className="search-input"
+          value={categoryFilter}
+          onChange={(e) => setCategoryFilter(e.target.value)}
+          dir="rtl"
+        >
+          {categories.map((category) => (
+            <option key={category} value={category}>
+              {category === "הכל"
+                ? "כל הקטגוריות"
+                : `${category} (${byCategory[category] || 0})`}
+            </option>
+          ))}
+        </select>
+
+        <span className="filter-count">
+          {filteredIssues.length} מתוך {issues.length} בעיות
+        </span>
+      </div>
+
+      <div className="table-wrap">
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>חומרה</th>
+              <th>קטגוריה</th>
+              <th>קוד בעיה</th>
+              <th>בעיה</th>
+              <th>קוד עובד</th>
+              <th>שם</th>
+              <th>יצרן</th>
+              <th>צבירה</th>
+              <th>המלצה</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            {filteredIssues.map((issue, index) => (
+              <tr
+                key={`${issue.issueCode}-${index}`}
+                className={
+                  issue.severity === "HIGH"
+                    ? "row-danger"
+                    : issue.severity === "MEDIUM"
+                      ? "row-warning"
+                      : ""
+                }
+              >
+                <td>
+                  <PriorityBadge priority={issue.severity} />
+                </td>
+                <td>{issue.category}</td>
+                <td>{issue.issueCode}</td>
+                <td className="action-text">{issue.issueLabel}</td>
+                <td>{issue.employeeCode || "—"}</td>
+                <td>{issue.clientName || "—"}</td>
+                <td>{issue.issuer || "—"}</td>
+                <td>{issue.accumulation ? fmtMoney(issue.accumulation) : "—"}</td>
+                <td className="action-text">{issue.recommendation}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 // ─── Tabs ─────────────────────────────────────────────────────────────────────
 
 const TABS = [
@@ -846,6 +1016,7 @@ const TABS = [
   { id: "action", label: "Action Center" },
   { id: "preview", label: "Unified Preview" },
   { id: "qa", label: "QA Trace" },
+  { id: "quality", label: "Data Quality" },
 ];
 
 // ─── Main Dashboard ───────────────────────────────────────────────────────────
@@ -866,6 +1037,7 @@ export default function Dashboard({ analysisData }) {
     accumulationTierAnalysis,
     actionCenter,
     unifiedRows,
+    dataQuality,
   } = pensionSummary || {};
 
   const feesAudit = managementAudit || managementFeesAudit;
@@ -910,6 +1082,9 @@ export default function Dashboard({ analysisData }) {
       case "qa":
         return <QaTraceTab rows={previewRows} />;
 
+      case "quality":
+        return <DataQualityTab dataQuality={dataQuality} />;
+
       default:
         return null;
     }
@@ -944,6 +1119,12 @@ export default function Dashboard({ analysisData }) {
                 ⚠ {summary.tierPotential} מודל צבירה
               </span>
             )}
+
+            {summary.dataQualityIssues > 0 && (
+              <span className="pill pill-warning">
+                QA {summary.dataQualityIssues} בעיות
+              </span>
+            )}
           </div>
         )}
       </header>
@@ -959,6 +1140,12 @@ export default function Dashboard({ analysisData }) {
 
             {tab.id === "action" && actions.length > 0 && (
               <span className="tab-badge">{actions.length}</span>
+            )}
+
+            {tab.id === "quality" && dataQuality?.summary?.issueCount > 0 && (
+              <span className="tab-badge">
+                {dataQuality.summary.issueCount}
+              </span>
             )}
           </button>
         ))}

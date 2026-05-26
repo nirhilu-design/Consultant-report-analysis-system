@@ -57,6 +57,12 @@ export default function App() {
 
       const pensionRows = unifiedPensionPersonalData.rows;
 
+      const personalRows =
+        personalDetails?.clientProfiles ||
+        personalDetails?.rows ||
+        personalDetails?.rawRows ||
+        [];
+
       const personalDetailsMerge = {
         source: "unifiedPensionPersonalData",
         hasPersonalDetailsFile: Boolean(personalDetails?.hasFile),
@@ -76,13 +82,16 @@ export default function App() {
         },
       };
 
-      const pensionSummary = buildPensionSummary(pensionRows, agreements);
+      const pensionSummary = buildPensionSummary(pensionRows, agreements, {
+        personalRows,
+      });
 
       setAnalysisData({
         pensionRows,
         rawPensionRows: pensionRowsRaw,
         agreements,
         personalDetails,
+        personalRows,
         personalDetailsMerge,
         unifiedPensionPersonalData,
         unifiedEmployeeData: unifiedPensionPersonalData,

@@ -207,3 +207,13 @@ body {
   min-height: 200px; color: #718096; font-size: 15px;
   border: 2px dashed #e2e8f0; border-radius: 10px;
 }
+
+/* ── Sub tabs (תגמולים / פיצויים) ── */
+.sub-tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+.sub-tab-btn {
+  padding: 6px 20px; border: 1px solid #e2e8f0; border-radius: 6px;
+  background: #fff; font-size: 13px; cursor: pointer; color: #4a5568;
+  transition: all .15s;
+}
+.sub-tab-btn.active { background: #ebf8ff; border-color: #3182ce; color: #2b6cb0; font-weight: 600; }
+.col-approved { color: #718096; font-size: 12px; }

@@ -1,0 +1,134 @@
+.personalDetailsQaCard {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.sectionHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.statusPill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 84px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.statusPill.success {
+  background: #e7f8ef;
+  color: #087443;
+}
+
+.statusPill.warning {
+  background: #fff7df;
+  color: #8a5a00;
+}
+
+.statusPill.error {
+  background: #fde8e8;
+  color: #b42318;
+}
+
+.qaStatusBox {
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid transparent;
+}
+
+.qaStatusBox strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.qaStatusBox p {
+  margin: 0;
+  color: #475467;
+}
+
+.qaStatusBox.success {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+
+.qaStatusBox.warning {
+  background: #fffbeb;
+  border-color: #fde68a;
+}
+
+.qaStatusBox.error {
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+
+.qaGrid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.qaMetric {
+  padding: 14px;
+  border-radius: 14px;
+  background: #f8fafc;
+  border: 1px solid #e4e7ec;
+}
+
+.qaMetric span {
+  display: block;
+  margin-bottom: 6px;
+  color: #667085;
+  font-size: 13px;
+}
+
+.qaMetric strong {
+  display: block;
+  font-size: 20px;
+  color: #101828;
+}
+
+.qaTableWrap {
+  overflow-x: auto;
+}
+
+.qaTable {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 760px;
+}
+
+.qaTable th,
+.qaTable td {
+  padding: 10px 12px;
+  border-bottom: 1px solid #e4e7ec;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.qaTable th {
+  color: #475467;
+  font-size: 13px;
+  background: #f9fafb;
+}
+
+.qaTable td {
+  color: #101828;
+  font-size: 14px;
+}
+
+@media (max-width: 900px) {
+  .qaGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .sectionHeader {
+    flex-direction: column;
+  }
+}

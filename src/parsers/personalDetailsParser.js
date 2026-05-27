@@ -51,24 +51,14 @@ function isBlank(value) {
 
 function normalizeCell(value) {
   if (value === undefined || value === null) return "";
-
-  if (value instanceof Date) {
-    return value;
-  }
-
-  if (typeof value === "string") {
-    return normalizeText(value);
-  }
-
+  if (value instanceof Date) return value;
+  if (typeof value === "string") return normalizeText(value);
   return value;
 }
 
 function toNumber(value) {
   if (isBlank(value)) return null;
-
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value;
-  }
+  if (typeof value === "number" && Number.isFinite(value)) return value;
 
   const normalized = normalizeText(value)
     .replace(/,/g, "")
@@ -76,13 +66,11 @@ function toNumber(value) {
     .replace(/%/g, "");
 
   const parsed = Number(normalized);
-
   return Number.isFinite(parsed) ? parsed : null;
 }
 
 function toInteger(value) {
   const parsed = toNumber(value);
-
   return parsed === null ? null : Math.round(parsed);
 }
 
@@ -102,26 +90,17 @@ function pad2(value) {
 
 function dateToIsoDate(date) {
   if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "";
-
   return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
 }
 
 function normalizeDate(value) {
   if (isBlank(value)) return "";
-
-  if (value instanceof Date) {
-    return dateToIsoDate(value);
-  }
+  if (value instanceof Date) return dateToIsoDate(value);
 
   if (typeof value === "number") {
     const date = excelSerialToDate(value);
-
     if (date) return dateToIsoDate(date);
-
-    if (value >= 1900 && value <= 2200) {
-      return String(Math.round(value));
-    }
-
+    if (value >= 1900 && value <= 2200) return String(Math.round(value));
     return "";
   }
 
@@ -131,14 +110,12 @@ function normalizeDate(value) {
   if (dayMonthYear) {
     const [, day, month, rawYear] = dayMonthYear;
     const year = rawYear.length === 2 ? `20${rawYear}` : rawYear;
-
     return `${year}-${pad2(month)}-${pad2(day)}`;
   }
 
   const monthYear = text.match(/^(\d{1,2})[./-](\d{4})$/);
   if (monthYear) {
     const [, month, year] = monthYear;
-
     return `${year}-${pad2(month)}`;
   }
 
@@ -150,31 +127,25 @@ function normalizeDate(value) {
 
 function extractYear(value) {
   if (isBlank(value)) return null;
-
-  if (value instanceof Date) {
-    return value.getFullYear();
-  }
+  if (value instanceof Date) return value.getFullYear();
 
   if (typeof value === "number") {
     if (value >= 1900 && value <= 2200) return Math.round(value);
-
     const date = excelSerialToDate(value);
     return date ? date.getFullYear() : null;
   }
 
   const text = normalizeText(value);
   const match = text.match(/(19|20)\d{2}/);
-
   return match ? Number(match[0]) : null;
 }
 
 function toBooleanHebrew(value) {
   if (isBlank(value)) return null;
 
-  const text = normalizeText(value);
-
-  if (["כן", "true", "1", "y", "yes"].includes(text.toLowerCase())) return true;
-  if (["לא", "false", "0", "n", "no"].includes(text.toLowerCase())) return false;
+  const text = normalizeText(value).toLowerCase();
+  if (["כן", "true", "1", "y", "yes"].includes(text)) return true;
+  if (["לא", "false", "0", "n", "no"].includes(text)) return false;
 
   return null;
 }
@@ -209,40 +180,68 @@ function normalizeSmokingStatus(value) {
   };
 }
 
+function emptyPersonalDetailsResult(extra = {}) {
+  return {
+    source: "personalDetails",
+    rows: [],
+    rawRows: [],
+    clientProfiles: [],
+    count: 0,
+    hasFile: false,
+    metadata: {
+      rawRowCount: 0,
+      profileCount: 0,
+      withIdNumber: 0,
+      withEmployeeCode: 0,
+      withPensionSalary: 0,
+      ...(extra.metadata || {}),
+    },
+    ...(extra.error ? { error: extra.error } : {}),
+  };
+}
+
 function getFirstSheet(workbook) {
-  if (!workbook || !Array.isArray(workbook.SheetNames) || workbook.SheetNames.length === 0) {
-    return null;
-  }
+  const sheetNames = Array.isArray(workbook?.SheetNames) ? workbook.SheetNames : [];
+  if (!sheetNames.length) return null;
 
   const preferredSheetName =
-    workbook.SheetNames.find((name) => normalizeText(name).includes("נתונים")) ||
-    workbook.SheetNames[0];
+    sheetNames.find((name) => normalizeText(name).includes("נתונים")) || sheetNames[0];
 
-  return workbook.Sheets[preferredSheetName] || null;
+  return workbook?.Sheets?.[preferredSheetName] || null;
 }
 
 function sheetToObjects(sheet) {
   if (!sheet) return [];
 
-  const rows = XLSX.utils.sheet_to_json(sheet, {
-    header: 1,
-    defval: "",
-    raw: true,
-  });
+  let rows = [];
 
-  if (!rows.length) return [];
+  try {
+    rows = XLSX.utils.sheet_to_json(sheet, {
+      header: 1,
+      defval: "",
+      raw: true,
+    });
+  } catch (error) {
+    console.warn("parsePersonalDetails: failed reading sheet", {
+      error: error?.message || String(error),
+    });
+    return [];
+  }
+
+  if (!Array.isArray(rows) || !rows.length) return [];
 
   const headerRowIndex = rows.findIndex((row) =>
-    row.some((cell) => String(cell ?? "").trim())
+    Array.isArray(row) && row.some((cell) => String(cell ?? "").trim())
   );
 
   if (headerRowIndex === -1) return [];
 
-  const headers = rows[headerRowIndex].map(normalizeHeader);
+  const headerRow = Array.isArray(rows[headerRowIndex]) ? rows[headerRowIndex] : [];
+  const headers = headerRow.map(normalizeHeader);
 
   return rows
     .slice(headerRowIndex + 1)
-    .filter((row) => row.some((cell) => String(cell ?? "").trim()))
+    .filter((row) => Array.isArray(row) && row.some((cell) => String(cell ?? "").trim()))
     .map((row, rowIndex) => {
       const record = {
         rowIndex: headerRowIndex + rowIndex + 2,
@@ -250,7 +249,6 @@ function sheetToObjects(sheet) {
 
       headers.forEach((header, columnIndex) => {
         if (!header) return;
-
         record[header] = normalizeCell(row[columnIndex]);
       });
 
@@ -259,9 +257,11 @@ function sheetToObjects(sheet) {
 }
 
 function pickValue(row, aliases) {
+  const safeRow = row && typeof row === "object" ? row : {};
+
   for (const alias of aliases) {
-    if (Object.prototype.hasOwnProperty.call(row, alias) && !isBlank(row[alias])) {
-      return row[alias];
+    if (Object.prototype.hasOwnProperty.call(safeRow, alias) && !isBlank(safeRow[alias])) {
+      return safeRow[alias];
     }
   }
 
@@ -273,7 +273,8 @@ function buildFullName(firstName, lastName) {
 }
 
 function normalizePersonalDetailsRow(row) {
-  const value = (fieldName) => pickValue(row, COLUMN_ALIASES[fieldName] || []);
+  const safeRow = row && typeof row === "object" ? row : { rowIndex: "unknown" };
+  const value = (fieldName) => pickValue(safeRow, COLUMN_ALIASES[fieldName] || []);
 
   const firstName = normalizeText(value("firstName"));
   const lastName = normalizeText(value("lastName"));
@@ -293,10 +294,10 @@ function normalizePersonalDetailsRow(row) {
   const spouseBirthDate = normalizeDate(spouseBirthDateRaw);
   const spouseBirthYear = extractYear(spouseBirthDateRaw);
 
-  const profile = {
-    sourceRowIndex: row.rowIndex,
+  return {
+    sourceRowIndex: safeRow.rowIndex,
 
-    identityKey: idNumber || employeeCode || fullName || `row-${row.rowIndex}`,
+    identityKey: idNumber || employeeCode || fullName || `row-${safeRow.rowIndex}`,
     employeeCode,
     idNumber,
 
@@ -371,50 +372,49 @@ function normalizePersonalDetailsRow(row) {
       isSmoker: smoking.isSmoker,
     },
   };
-
-  return profile;
 }
 
 function buildMetadata(rawRows, clientProfiles) {
+  const safeRawRows = Array.isArray(rawRows) ? rawRows : [];
+  const safeClientProfiles = Array.isArray(clientProfiles) ? clientProfiles : [];
+
   return {
-    rawRowCount: rawRows.length,
-    profileCount: clientProfiles.length,
-    withIdNumber: clientProfiles.filter((profile) => profile.idNumber).length,
-    withEmployeeCode: clientProfiles.filter((profile) => profile.employeeCode).length,
-    withPensionSalary: clientProfiles.filter((profile) => profile.pensionSalary !== null).length,
+    rawRowCount: safeRawRows.length,
+    profileCount: safeClientProfiles.length,
+    withIdNumber: safeClientProfiles.filter((profile) => profile.idNumber).length,
+    withEmployeeCode: safeClientProfiles.filter((profile) => profile.employeeCode).length,
+    withPensionSalary: safeClientProfiles.filter((profile) => profile.pensionSalary !== null).length,
   };
 }
 
 export function parsePersonalDetails(workbook) {
-  if (!workbook) {
+  if (!workbook) return emptyPersonalDetailsResult();
+
+  try {
+    const sheet = getFirstSheet(workbook);
+    const rawRows = sheetToObjects(sheet);
+    const clientProfiles = rawRows.map(normalizePersonalDetailsRow);
+
     return {
       source: "personalDetails",
-      rows: [],
-      rawRows: [],
-      clientProfiles: [],
-      count: 0,
-      hasFile: false,
-      metadata: {
-        rawRowCount: 0,
-        profileCount: 0,
-        withIdNumber: 0,
-        withEmployeeCode: 0,
-        withPensionSalary: 0,
-      },
+      rows: rawRows,
+      rawRows,
+      clientProfiles,
+      count: clientProfiles.length,
+      hasFile: true,
+      metadata: buildMetadata(rawRows, clientProfiles),
     };
+  } catch (error) {
+    console.warn("parsePersonalDetails: parser recovered from error", {
+      error: error?.message || String(error),
+    });
+
+    return emptyPersonalDetailsResult({
+      hasFile: true,
+      error: error?.message || String(error),
+      metadata: {
+        parserRecovered: true,
+      },
+    });
   }
-
-  const sheet = getFirstSheet(workbook);
-  const rawRows = sheetToObjects(sheet);
-  const clientProfiles = rawRows.map(normalizePersonalDetailsRow);
-
-  return {
-    source: "personalDetails",
-    rows: rawRows,
-    rawRows,
-    clientProfiles,
-    count: clientProfiles.length,
-    hasFile: true,
-    metadata: buildMetadata(rawRows, clientProfiles),
-  };
 }

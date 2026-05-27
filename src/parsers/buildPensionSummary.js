@@ -2,75 +2,108 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // BUILD PENSION SUMMARY — מחבר את כל השכבות לתוצאה מלאה
 //
-// סדר עבודה:
-//   1. normalizeAgreementOptions  → agreementOptionsByIssuer
-//   2. buildBaseUnifiedRows       → unified rows עם issuerCanonical + personalRows
-//   3. evaluateUnifiedRows        → audit per row
-//   4. buildPensionAnalytics      → KPI, matrices, action center
-//   5. buildDataQuality           → בקרת איכות נתונים
+// Stability 04:
+//   1. הגנות על קלטים שאינם Array
+//   2. fallback בטוח ל-dataQuality.summary
+//   3. שמירה על אותו output schema כדי לא לשבור Dashboard
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { normalizeAgreementOptions } from "../unified/agreementEngine.js";
-import { buildBaseUnifiedRows }      from "../unified/rawToUnifiedRows.js";
-import { evaluateUnifiedRows }       from "../unified/auditEngine.js";
-import { buildPensionAnalytics }     from "../unified/analyticsEngine.js";
-import { buildDataQuality }          from "../unified/dataQualityEngine.js";
-import { DEFAULT_ISSUER_ALIASES }    from "../unified/issuerAliases.js";
-import { PRODUCT_TYPES }             from "../unified/unifiedSchema.js";
+import { buildBaseUnifiedRows } from "../unified/rawToUnifiedRows.js";
+import { evaluateUnifiedRows } from "../unified/auditEngine.js";
+import { buildPensionAnalytics } from "../unified/analyticsEngine.js";
+import { buildDataQuality } from "../unified/dataQualityEngine.js";
+import { DEFAULT_ISSUER_ALIASES } from "../unified/issuerAliases.js";
+import { PRODUCT_TYPES } from "../unified/unifiedSchema.js";
+
+function asArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function asObject(value) {
+  return value && typeof value === "object" ? value : {};
+}
 
 function isPresent(value) {
   return value !== null && value !== undefined && value !== "";
 }
 
 function hasAnyAgreement(row) {
+  const safeRow = asObject(row);
+
   return Boolean(
-    row.agreementIssuerFound ||
-    row.auditMatchRuleType === "INLINE_AGREEMENT" ||
-    row.auditMatchResult === "MATCH_INLINE_AGREEMENT" ||
-    row.auditMatchResult === "FAIL_INLINE_AGREEMENT" ||
-    isPresent(row.depositFeeAgreement) ||
-    isPresent(row.accumulationFeeAgreement) ||
-    isPresent(row.auditReferenceDepositFee) ||
-    isPresent(row.auditReferenceAccumulationFee)
+    safeRow.agreementIssuerFound ||
+      safeRow.auditMatchRuleType === "INLINE_AGREEMENT" ||
+      safeRow.auditMatchResult === "MATCH_INLINE_AGREEMENT" ||
+      safeRow.auditMatchResult === "FAIL_INLINE_AGREEMENT" ||
+      isPresent(safeRow.depositFeeAgreement) ||
+      isPresent(safeRow.accumulationFeeAgreement) ||
+      isPresent(safeRow.auditReferenceDepositFee) ||
+      isPresent(safeRow.auditReferenceAccumulationFee)
   );
 }
 
-export function buildPensionSummary(
-  pensionRows = [],
-  agreements = [],
-  options = {}
-) {
-  const productType   = options.productType   || PRODUCT_TYPES.PENSION;
-  const issuerAliases = options.issuerAliases || DEFAULT_ISSUER_ALIASES;
-  const broker        = options.broker        || {};
-  const personalRows  = options.personalRows  || [];
+function normalizeDataQuality(dataQuality) {
+  const safeDataQuality = asObject(dataQuality);
+  const summary = asObject(safeDataQuality.summary);
 
-  const { optionsByIssuer: agreementOptionsByIssuer } =
-    normalizeAgreementOptions({
-      agreements,
-      issuerAliases,
-      productType,
-    });
+  return {
+    ...safeDataQuality,
+    summary: {
+      issueCount: Number.isFinite(summary.issueCount) ? summary.issueCount : 0,
+      highIssues: Number.isFinite(summary.highIssues) ? summary.highIssues : 0,
+      ...summary,
+    },
+  };
+}
+
+function emptyAnalyticsFallback() {
+  return {
+    managementAudit: [],
+    actionDrilldown: [],
+  };
+}
+
+export function buildPensionSummary(pensionRows = [], agreements = [], options = {}) {
+  const safePensionRows = asArray(pensionRows);
+  const safeAgreements = asArray(agreements);
+  const safeOptions = asObject(options);
+
+  const productType = safeOptions.productType || PRODUCT_TYPES.PENSION;
+  const issuerAliases = safeOptions.issuerAliases || DEFAULT_ISSUER_ALIASES;
+  const broker = asObject(safeOptions.broker);
+  const personalRows = asArray(safeOptions.personalRows);
+
+  const { optionsByIssuer: agreementOptionsByIssuer = {} } = normalizeAgreementOptions({
+    agreements: safeAgreements,
+    issuerAliases,
+    productType,
+  });
 
   const baseRows = buildBaseUnifiedRows({
-    rows: pensionRows,
+    rows: safePensionRows,
     personalRows,
     issuerAliases,
     productType,
     broker,
-    batchId: options.batchId || "",
+    batchId: safeOptions.batchId || "",
   });
 
-  const unifiedRows = evaluateUnifiedRows({
-    unifiedRows: baseRows,
-    agreementOptionsByIssuer,
-    productType,
-  });
+  const unifiedRows = asArray(
+    evaluateUnifiedRows({
+      unifiedRows: asArray(baseRows),
+      agreementOptionsByIssuer,
+      productType,
+    })
+  );
 
-  const analytics = buildPensionAnalytics(unifiedRows);
-  const dataQuality = buildDataQuality(unifiedRows);
+  const analytics = {
+    ...emptyAnalyticsFallback(),
+    ...asObject(buildPensionAnalytics(unifiedRows)),
+  };
 
-  const auditedRows = unifiedRows.filter((r) => r.auditStatus !== "excluded");
+  const dataQuality = normalizeDataQuality(buildDataQuality(unifiedRows));
+  const auditedRows = unifiedRows.filter((row) => row.auditStatus !== "excluded");
 
   return {
     ...analytics,
@@ -85,11 +118,11 @@ export function buildPensionSummary(
     summary: {
       total: unifiedRows.length,
       audited: auditedRows.length,
-      valid: unifiedRows.filter((r) => r.auditStatus === "valid").length,
-      invalid: unifiedRows.filter((r) => r.auditStatus === "invalid").length,
-      excluded: unifiedRows.filter((r) => r.auditStatus === "excluded").length,
-      tierPotential: unifiedRows.filter((r) => r.tierPotentialNotUsed).length,
-      noAgreement: auditedRows.filter((r) => !hasAnyAgreement(r)).length,
+      valid: unifiedRows.filter((row) => row.auditStatus === "valid").length,
+      invalid: unifiedRows.filter((row) => row.auditStatus === "invalid").length,
+      excluded: unifiedRows.filter((row) => row.auditStatus === "excluded").length,
+      tierPotential: unifiedRows.filter((row) => row.tierPotentialNotUsed).length,
+      noAgreement: auditedRows.filter((row) => !hasAnyAgreement(row)).length,
       dataQualityIssues: dataQuality.summary.issueCount,
       dataQualityHighIssues: dataQuality.summary.highIssues,
     },

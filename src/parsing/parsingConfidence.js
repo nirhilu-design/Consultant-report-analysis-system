@@ -1,15 +1,20 @@
 // src/parsing/parsingConfidence.js
-// CORE HARDENING v19A
-// Backward-compatible Parsing Confidence Engine
+// CORE HARDENING v19B
+// Full backward-compatible Parsing Confidence Engine
 //
-// Important:
-// This file keeps legacy exports such as asArray,
-// because safeRowBuilder.js imports them directly.
+// Why this file exists:
+// Existing project files import legacy helpers from this module:
+// - asArray
+// - createEmptyPersonalDetails
+// - runParsingStage
+// - buildParsingConfidence
+//
+// v19 adds a richer confidence report, but this file keeps all legacy exports
+// so parseManagerFile.js and safeRowBuilder.js continue to build.
 
 export function asArray(value) {
   if (!value) return [];
-  if (Array.isArray(value)) return value.filter(Boolean);
-  return [value].filter(Boolean);
+  return Array.isArray(value) ? value.filter(Boolean) : [value].filter(Boolean);
 }
 
 export function uniqueArray(value) {
@@ -20,6 +25,33 @@ export function uniqueArray(value) {
         .filter(Boolean)
     )
   );
+}
+
+export function createEmptyPersonalDetails(warning = "") {
+  return {
+    hasFile: false,
+    rows: [],
+    rawRows: [],
+    clientProfiles: [],
+    metadata: {
+      rowCount: 0,
+      warning,
+    },
+  };
+}
+
+export function runParsingStage(stageKey, label, callback) {
+  try {
+    return callback();
+  } catch (error) {
+    console.error(`parsing stage failed: ${stageKey}`, { label, error });
+
+    const wrapped = new Error(`ANALYSIS_STAGE_FAILED:${stageKey}`);
+    wrapped.cause = error;
+    wrapped.stageKey = stageKey;
+    wrapped.stageLabel = label;
+    throw wrapped;
+  }
 }
 
 export function isMeaningfulValue(value) {
@@ -65,6 +97,40 @@ export const HEADER_LABELS_HE = {
 
 export function getFieldLabel(fieldName) {
   return HEADER_LABELS_HE[fieldName] || fieldName;
+}
+
+export function getConfidenceLevel(score) {
+  const numericScore = Number(score || 0);
+
+  if (numericScore >= 90) return "excellent";
+  if (numericScore >= 75) return "good";
+  if (numericScore >= 55) return "partial";
+  return "risky";
+}
+
+export function getConfidenceStatus(score) {
+  const numericScore = Number(score || 0);
+
+  if (numericScore >= 85) return "high";
+  if (numericScore >= 65) return "medium";
+  return "low";
+}
+
+export function getConfidenceTitle(levelOrStatus) {
+  switch (levelOrStatus) {
+    case "excellent":
+      return "קליטה מצוינת";
+    case "good":
+    case "high":
+      return "קליטה תקינה";
+    case "partial":
+    case "medium":
+      return "קליטה חלקית";
+    case "risky":
+    case "low":
+    default:
+      return "קליטה דורשת בדיקה";
+  }
 }
 
 export function calculateCompletenessScore({ unifiedRows = [], requiredHeaders = DEFAULT_REQUIRED_HEADERS } = {}) {
@@ -113,29 +179,6 @@ export function calculateRowScore({ rawRows = [], unifiedRows = [] } = {}) {
   return Math.round(ratio * 100);
 }
 
-export function getConfidenceLevel(score) {
-  const numericScore = Number(score || 0);
-
-  if (numericScore >= 90) return "excellent";
-  if (numericScore >= 75) return "good";
-  if (numericScore >= 55) return "partial";
-  return "risky";
-}
-
-export function getConfidenceTitle(level) {
-  switch (level) {
-    case "excellent":
-      return "קליטה מצוינת";
-    case "good":
-      return "קליטה תקינה";
-    case "partial":
-      return "קליטה חלקית";
-    case "risky":
-    default:
-      return "קליטה דורשת בדיקה";
-  }
-}
-
 export function buildWarnings({
   rawRows = [],
   unifiedRows = [],
@@ -163,7 +206,7 @@ export function buildWarnings({
     warnings.push("נמצאו שורות בקובץ, אבל לא נוצרו שורות Unified.");
   }
 
-  if (!detectedCount) {
+  if (detectedHeaders !== null && detectedHeaders !== undefined && !detectedCount) {
     warnings.push("לא זוהו כותרות מתאימות בקובץ.");
   }
 
@@ -227,6 +270,7 @@ export function buildParsingConfidenceReport(options = {}) {
   );
 
   const level = getConfidenceLevel(score);
+  const status = getConfidenceStatus(score);
 
   const warnings = buildWarnings({
     rawRows,
@@ -239,10 +283,11 @@ export function buildParsingConfidenceReport(options = {}) {
   });
 
   return {
-    version: "v19A",
+    version: "v19B",
     managerName,
     fileName,
     score,
+    status,
     level,
     title: getConfidenceTitle(level),
     rowCount: asArray(unifiedRows).length,
@@ -253,6 +298,7 @@ export function buildParsingConfidenceReport(options = {}) {
     aliasMatchedHeaders: uniqueArray(aliasMatchedHeaders),
     invalidRowCount: asArray(invalidRows).length,
     warnings,
+    checks: [],
     metrics: {
       headerScore,
       rowScore,
@@ -270,10 +316,77 @@ export function buildParsingConfidenceReport(options = {}) {
   };
 }
 
-// Legacy-compatible alias.
-// Existing files may import buildParsingConfidence instead of buildParsingConfidenceReport.
-export function buildParsingConfidence(options = {}) {
-  return buildParsingConfidenceReport(options);
+// Legacy public API.
+// parseManagerFile.js already calls this function with workbook-level arguments.
+// Keep the legacy shape: score, status, checks, warnings.
+// Add v19 fields without removing old fields.
+export function buildParsingConfidence({
+  dataWorkbook,
+  agreementsWorkbook,
+  personalDetailsWorkbook,
+  pensionRowsRaw = [],
+  agreements = [],
+  personalDetails,
+  unifiedRows = [],
+  warnings = [],
+  detectedHeaders,
+  requiredHeaders,
+  missingRequiredHeaders,
+  aliasMatchedHeaders,
+  invalidRows,
+  managerName = "",
+  fileName = "",
+} = {}) {
+  const checks = [
+    { key: "dataWorkbook", passed: Boolean(dataWorkbook?.SheetNames?.length), weight: 20 },
+    { key: "agreementsWorkbook", passed: Boolean(agreementsWorkbook?.SheetNames?.length), weight: 20 },
+    { key: "rawPensionRows", passed: asArray(pensionRowsRaw).length > 0, weight: 20 },
+    { key: "agreements", passed: asArray(agreements).length > 0, weight: 20 },
+    { key: "unifiedRows", passed: asArray(unifiedRows).length > 0, weight: 15 },
+    {
+      key: "personalDetails",
+      passed: !personalDetailsWorkbook || Boolean(personalDetails?.hasFile || asArray(personalDetails?.clientProfiles).length),
+      weight: 5,
+      optional: true,
+    },
+  ];
+
+  const totalWeight = checks.reduce((sum, check) => sum + check.weight, 0);
+  const passedWeight = checks.reduce((sum, check) => sum + (check.passed ? check.weight : 0), 0);
+  const warningPenalty = Math.min(asArray(warnings).length * 5, 20);
+  const legacyScore = Math.max(
+    0,
+    Math.min(100, Math.round((passedWeight / totalWeight) * 100) - warningPenalty)
+  );
+
+  const report = buildParsingConfidenceReport({
+    rawRows: pensionRowsRaw,
+    unifiedRows,
+    detectedHeaders: detectedHeaders || [],
+    requiredHeaders: requiredHeaders || [],
+    missingRequiredHeaders: missingRequiredHeaders || [],
+    aliasMatchedHeaders: aliasMatchedHeaders || [],
+    invalidRows: invalidRows || [],
+    customWarnings: warnings,
+    managerName,
+    fileName,
+  });
+
+  return {
+    ...report,
+    score: legacyScore,
+    status: getConfidenceStatus(legacyScore),
+    level: getConfidenceLevel(legacyScore),
+    title: getConfidenceTitle(getConfidenceLevel(legacyScore)),
+    checks,
+    warnings: uniqueArray([...asArray(report.warnings), ...asArray(warnings)]),
+    metrics: {
+      ...report.metrics,
+      legacyPassedWeight: passedWeight,
+      legacyTotalWeight: totalWeight,
+      warningPenalty,
+    },
+  };
 }
 
 export function createEmptyParsingConfidenceReport(extra = {}) {
@@ -288,7 +401,7 @@ export function createEmptyParsingConfidenceReport(extra = {}) {
 
 export function isParsingRisky(report) {
   if (!report) return true;
-  return report.level === "risky" || Number(report.score || 0) < 55;
+  return report.level === "risky" || report.status === "low" || Number(report.score || 0) < 55;
 }
 
 export function isParsingUsable(report) {

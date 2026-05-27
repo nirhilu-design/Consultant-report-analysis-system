@@ -1,5 +1,6 @@
 // Path: src/components/Dashboard.jsx
 import { useState, useMemo } from "react";
+import { buildPensionAnalytics } from "../unified/analyticsEngine";
 
 function fmtNumber(v) {
   return Number(v || 0).toLocaleString("he-IL");
@@ -61,6 +62,98 @@ function EmptyState({ text = "אין נתונים" }) {
   return (
     <div className="empty-state">
       <p>{text}</p>
+    </div>
+  );
+}
+
+
+function filterRowsByManager(rows = [], managerFilter = "all") {
+  if (!Array.isArray(rows)) return [];
+  if (!managerFilter || managerFilter === "all") return rows;
+  return rows.filter((row) => getArrangementManager(row) === managerFilter);
+}
+
+function buildManagerOptions(rows = []) {
+  return buildManagerBreakdown(rows).map((item) => item.manager);
+}
+
+function filterDataQualityByRows(dataQuality, scopedRows = [], managerFilter = "all") {
+  if (!dataQuality || !managerFilter || managerFilter === "all") return dataQuality;
+
+  const issues = Array.isArray(dataQuality.issues) ? dataQuality.issues : [];
+  const allowedEmployeeCodes = new Set(
+    scopedRows
+      .map((row) => String(row.employeeCode || row.clientId || "").trim())
+      .filter(Boolean)
+  );
+  const allowedIssuers = new Set(
+    scopedRows
+      .map((row) => String(row.issuerCanonical || row.issuerOriginal || "").trim())
+      .filter(Boolean)
+  );
+
+  const filteredIssues = issues.filter((issue) => {
+    const employeeCode = String(issue.employeeCode || issue.clientId || "").trim();
+    const issuer = String(issue.issuer || issue.issuerCanonical || issue.issuerOriginal || "").trim();
+
+    if (employeeCode && allowedEmployeeCodes.has(employeeCode)) return true;
+    if (issuer && allowedIssuers.has(issuer)) return true;
+
+    return false;
+  });
+
+  const byCategory = filteredIssues.reduce((acc, issue) => {
+    const category = issue.category || "לא מסווג";
+    acc[category] = (acc[category] || 0) + 1;
+    return acc;
+  }, {});
+
+  return {
+    ...dataQuality,
+    issues: filteredIssues,
+    byCategory,
+    summary: {
+      ...(dataQuality.summary || {}),
+      issueCount: filteredIssues.length,
+      highIssues: filteredIssues.filter((issue) => issue.severity === "HIGH").length,
+      mediumIssues: filteredIssues.filter((issue) => issue.severity === "MEDIUM").length,
+      lowIssues: filteredIssues.filter((issue) => issue.severity === "LOW").length,
+    },
+  };
+}
+
+function GlobalManagerScope({
+  managerFilter,
+  onManagerFilterChange,
+  managerOptions = [],
+  scopedCount = 0,
+  totalCount = 0,
+}) {
+  return (
+    <div className="global-scope-bar">
+      <div>
+        <strong>תצוגת מנהל הסדר</strong>
+        <span>הבחירה כאן משפיעה על כל הטאבים בדוח.</span>
+      </div>
+
+      <label className="manager-filter global-manager-filter">
+        <span>מנהל הסדר</span>
+        <select
+          value={managerFilter}
+          onChange={(event) => onManagerFilterChange(event.target.value)}
+        >
+          <option value="all">כל מנהלי ההסדר</option>
+          {managerOptions.map((manager) => (
+            <option key={manager} value={manager}>
+              {manager}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <em>
+        מוצגות {fmtNumber(scopedCount)} מתוך {fmtNumber(totalCount)} פוליסות
+      </em>
     </div>
   );
 }
@@ -1258,19 +1351,51 @@ export default function Dashboard({ analysisData }) {
     dataQuality,
   } = pensionSummary || {};
 
-  const feesAudit = managementAudit || managementFeesAudit;
-  const actions = actionCenter || [];
+  const baseRows = unifiedRows || pensionRows || [];
+  const managerOptions = useMemo(() => buildManagerOptions(baseRows), [baseRows]);
+  const scopedRows = useMemo(
+    () => filterRowsByManager(baseRows, managerFilter),
+    [baseRows, managerFilter]
+  );
+
+  const scopedAnalytics = useMemo(() => {
+    return buildPensionAnalytics(scopedRows);
+  }, [scopedRows]);
+
+  const isAllManagers = managerFilter === "all";
+  const feesAudit = isAllManagers
+    ? managementAudit || managementFeesAudit
+    : scopedAnalytics.managementAudit || scopedAnalytics.managementFeesAudit;
+  const actions = isAllManagers ? actionCenter || [] : scopedAnalytics.actionCenter || [];
   const summary = pensionSummary?.summary;
-  const previewRows = unifiedRows || pensionRows || [];
+  const previewRows = scopedRows;
+  const scopedDataQuality = filterDataQualityByRows(dataQuality, scopedRows, managerFilter);
+
+  const displayKpi = isAllManagers ? kpi : scopedAnalytics.kpi;
+  const displayInsuranceTrackMarital = isAllManagers
+    ? insuranceTrackMarital
+    : scopedAnalytics.insuranceTrackMarital;
+  const displayInvestmentTrackRewardsMarital = isAllManagers
+    ? investmentTrackRewardsMarital
+    : scopedAnalytics.investmentTrackRewardsMarital;
+  const displayInvestmentTrackCompensationMarital = isAllManagers
+    ? investmentTrackCompensationMarital
+    : scopedAnalytics.investmentTrackCompensationMarital;
+  const displayInvestmentTrackComparison = isAllManagers
+    ? investmentTrackComparison
+    : scopedAnalytics.investmentTrackComparison;
+  const displayAccumulationTierAnalysis = isAllManagers
+    ? accumulationTierAnalysis
+    : scopedAnalytics.accumulationTierAnalysis;
 
   function renderTab() {
     switch (activeTab) {
       case "kpi":
         return (
           <KpiTab
-            kpi={kpi}
-            rows={previewRows}
-            actions={actions}
+            kpi={displayKpi}
+            rows={baseRows}
+            actions={isAllManagers ? actionCenter || [] : actions}
             managerFilter={managerFilter}
             onManagerFilterChange={setManagerFilter}
           />
@@ -1282,7 +1407,7 @@ export default function Dashboard({ analysisData }) {
       case "insurance":
         return (
           <MatrixTab
-            matrix={insuranceTrackMarital}
+            matrix={displayInsuranceTrackMarital}
             rowLabel="מסלול ביטוח"
           />
         );
@@ -1290,14 +1415,14 @@ export default function Dashboard({ analysisData }) {
       case "investment":
         return (
           <InvestmentTrackTab
-            rewardsMatrix={investmentTrackRewardsMarital}
-            compensationMatrix={investmentTrackCompensationMarital}
-            comparison={investmentTrackComparison}
+            rewardsMatrix={displayInvestmentTrackRewardsMarital}
+            compensationMatrix={displayInvestmentTrackCompensationMarital}
+            comparison={displayInvestmentTrackComparison}
           />
         );
 
       case "tier":
-        return <AccumulationTierTab data={accumulationTierAnalysis} />;
+        return <AccumulationTierTab data={displayAccumulationTierAnalysis} />;
 
       case "action":
         return <ActionCenterTab items={actions} />;
@@ -1309,7 +1434,7 @@ export default function Dashboard({ analysisData }) {
         return <QaTraceTab rows={previewRows} />;
 
       case "quality":
-        return <DataQualityTab dataQuality={dataQuality} />;
+        return <DataQualityTab dataQuality={scopedDataQuality} />;
 
       default:
         return null;
@@ -1355,6 +1480,14 @@ export default function Dashboard({ analysisData }) {
         )}
       </header>
 
+      <GlobalManagerScope
+        managerFilter={managerFilter}
+        onManagerFilterChange={setManagerFilter}
+        managerOptions={managerOptions}
+        scopedCount={previewRows.length}
+        totalCount={baseRows.length}
+      />
+
       <nav className="tab-bar">
         {TABS.map((tab) => (
           <button
@@ -1368,9 +1501,9 @@ export default function Dashboard({ analysisData }) {
               <span className="tab-badge">{actions.length}</span>
             )}
 
-            {tab.id === "quality" && dataQuality?.summary?.issueCount > 0 && (
+            {tab.id === "quality" && scopedDataQuality?.summary?.issueCount > 0 && (
               <span className="tab-badge">
-                {dataQuality.summary.issueCount}
+                {scopedDataQuality.summary.issueCount}
               </span>
             )}
           </button>

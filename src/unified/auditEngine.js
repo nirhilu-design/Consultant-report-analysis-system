@@ -1,4 +1,15 @@
 // Path: src/unified/auditEngine.js
+
+import {
+  AUDIT_STATUS as SCHEMA_AUDIT_STATUS,
+  AUDIT_STATUS_HE as SCHEMA_AUDIT_STATUS_HE,
+  ISSUE_CATEGORY as SCHEMA_ISSUE_CATEGORY,
+  PRODUCT_TYPES,
+  ensureUnifiedRow,
+  ensureUnifiedRows,
+  getProductConfig,
+} from "./unifiedSchema.js";
+
 // ─────────────────────────────────────────────────────────────────────────────
 // AUDIT ENGINE — מנוע בדיקת דמי ניהול
 //
@@ -13,22 +24,16 @@
 //   5. כלל בסיס fallback → BASELINE
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const AUDIT_STATUS = {
-  VALID: "valid",
-  INVALID: "invalid",
-  EXCLUDED: "excluded",
-};
+export const AUDIT_STATUS = SCHEMA_AUDIT_STATUS;
 
 export const AUDIT_STATUS_HE = {
-  valid: "תקין",
-  invalid: "לא תקין",
-  excluded: "תפעול בלבד",
+  valid: SCHEMA_AUDIT_STATUS_HE.VALID || "תקין",
+  invalid: SCHEMA_AUDIT_STATUS_HE.INVALID || "לא תקין",
+  excluded: SCHEMA_AUDIT_STATUS_HE.EXCLUDED || "תפעול בלבד",
 };
 
 export const ISSUE_CATEGORY = {
-  NONE: "NONE",
-  FEE_MISMATCH: "FEE_MISMATCH",
-  MISSING_AGREEMENT: "MISSING_AGREEMENT",
+  ...SCHEMA_ISSUE_CATEGORY,
   TIER_POTENTIAL_NOT_USED: "TIER_POTENTIAL_NOT_USED",
 };
 
@@ -56,11 +61,27 @@ const MOR_DEFAULT_PENSION_FUND_LIMITS = {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function safeRows(rows) {
-  return Array.isArray(rows) ? rows.filter(Boolean) : [];
+  return ensureUnifiedRows(Array.isArray(rows) ? rows.filter(Boolean) : []);
 }
 
 function safeRow(row) {
-  return row && typeof row === "object" ? row : {};
+  return ensureUnifiedRow(row && typeof row === "object" ? row : {});
+}
+
+function getProductType(row) {
+  return getProductConfig(row?.productType) ? row.productType : PRODUCT_TYPES.PENSION;
+}
+
+function productSupports(row, flag) {
+  return Boolean(getProductConfig(getProductType(row))?.[flag]);
+}
+
+function getBaseline(row) {
+  const config = getProductConfig(getProductType(row));
+  return {
+    depositFee: config?.withoutAgreementBaseline?.depositFee ?? BASELINE.depositFee,
+    accumulationFee: config?.withoutAgreementBaseline?.accumulationFee ?? BASELINE.accumulationFee,
+  };
 }
 
 function isPresent(value) {
@@ -190,7 +211,7 @@ function isDefaultPensionFundCandidate(row) {
   // אם מדובר בקרן פנסיה ויש דמי ניהול בגבולות ברירת מחדל,
   // אין לסמן חריגה גם אם קובץ ההסכמים מציג מודל אחר.
   return (
-    row.productType === "PENSION" ||
+    getProductType(row) === PRODUCT_TYPES.PENSION ||
     text.includes("פנסיה") ||
     text.includes("מקפת") ||
     text.includes("מבטחים") ||
@@ -241,8 +262,12 @@ function evaluateInlineAgreement(row) {
     ? row.accumulationFeeAgreement
     : null;
 
-  const depositOk = feeOk(row.depositFee, approvedDepositFee);
-  const accumulationOk = feeOk(row.accumulationFee, approvedAccumulationFee);
+  const depositOk = productSupports(row, "hasDepositFee")
+    ? feeOk(row.depositFee, approvedDepositFee)
+    : true;
+  const accumulationOk = productSupports(row, "hasAccumulationFee")
+    ? feeOk(row.accumulationFee, approvedAccumulationFee)
+    : true;
   const pass = depositOk && accumulationOk;
 
   return {
@@ -272,10 +297,15 @@ function evaluateExternalAgreement(row, options = []) {
     isOptionEligible(option, row.accumulation)
   );
 
-  const fullMatch = eligibleOptions.find((option) =>
-    feeOk(row.depositFee, option.depositFee) &&
-    feeOk(row.accumulationFee, option.accumulationFee)
-  );
+  const fullMatch = eligibleOptions.find((option) => {
+    const depositOk = productSupports(row, "hasDepositFee")
+      ? feeOk(row.depositFee, option.depositFee)
+      : true;
+    const accumulationOk = productSupports(row, "hasAccumulationFee")
+      ? feeOk(row.accumulationFee, option.accumulationFee)
+      : true;
+    return depositOk && accumulationOk;
+  });
 
   if (fullMatch) {
     return {
@@ -316,8 +346,8 @@ function evaluateExternalAgreement(row, options = []) {
   const tierPotentialNotUsed = Boolean(
     eligibleTier &&
     (
-      feeMismatch(row.depositFee, eligibleTier.depositFee) ||
-      feeMismatch(row.accumulationFee, eligibleTier.accumulationFee)
+      (productSupports(row, "hasDepositFee") && feeMismatch(row.depositFee, eligibleTier.depositFee)) ||
+      (productSupports(row, "hasAccumulationFee") && feeMismatch(row.accumulationFee, eligibleTier.accumulationFee))
     )
   );
 
@@ -352,8 +382,13 @@ function evaluateExternalAgreement(row, options = []) {
 // ─── Baseline fallback ────────────────────────────────────────────────────────
 
 function evaluateBaseline(row) {
-  const depositOk = feeOk(row.depositFee, BASELINE.depositFee);
-  const accumulationOk = feeOk(row.accumulationFee, BASELINE.accumulationFee);
+  const baseline = getBaseline(row);
+  const depositOk = productSupports(row, "hasDepositFee")
+    ? feeOk(row.depositFee, baseline.depositFee)
+    : true;
+  const accumulationOk = productSupports(row, "hasAccumulationFee")
+    ? feeOk(row.accumulationFee, baseline.accumulationFee)
+    : true;
   const pass = depositOk && accumulationOk;
 
   return {
@@ -364,9 +399,9 @@ function evaluateBaseline(row) {
     auditMatchRuleType: "BASELINE",
     auditReason: pass
       ? "דמי הניהול עומדים בכלל הבסיס"
-      : `חריגה מכלל בסיס: הפקדה ${row.depositFee ?? "—"}% מול ${BASELINE.depositFee}% | צבירה ${row.accumulationFee ?? "—"}% מול ${BASELINE.accumulationFee}%`,
-    auditReferenceDepositFee: BASELINE.depositFee,
-    auditReferenceAccumulationFee: BASELINE.accumulationFee,
+      : `חריגה מכלל בסיס: הפקדה ${row.depositFee ?? "—"}% מול ${baseline.depositFee ?? "—"}% | צבירה ${row.accumulationFee ?? "—"}% מול ${baseline.accumulationFee ?? "—"}%`,
+    auditReferenceDepositFee: productSupports(row, "hasDepositFee") ? baseline.depositFee : null,
+    auditReferenceAccumulationFee: productSupports(row, "hasAccumulationFee") ? baseline.accumulationFee : null,
     agreementIssuerFound: false,
     issueCategory: pass ? ISSUE_CATEGORY.NONE : ISSUE_CATEGORY.MISSING_AGREEMENT,
     requiredAction: pass

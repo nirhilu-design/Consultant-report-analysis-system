@@ -1,430 +1,353 @@
-// Path: src/components/UploadPanel.jsx
-import { useMemo, useState } from "react";
+import { Component, useState } from "react";
+import * as XLSX from "xlsx";
 
-const FILE_SLOTS = [
-  {
-    key: "dataFile",
-    title: "דוח נתונים",
-    subtitle: "דוח יועץ / מנהלי הסדר",
-    required: true,
-    badge: "חובה",
-    keywords: [
-      "דוח יועץ",
-      "יועץ",
-      "נתונים",
-      "קרן פנסיה",
-      "פנסיה",
-      "data",
-      "pension",
-    ],
-  },
-  {
-    key: "agreementsFile",
-    title: "דוח הסכמים",
-    subtitle: "הסכמי דמי ניהול",
-    required: true,
-    badge: "חובה",
-    keywords: [
-      "הסכמים",
-      "הסכם",
-      "דמי ניהול",
-      "agreements",
-      "agreement",
-    ],
-  },
-  {
-    key: "personalDetailsFile",
-    title: "פרטים אישיים",
-    subtitle: "קובץ עובדים / פרטי לקוחות",
-    required: false,
-    badge: "מומלץ",
-    keywords: [
-      "פרטים אישיים",
-      "פרטים אישים",
-      "אישי",
-      "אישים",
-      "עובדים",
-      "לקוחות",
-      "personal",
-      "details",
-      "employees",
-      "clients",
-    ],
-  },
-];
+import UploadPanel from "./components/UploadPanel.jsx";
+import Dashboard from "./components/Dashboard.jsx";
 
-function isExcelFile(file) {
-  if (!file) return false;
+import { parsePensionFund } from "./parsers/pensionFundParser.js";
+import { parseAgreements } from "./parsers/agreementsParser.js";
+import { parsePersonalDetails } from "./parsers/personalDetailsParser.js";
+import { buildPensionSummary } from "./parsers/buildPensionSummary.js";
+import { buildUnifiedPensionPersonalData } from "./parsers/unifiedPensionPersonalDataBuilder.js";
 
-  const name = file.name || "";
-  const ext = name.split(".").pop()?.toLowerCase();
+import "./styles.css";
 
-  return ext === "xlsx" || ext === "xls";
-}
+async function readWorkbook(file, label = "") {
+  if (!file) return null;
 
-function formatFileSize(bytes) {
-  if (!bytes) return "";
+  try {
+    const buffer = await file.arrayBuffer();
 
-  if (bytes < 1024 * 1024) {
-    return `${Math.round(bytes / 1024)}KB`;
-  }
-
-  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
-}
-
-function normalizeFileName(name) {
-  return String(name || "")
-    .toLowerCase()
-    .replace(/[״"]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function guessSlotKey(file, currentFiles) {
-  const name = normalizeFileName(file?.name);
-
-  if (!name) return null;
-
-  const scored = FILE_SLOTS.map((slot) => {
-    const score = slot.keywords.reduce((sum, keyword) => {
-      return name.includes(normalizeFileName(keyword)) ? sum + 1 : sum;
-    }, 0);
-
-    return {
-      key: slot.key,
-      score,
-      alreadyHasFile: Boolean(currentFiles?.[slot.key]),
-    };
-  })
-    .filter((item) => item.score > 0)
-    .sort((a, b) => {
-      if (b.score !== a.score) return b.score - a.score;
-      return Number(a.alreadyHasFile) - Number(b.alreadyHasFile);
+    return XLSX.read(buffer, {
+      type: "array",
+      cellDates: true,
+      cellNF: false,
+      cellText: false,
     });
-
-  if (scored.length) return scored[0].key;
-
-  const emptySlot = FILE_SLOTS.find((slot) => !currentFiles?.[slot.key]);
-
-  return emptySlot?.key || "dataFile";
+  } catch (error) {
+    console.error("readWorkbook failed", { label, fileName: file?.name, error });
+    throw new Error(`READ_WORKBOOK_FAILED:${label || file?.name || "unknown"}`);
+  }
 }
 
-function FileStatusIcon({ file, required }) {
-  if (file) {
-    return <span className="uploadStatusIcon success">✓</span>;
-  }
-
-  if (required) {
-    return <span className="uploadStatusIcon required">!</span>;
-  }
-
-  return <span className="uploadStatusIcon optional">+</span>;
-}
-
-function DropUpload({
-  slot,
-  file,
-  isDragging,
-  dragTarget,
-  onFile,
-  onRemove,
-  onDragEnterSlot,
-  onDragLeaveSlot,
-  onDropSlot,
-}) {
-  const active = isDragging && dragTarget === slot.key;
-
-  return (
-    <label
-      className={[
-        "uploadBox",
-        file ? "hasFile" : "",
-        active ? "dragActive" : "",
-        slot.required ? "requiredSlot" : "optionalSlot",
-      ]
-        .filter(Boolean)
-        .join(" ")}
-      onDragEnter={(event) => onDragEnterSlot(event, slot.key)}
-      onDragOver={(event) => {
-        event.preventDefault();
-        onDragEnterSlot(event, slot.key);
-      }}
-      onDragLeave={(event) => onDragLeaveSlot(event, slot.key)}
-      onDrop={(event) => onDropSlot(event, slot.key)}
-    >
-      <input
-        type="file"
-        accept=".xlsx,.xls"
-        onChange={(event) => {
-          onFile(event.target.files?.[0] || null);
-          event.currentTarget.value = "";
-        }}
-      />
-
-      <div className="uploadBoxTop">
-        <FileStatusIcon file={file} required={slot.required} />
-
-        <div className="uploadBoxText">
-          <div className="uploadTitleRow">
-            <strong>{slot.title}</strong>
-            <span className={slot.required ? "slotBadge required" : "slotBadge optional"}>
-              {slot.badge}
-            </span>
-          </div>
-
-          <span>{slot.subtitle}</span>
-        </div>
-      </div>
-
-      <div className="uploadDropHint">
-        {file ? "קובץ נבחר" : "גרור לכאן או לחץ לבחירה"}
-      </div>
-
-      {file ? (
-        <div className="selectedFileCard">
-          <div>
-            <strong>{file.name}</strong>
-            <span>{formatFileSize(file.size)}</span>
-          </div>
-
-          <button
-            type="button"
-            className="removeFileButton"
-            onClick={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              onRemove();
-            }}
-          >
-            הסר
-          </button>
-        </div>
-      ) : (
-        <p className="uploadHint">Excel בלבד · xlsx / xls</p>
-      )}
-    </label>
+function hasWorkbookSheets(workbook) {
+  return Boolean(
+    workbook &&
+      Array.isArray(workbook.SheetNames) &&
+      workbook.SheetNames.length > 0
   );
 }
 
-export default function UploadPanel({ files, setFiles, onStart, isAnalyzing = false }) {
-  const [isDragging, setIsDragging] = useState(false);
-  const [dragTarget, setDragTarget] = useState(null);
-  const [error, setError] = useState("");
+function asArray(value) {
+  return Array.isArray(value) ? value : [];
+}
 
-  const canStart = Boolean(files.dataFile && files.agreementsFile);
+function createEmptyPersonalDetails(warning = "") {
+  return {
+    hasFile: false,
+    rows: [],
+    rawRows: [],
+    clientProfiles: [],
+    metadata: {
+      rowCount: 0,
+      warning,
+    },
+  };
+}
 
-  const progress = useMemo(() => {
-    const uploaded = FILE_SLOTS.filter((slot) => Boolean(files[slot.key])).length;
-    return {
-      uploaded,
-      total: FILE_SLOTS.length,
-      percent: Math.round((uploaded / FILE_SLOTS.length) * 100),
+function runAnalysisStage(stageKey, label, callback) {
+  try {
+    const result = callback();
+
+    return result;
+  } catch (error) {
+    console.error(`analysis stage failed: ${stageKey}`, { label, error });
+
+    const wrapped = new Error(`ANALYSIS_STAGE_FAILED:${stageKey}`);
+    wrapped.cause = error;
+    wrapped.stageLabel = label;
+    throw wrapped;
+  }
+}
+
+function createUserAnalysisError(error) {
+  const message = String(error?.message || "");
+
+  if (message.startsWith("MISSING_REQUIRED_FILES")) {
+    return "חסרים קבצי חובה. יש להעלות דוח נתונים ודוח הסכמים לפני התחלת הניתוח.";
+  }
+
+  if (message.startsWith("READ_WORKBOOK_FAILED")) {
+    return "אחד מקבצי ה־Excel לא נקרא בצורה תקינה. מומלץ לשמור מחדש את הקובץ כ־xlsx ולהעלות שוב.";
+  }
+
+  if (message.startsWith("EMPTY_DATA_FILE")) {
+    return "דוח הנתונים נקרא, אבל לא נמצאו בו שורות פנסיה תקינות. בדוק שזהו דוח הנתונים הנכון ושיש בו גיליון פנסיה.";
+  }
+
+  if (message.startsWith("EMPTY_AGREEMENTS_FILE")) {
+    return "דוח ההסכמים נקרא, אבל לא נמצאו בו הסכמי דמי ניהול תקינים. בדוק שזהו קובץ ההסכמים הנכון.";
+  }
+
+  if (message.startsWith("INVALID_UNIFIED_RESULT")) {
+    return "הנתונים נקראו, אבל שכבת האיחוד החזירה מבנה לא תקין. זה בדרך כלל אומר שאחד הקבצים במבנה שונה מהצפוי.";
+  }
+
+  if (message.startsWith("ANALYSIS_STAGE_FAILED")) {
+    const stageLabel = error?.stageLabel || "אחד משלבי הניתוח";
+    return `${stageLabel} נכשל. הקבצים לא אבדו — אפשר לבדוק את שיוך הקבצים ולנסות שוב.`;
+  }
+
+  return "לא הצלחנו לנתח את הקבצים. בדוק שהקבצים הם Excel תקינים ונסה שוב.";
+}
+
+class DashboardErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+
+  componentDidCatch(error, info) {
+    console.error("Dashboard render failed", error, info);
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <section className="card" dir="rtl">
+          <h2>הניתוח הסתיים, אבל התצוגה נתקלה בשגיאה</h2>
+          <p>
+            הנתונים נטענו, אך אחד מרכיבי הדשבורד לא הצליח להתרנדר. אפשר לחזור
+            להעלאה, לבדוק את שיוך הקבצים ולהריץ שוב בלי לרענן את האתר.
+          </p>
+          <button
+            type="button"
+            className="primaryButton"
+            onClick={this.props.onReset}
+          >
+            חזרה להעלאת קבצים
+          </button>
+        </section>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
+export default function App() {
+  const [analysisStarted, setAnalysisStarted] = useState(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analysisError, setAnalysisError] = useState("");
+  const [analysisData, setAnalysisData] = useState(null);
+
+  const [files, setFiles] = useState({
+    dataFile: null,
+    agreementsFile: null,
+    personalDetailsFile: null,
+  });
+
+  function resetAnalysis() {
+    setAnalysisStarted(false);
+    setAnalysisData(null);
+    setAnalysisError("");
+  }
+
+  async function handleStartAnalysis() {
+    if (!files.dataFile || !files.agreementsFile || isAnalyzing) {
+      setAnalysisError(createUserAnalysisError(new Error("MISSING_REQUIRED_FILES")));
+      return;
+    }
+
+    setIsAnalyzing(true);
+    setAnalysisError("");
+    setAnalysisData(null);
+
+    const diagnostics = {
+      warnings: [],
+      files: {
+        dataFile: files.dataFile?.name || "",
+        agreementsFile: files.agreementsFile?.name || "",
+        personalDetailsFile: files.personalDetailsFile?.name || "",
+      },
+      counts: {},
     };
-  }, [files]);
 
-  function setFileForSlot(slotKey, file) {
-    setError("");
+    try {
+      const dataWorkbook = await readWorkbook(files.dataFile, "דוח נתונים");
+      const agreementsWorkbook = await readWorkbook(files.agreementsFile, "דוח הסכמים");
+      const personalDetailsWorkbook = await readWorkbook(
+        files.personalDetailsFile,
+        "פרטים אישיים"
+      );
 
-    if (file && !isExcelFile(file)) {
-      setError("אפשר להעלות רק קובצי Excel מסוג xlsx או xls.");
-      return;
-    }
+      if (!hasWorkbookSheets(dataWorkbook)) throw new Error("EMPTY_DATA_FILE");
+      if (!hasWorkbookSheets(agreementsWorkbook)) throw new Error("EMPTY_AGREEMENTS_FILE");
 
-    setFiles((prev) => ({
-      ...prev,
-      [slotKey]: file,
-    }));
-  }
+      diagnostics.counts.dataSheets = dataWorkbook.SheetNames.length;
+      diagnostics.counts.agreementSheets = agreementsWorkbook.SheetNames.length;
+      diagnostics.counts.personalDetailsSheets = personalDetailsWorkbook?.SheetNames?.length || 0;
 
-  function assignDroppedFiles(fileList, forcedSlotKey = null) {
-    const droppedFiles = Array.from(fileList || []);
-    const excelFiles = droppedFiles.filter(isExcelFile);
+      const pensionRowsRaw = runAnalysisStage(
+        "parsePensionFund",
+        "קריאת דוח הנתונים",
+        () => parsePensionFund(dataWorkbook)
+      );
 
-    setError("");
+      const agreements = runAnalysisStage(
+        "parseAgreements",
+        "קריאת דוח ההסכמים",
+        () => parseAgreements(agreementsWorkbook)
+      );
 
-    if (!droppedFiles.length) return;
+      let personalDetails = createEmptyPersonalDetails();
 
-    if (!excelFiles.length) {
-      setError("לא זוהה קובץ Excel. יש להעלות קובצי xlsx או xls בלבד.");
-      return;
-    }
-
-    setFiles((prev) => {
-      const next = { ...prev };
-
-      if (forcedSlotKey && excelFiles.length === 1) {
-        next[forcedSlotKey] = excelFiles[0];
-        return next;
+      if (personalDetailsWorkbook) {
+        try {
+          personalDetails = parsePersonalDetails(personalDetailsWorkbook);
+        } catch (error) {
+          console.error("optional personal details parsing failed", error);
+          diagnostics.warnings.push(
+            "קובץ הפרטים האישיים לא נותח בהצלחה, ולכן הניתוח ממשיך בלי העשרת פרטים אישיים."
+          );
+          personalDetails = createEmptyPersonalDetails("personal details parser failed");
+        }
       }
 
-      for (const file of excelFiles) {
-        const slotKey = guessSlotKey(file, next);
-        next[slotKey] = file;
+      if (!Array.isArray(pensionRowsRaw) || pensionRowsRaw.length === 0) {
+        throw new Error("EMPTY_DATA_FILE");
       }
 
-      return next;
-    });
+      if (!Array.isArray(agreements) || agreements.length === 0) {
+        throw new Error("EMPTY_AGREEMENTS_FILE");
+      }
 
-    if (droppedFiles.length !== excelFiles.length) {
-      setError("חלק מהקבצים לא נקלטו כי אינם קובצי Excel.");
+      diagnostics.counts.rawPensionRows = pensionRowsRaw.length;
+      diagnostics.counts.agreements = agreements.length;
+      diagnostics.counts.personalProfiles = asArray(personalDetails?.clientProfiles).length;
+
+      const unifiedPensionPersonalData = runAnalysisStage(
+        "buildUnifiedPensionPersonalData",
+        "איחוד דוח הנתונים עם פרטים אישיים",
+        () => buildUnifiedPensionPersonalData(pensionRowsRaw, personalDetails)
+      );
+
+      if (!unifiedPensionPersonalData || !Array.isArray(unifiedPensionPersonalData.rows)) {
+        throw new Error("INVALID_UNIFIED_RESULT");
+      }
+
+      const pensionRows = unifiedPensionPersonalData.rows;
+      const unifiedMetadata = unifiedPensionPersonalData.metadata || {};
+
+      const personalRows =
+        personalDetails?.clientProfiles ||
+        personalDetails?.rows ||
+        personalDetails?.rawRows ||
+        [];
+
+      const personalDetailsMerge = {
+        source: "unifiedPensionPersonalData",
+        hasPersonalDetailsFile: Boolean(personalDetails?.hasFile),
+        joinKey: "employeeCode",
+        metadata: {
+          pensionRowCount: unifiedMetadata.pensionRows || pensionRows.length,
+          clientProfileCount: unifiedMetadata.personalProfiles || asArray(personalRows).length,
+          matchedPensionRows: unifiedMetadata.matchedPensionRows || 0,
+          unmatchedPensionRows: unifiedMetadata.unmatchedPensionRows || 0,
+          matchedClientProfiles: unifiedMetadata.matchedEmployees || 0,
+          unmatchedClientProfiles:
+            unifiedMetadata.personalProfilesWithoutPensionRows || 0,
+          matchRate: unifiedMetadata.rowMatchRate || 0,
+          matchMethods: {
+            employeeCode: unifiedMetadata.matchedPensionRows || 0,
+          },
+        },
+      };
+
+      const pensionSummary = runAnalysisStage(
+        "buildPensionSummary",
+        "בניית סיכום ואנליטיקה",
+        () => buildPensionSummary(pensionRows, agreements, { personalRows })
+      );
+
+      diagnostics.counts.unifiedRows = pensionRows.length;
+
+      setAnalysisData({
+        pensionRows,
+        rawPensionRows: pensionRowsRaw,
+        agreements,
+        personalDetails,
+        personalRows,
+        personalDetailsMerge,
+        unifiedPensionPersonalData,
+        unifiedEmployeeData: unifiedPensionPersonalData,
+        pensionSummary,
+        diagnostics,
+      });
+
+      setAnalysisStarted(true);
+    } catch (error) {
+      console.error(error);
+      setAnalysisStarted(false);
+      setAnalysisData(null);
+      setAnalysisError(createUserAnalysisError(error));
+    } finally {
+      setIsAnalyzing(false);
     }
-  }
-
-  function handlePageDragOver(event) {
-    event.preventDefault();
-    setIsDragging(true);
-  }
-
-  function handlePageDragLeave(event) {
-    if (event.currentTarget === event.target) {
-      setIsDragging(false);
-      setDragTarget(null);
-    }
-  }
-
-  function handlePageDrop(event) {
-    event.preventDefault();
-    setIsDragging(false);
-    setDragTarget(null);
-    assignDroppedFiles(event.dataTransfer.files);
-  }
-
-  function handleSlotDragEnter(event, slotKey) {
-    event.preventDefault();
-    setIsDragging(true);
-    setDragTarget(slotKey);
-  }
-
-  function handleSlotDragLeave(event, slotKey) {
-    event.preventDefault();
-
-    const currentTarget = event.currentTarget;
-    const relatedTarget = event.relatedTarget;
-
-    if (currentTarget && relatedTarget && currentTarget.contains(relatedTarget)) {
-      return;
-    }
-
-    if (dragTarget === slotKey) {
-      setDragTarget(null);
-    }
-  }
-
-  function handleSlotDrop(event, slotKey) {
-    event.preventDefault();
-    event.stopPropagation();
-
-    setIsDragging(false);
-    setDragTarget(null);
-
-    assignDroppedFiles(event.dataTransfer.files, slotKey);
-  }
-
-  function clearAllFiles() {
-    setFiles({
-      dataFile: null,
-      agreementsFile: null,
-      personalDetailsFile: null,
-    });
-
-    setError("");
   }
 
   return (
-    <section
-      className={`card uploadPanel ${isDragging ? "uploadPanelDragging" : ""}`}
-      onDragOver={handlePageDragOver}
-      onDragLeave={handlePageDragLeave}
-      onDrop={handlePageDrop}
-    >
-      <div className="uploadHeader">
-        <div>
-          <p className="eyebrow">Upload Center</p>
-          <h2>העלאת קבצים לניתוח</h2>
-          <p>
-            העלה את דוח הנתונים ודוח ההסכמים. קובץ הפרטים האישיים מומלץ כדי
-            לקבל ניתוח עשיר ומדויק יותר.
-          </p>
-        </div>
+    <main className="app" dir="rtl">
+      {!analysisStarted ? (
+        <>
+          <section className="hero">
+            <div>
+              <p className="eyebrow">
+                דוח יועץ פנסיוני / מנהלי הסדר
+              </p>
 
-        <div className="uploadProgressCard">
-          <strong>
-            {progress.uploaded}/{progress.total}
-          </strong>
-          <span>קבצים נבחרו</span>
-          <div className="uploadProgressBar">
-            <div style={{ width: `${progress.percent}%` }} />
-          </div>
-        </div>
-      </div>
+              <h1>
+                מערכת ניתוח דוח יועץ פנסיוני
+              </h1>
 
-      <div className="uploadGlobalDropZone">
-        <div className="uploadGlobalIcon">⇪</div>
-        <div>
-          <strong>אפשר לגרור לכאן את כל הקבצים יחד</strong>
-          <span>
-            המערכת תנסה לשייך אוטומטית לפי שם הקובץ: נתונים, הסכמים, פרטים אישיים.
-          </span>
-        </div>
-      </div>
+              <p>
+                העלה דוח נתונים, דוח הסכמים וקובץ פרטים אישיים אופציונלי,
+                ולאחר מכן הפעל ניתוח.
+              </p>
+            </div>
+          </section>
 
-      <div className="uploadGrid">
-        {FILE_SLOTS.map((slot) => (
-          <DropUpload
-            key={slot.key}
-            slot={slot}
-            file={files[slot.key]}
-            isDragging={isDragging}
-            dragTarget={dragTarget}
-            onFile={(file) => setFileForSlot(slot.key, file)}
-            onRemove={() => setFileForSlot(slot.key, null)}
-            onDragEnterSlot={handleSlotDragEnter}
-            onDragLeaveSlot={handleSlotDragLeave}
-            onDropSlot={handleSlotDrop}
+          <UploadPanel
+            files={files}
+            setFiles={setFiles}
+            onStart={handleStartAnalysis}
+            isAnalyzing={isAnalyzing}
           />
-        ))}
-      </div>
 
-      {error && <div className="errorBox">{error}</div>}
+          {isAnalyzing && (
+            <div className="statusBox">
+              מנתח את הקבצים...
+            </div>
+          )}
 
-      <div className="uploadActions">
-        <button
-          className="primaryButton"
-          disabled={!canStart || isAnalyzing}
-          onClick={onStart}
-          type="button"
-        >
-          {isAnalyzing ? "מנתח..." : "התחל ניתוח"}
-        </button>
-
-        <button
-          className="secondaryButton"
-          onClick={clearAllFiles}
-          type="button"
-          disabled={!progress.uploaded || isAnalyzing}
-        >
-          נקה קבצים
-        </button>
-      </div>
-
-      {!canStart && (
-        <p className="hint">
-          יש להעלות לפחות דוח נתונים ודוח הסכמים לפני התחלת הניתוח.
-        </p>
+          {analysisError && (
+            <div className="errorBox">
+              {analysisError}
+            </div>
+          )}
+        </>
+      ) : (
+        <DashboardErrorBoundary onReset={resetAnalysis}>
+          <Dashboard
+            files={files}
+            analysisData={analysisData}
+          />
+        </DashboardErrorBoundary>
       )}
-
-      {canStart && !files.personalDetailsFile && (
-        <p className="hint">
-          קובץ פרטים אישיים לא חובה, אבל מומלץ כדי להציג שם, גיל, מצב משפחתי
-          וחיבור טוב יותר לעובדים.
-        </p>
-      )}
-
-      {canStart && files.personalDetailsFile && (
-        <p className="successHint">
-          כל הקבצים הדרושים נקלטו. אפשר להתחיל ניתוח.
-        </p>
-      )}
-    </section>
+    </main>
   );
 }

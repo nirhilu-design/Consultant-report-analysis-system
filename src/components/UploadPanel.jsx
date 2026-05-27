@@ -155,7 +155,10 @@ function DropUpload({
       <input
         type="file"
         accept=".xlsx,.xls"
-        onChange={(event) => onFile(event.target.files?.[0] || null)}
+        onChange={(event) => {
+          onFile(event.target.files?.[0] || null);
+          event.currentTarget.value = "";
+        }}
       />
 
       <div className="uploadBoxTop">
@@ -203,7 +206,7 @@ function DropUpload({
   );
 }
 
-export default function UploadPanel({ files, setFiles, onStart }) {
+export default function UploadPanel({ files, setFiles, onStart, isAnalyzing = false }) {
   const [isDragging, setIsDragging] = useState(false);
   const [dragTarget, setDragTarget] = useState(null);
   const [error, setError] = useState("");
@@ -387,18 +390,18 @@ export default function UploadPanel({ files, setFiles, onStart }) {
       <div className="uploadActions">
         <button
           className="primaryButton"
-          disabled={!canStart}
+          disabled={!canStart || isAnalyzing}
           onClick={onStart}
           type="button"
         >
-          התחל ניתוח
+          {isAnalyzing ? "מנתח..." : "התחל ניתוח"}
         </button>
 
         <button
           className="secondaryButton"
           onClick={clearAllFiles}
           type="button"
-          disabled={!progress.uploaded}
+          disabled={!progress.uploaded || isAnalyzing}
         >
           נקה קבצים
         </button>

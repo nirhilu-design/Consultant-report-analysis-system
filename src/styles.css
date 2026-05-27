@@ -1212,3 +1212,135 @@ button:disabled {
     margin-inline-start: 0;
   }
 }
+
+/* v2026_05_27_multi_manager_upload_08 */
+.managerUploadList {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  margin-top: 18px;
+}
+
+.managerUploadCard {
+  border: 1px solid #dbe6fb;
+  border-radius: 26px;
+  padding: 18px;
+  background: linear-gradient(135deg, #ffffff 0%, #f8fbff 100%);
+  box-shadow: 0 16px 36px rgba(16, 45, 92, 0.08);
+}
+
+.managerUploadHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 16px;
+}
+
+.managerUploadHeader > div:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 260px;
+}
+
+.managerStatus {
+  width: fit-content;
+  border-radius: 999px;
+  padding: 5px 11px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.managerStatus.ready {
+  color: #166534;
+  background: #dcfce7;
+  border: 1px solid #bbf7d0;
+}
+
+.managerStatus.missing {
+  color: #92400e;
+  background: #fef3c7;
+  border: 1px solid #fde68a;
+}
+
+.managerNameInput {
+  width: min(360px, 100%);
+  border: 1px solid #c9d8f6;
+  border-radius: 16px;
+  padding: 12px 14px;
+  background: #ffffff;
+  color: #0d1f4f;
+  font-family: inherit;
+  font-size: 17px;
+  font-weight: 800;
+  outline: none;
+}
+
+.managerNameInput:focus {
+  border-color: #7da8ff;
+  box-shadow: 0 0 0 4px rgba(47, 111, 219, 0.12);
+}
+
+.managerUploadActions,
+.uploadActionsSplit,
+.uploadActionsLeft {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.uploadActionsSplit {
+  justify-content: space-between;
+}
+
+.smallButton {
+  min-height: 36px;
+  padding: 8px 12px;
+  font-size: 13px;
+}
+
+.dangerButton {
+  border: 1px solid #fecaca;
+  border-radius: 14px;
+  background: #fff5f5;
+  color: #b91c1c;
+  cursor: pointer;
+  font-family: inherit;
+  font-weight: 800;
+  transition: 0.18s ease;
+}
+
+.dangerButton:hover:not(:disabled) {
+  background: #fee2e2;
+  transform: translateY(-1px);
+}
+
+.dangerButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.managerUploadGrid {
+  margin-top: 0;
+}
+
+@media (max-width: 980px) {
+  .managerUploadHeader,
+  .uploadActionsSplit {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .managerUploadHeader > div:first-child,
+  .managerNameInput {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .managerUploadActions,
+  .uploadActionsLeft {
+    width: 100%;
+  }
+}

@@ -17,6 +17,10 @@
 //   לא מקבלות התראת צבירה חסרה.
 // ─────────────────────────────────────────────────────────────────────────────
 
+function safeRows(rows) {
+  return Array.isArray(rows) ? rows.filter(Boolean) : [];
+}
+
 function isPresent(value) {
   return value !== null && value !== undefined && value !== "";
 }
@@ -185,6 +189,7 @@ function severityRank(severity) {
 }
 
 function buildTrackSimilarity(rows = []) {
+  rows = safeRows(rows);
   const active = rows.filter((r) => !isExcludedOrOperationOnly(r));
 
   const withBoth = active.filter((r) => {
@@ -209,6 +214,7 @@ function buildTrackSimilarity(rows = []) {
 }
 
 export function buildDataQuality(rows = []) {
+  rows = safeRows(rows);
   const issues = [];
   const activeRows = rows.filter((r) => !isExcludedOrOperationOnly(r));
 

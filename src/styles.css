@@ -1467,3 +1467,81 @@ body,
     grid-template-columns: 1fr;
   }
 }
+
+/* v2026_05_27_layout_centering_10
+   RTL-safe centering fix after v09.
+   Keeps the navigation inside the card while preventing the tab group from sticking to the right edge. */
+.dashboard-header,
+.global-scope-bar,
+.tab-bar,
+.dashboard-content {
+  width: min(100%, 1680px);
+  max-width: calc(100vw - 64px);
+  margin-inline: auto;
+}
+
+.tab-bar {
+  direction: rtl;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 8px 10px;
+  overflow: visible;
+  padding: 10px 14px;
+}
+
+.tab-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 42px;
+  max-width: 100%;
+}
+
+.tab-badge {
+  margin-right: 0;
+  margin-inline-start: 0;
+  margin-inline-end: 0;
+}
+
+.global-scope-bar {
+  direction: rtl;
+  flex-wrap: wrap;
+}
+
+.global-scope-bar > div {
+  min-width: 220px;
+}
+
+.global-manager-filter {
+  margin-inline-start: 0;
+}
+
+@media (max-width: 1200px) {
+  .dashboard-header,
+  .global-scope-bar,
+  .tab-bar,
+  .dashboard-content {
+    max-width: calc(100vw - 40px);
+  }
+
+  .tab-bar {
+    justify-content: center;
+  }
+}
+
+@media (max-width: 700px) {
+  .dashboard-header,
+  .global-scope-bar,
+  .tab-bar,
+  .dashboard-content {
+    max-width: calc(100vw - 24px);
+  }
+
+  .tab-bar {
+    justify-content: flex-start;
+  }
+}

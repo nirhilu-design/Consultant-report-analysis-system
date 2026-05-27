@@ -10,6 +10,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import * as XLSX from "xlsx";
+import { buildIssuerAliasLookup, canonicalIssuer as canonicalIssuerFromAliases } from "../unified/issuerAliases.js";
 
 function normalizeText(value) {
   return String(value ?? "")
@@ -33,30 +34,13 @@ function normalizeFeePercent(value) {
   return Number(num.toFixed(4));
 }
 
-const ISSUER_MAP = {
-  "הפניקס": ["הפניקס", "פניקס", "אקסלנס"],
-  "הראל": ["הראל"],
-  "כלל": ["כלל"],
-  "מגדל": ["מגדל", "מקפת"],
-  "מנורה מבטחים": ["מנורה", "מבטחים"],
-  "מיטב": ["מיטב", "דש"],
-  "אלטשולר שחם": ["אלטשולר"],
-  "מור": ["מור"],
-  "ילין לפידות": ["ילין"],
-  "אנליסט": ["אנליסט"],
-  "איילון": ["איילון"],
-};
+const ISSUER_ALIAS_LOOKUP = buildIssuerAliasLookup();
 
 function canonicalIssuer(raw) {
   const text = normalizeText(raw);
   if (!text) return null;
 
-  for (const [canonical, aliases] of Object.entries(ISSUER_MAP)) {
-    if (text === canonical) return canonical;
-    if (aliases.some((alias) => text.includes(alias))) return canonical;
-  }
-
-  return text;
+  return canonicalIssuerFromAliases(text, ISSUER_ALIAS_LOOKUP);
 }
 
 function asArray(row) {
@@ -153,6 +137,7 @@ export function parseAgreements(workbook) {
           sheetName,
           issuer,
           issuerOriginal: issuerRaw,
+          parserVersion: "stability_05",
           optionName: "מודל א",
           depositFee: modelADepositFee,
           accumulationFee: modelAAccumulationFee,
@@ -170,6 +155,7 @@ export function parseAgreements(workbook) {
           sheetName,
           issuer,
           issuerOriginal: issuerRaw,
+          parserVersion: "stability_05",
           optionName: "מודל צבירות גבוהות",
           depositFee: highDepositFee,
           accumulationFee: highAccumulationFee,
@@ -182,6 +168,7 @@ export function parseAgreements(workbook) {
   });
 
   console.log("parseAgreements result:", {
+    version: "stability_05",
     total: agreements.length,
     issuers: [...new Set(agreements.map((agreement) => agreement.issuer))],
     threshold: agreements.find((agreement) => agreement.conditionType === "MIN_ACCUMULATION")?.conditionValue,

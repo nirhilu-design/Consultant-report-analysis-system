@@ -1,5 +1,13 @@
 // Path: src/components/UploadPanel.jsx
 import { useMemo, useState } from "react";
+import {
+  buildUploadProgress,
+  canStartAnalysis,
+  createManager,
+  hasRequiredFiles,
+  normalizeFilesState,
+  normalizeManagers,
+} from "../upload/uploadSessionModel.js";
 
 const FILE_SLOTS = [
   {
@@ -38,38 +46,6 @@ const FILE_SLOTS = [
     ],
   },
 ];
-
-function createManager(index = 1) {
-  return {
-    id: `manager_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-    name: `מנהל הסדר ${index}`,
-    dataFile: null,
-    agreementsFile: null,
-    personalDetailsFile: null,
-  };
-}
-
-function normalizeManagers(files) {
-  if (Array.isArray(files?.managers) && files.managers.length) {
-    return files.managers.map((manager, index) => ({
-      id: manager.id || `manager_${index + 1}`,
-      name: manager.name || `מנהל הסדר ${index + 1}`,
-      dataFile: manager.dataFile || null,
-      agreementsFile: manager.agreementsFile || null,
-      personalDetailsFile: manager.personalDetailsFile || null,
-    }));
-  }
-
-  return [
-    {
-      id: "manager_1",
-      name: "מנהל הסדר 1",
-      dataFile: files?.dataFile || null,
-      agreementsFile: files?.agreementsFile || null,
-      personalDetailsFile: files?.personalDetailsFile || null,
-    },
-  ];
-}
 
 function isExcelFile(file) {
   if (!file) return false;
@@ -209,41 +185,31 @@ function DropUpload({
 }
 
 export default function UploadPanel({ files, setFiles, onStart, isAnalyzing = false }) {
-  const managers = normalizeManagers(files);
+  const normalizedFiles = normalizeFilesState(files);
+  const managers = normalizeManagers(normalizedFiles);
   const [isDragging, setIsDragging] = useState(false);
   const [dragTarget, setDragTarget] = useState(null);
   const [error, setError] = useState("");
 
   const progress = useMemo(() => {
-    const total = managers.length * FILE_SLOTS.length;
-    const uploaded = managers.reduce((sum, manager) => {
-      return sum + FILE_SLOTS.filter((slot) => Boolean(manager[slot.key])).length;
-    }, 0);
-    const requiredTotal = managers.length * FILE_SLOTS.filter((slot) => slot.required).length;
-    const requiredUploaded = managers.reduce((sum, manager) => {
-      return sum + FILE_SLOTS.filter((slot) => slot.required && Boolean(manager[slot.key])).length;
-    }, 0);
+    return buildUploadProgress(normalizedFiles, FILE_SLOTS);
+  }, [normalizedFiles]);
 
-    return {
-      uploaded,
-      total,
-      requiredUploaded,
-      requiredTotal,
-      percent: total ? Math.round((uploaded / total) * 100) : 0,
-    };
-  }, [managers]);
-
-  const canStart = managers.length > 0 && managers.every((manager) => manager.dataFile && manager.agreementsFile);
+  const canStart = canStartAnalysis(normalizedFiles);
 
   function updateManagers(updater) {
     setFiles((prev) => {
-      const currentManagers = normalizeManagers(prev);
+      const currentState = normalizeFilesState(prev);
+      const currentManagers = normalizeManagers(currentState);
       const nextManagers = updater(currentManagers).map((manager, index) => ({
         ...manager,
         name: manager.name || `מנהל הסדר ${index + 1}`,
       }));
 
-      return { managers: nextManagers };
+      return {
+        ...currentState,
+        managers: nextManagers,
+      };
     });
   }
 
@@ -442,14 +408,14 @@ export default function UploadPanel({ files, setFiles, onStart, isAnalyzing = fa
         <div>
           <strong>אפשר לגרור קבצים לתוך מנהל ההסדר הרלוונטי</strong>
           <span>
-            בתוך כל ריבוע יש שלושה אזורי העלאה: נתונים, הסכמים ופרטים אישיים.
+            מנהל ריק לא חוסם התחלת ניתוח. רק מנהל שהתחלת להזין בו קבצים חייב לכלול דוח נתונים ודוח הסכמים.
           </span>
         </div>
       </div>
 
       <div className="managerUploadList">
         {managers.map((manager, managerIndex) => {
-          const managerComplete = Boolean(manager.dataFile && manager.agreementsFile);
+          const managerComplete = hasRequiredFiles(manager);
 
           return (
             <div className="managerUploadCard" key={manager.id}>
@@ -549,7 +515,7 @@ export default function UploadPanel({ files, setFiles, onStart, isAnalyzing = fa
 
       {!canStart && (
         <p className="hint">
-          לכל מנהל הסדר פעיל יש להעלות לפחות דוח נתונים ודוח הסכמים לפני התחלת הניתוח.
+          לכל מנהל הסדר פעיל יש להעלות לפחות דוח נתונים ודוח הסכמים לפני התחלת הניתוח. מנהלים ריקים נשארים כטיוטה ולא חוסמים את ההרצה.
         </p>
       )}
 

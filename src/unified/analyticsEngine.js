@@ -1,7 +1,19 @@
 // Path: src/unified/analyticsEngine.js
 
+import {
+  AUDIT_STATUS,
+  PRODUCT_CONFIGS,
+  PRODUCT_TYPES,
+  ensureUnifiedRows,
+  getProductConfig,
+} from "./unifiedSchema.js";
+
+const UNKNOWN = "לא צוין";
+const NO_TRACK = "ללא מסלול";
+const NO_INSURANCE_TRACK = "מסלול ביטוח לא צוין";
+
 function safeRows(rows) {
-  return Array.isArray(rows) ? rows.filter(Boolean) : [];
+  return ensureUnifiedRows(Array.isArray(rows) ? rows.filter(Boolean) : []);
 }
 
 function toSafeNumber(value) {
@@ -16,123 +28,282 @@ function toSafeNumber(value) {
   return Number.isFinite(num) ? num : 0;
 }
 
-function accumulationBucket(v) {
-  const num = toSafeNumber(v);
-  if (!num || num <= 0) return "לא צוין";
-  if (num < 50_000)  return "0-50K";
+function isPresent(value) {
+  return value !== null && value !== undefined && value !== "";
+}
+
+function normalizeText(value, fallback = "") {
+  const text = String(value ?? "")
+    .replace(/\s+/g, " ")
+    .replace(/[״"]/g, "")
+    .trim();
+
+  return text || fallback;
+}
+
+function normalizeTrack(value) {
+  return normalizeText(value, NO_TRACK);
+}
+
+function getAuditStatus(row) {
+  return row?.auditStatus || "";
+}
+
+function isExcluded(row) {
+  return getAuditStatus(row) === AUDIT_STATUS.EXCLUDED || row?.isExcludedFromFeeAudit === true;
+}
+
+function isValid(row) {
+  return getAuditStatus(row) === AUDIT_STATUS.VALID;
+}
+
+function isInvalid(row) {
+  return getAuditStatus(row) === AUDIT_STATUS.INVALID;
+}
+
+function getProductType(row) {
+  return PRODUCT_CONFIGS[row?.productType] ? row.productType : PRODUCT_TYPES.PENSION;
+}
+
+function productSupports(row, flag) {
+  return Boolean(getProductConfig(getProductType(row))?.[flag]);
+}
+
+function getClientKey(row) {
+  return (
+    row.employeeCode ||
+    row.clientId ||
+    row.personal_fullName ||
+    row.clientName ||
+    row.policyNumber ||
+    ""
+  );
+}
+
+function accumulationBucket(value) {
+  const num = toSafeNumber(value);
+  if (!num || num <= 0) return UNKNOWN;
+  if (num < 50_000) return "0-50K";
   if (num < 100_000) return "50K-100K";
   if (num < 300_000) return "100K-300K";
   if (num < 500_000) return "300K-500K";
   return "500K+";
 }
 
-function isPresent(value) {
-  return value !== null && value !== undefined && value !== "";
-}
-
-function normalizeTrack(value) {
-  return String(value || "")
-    .replace(/\s+/g, " ")
-    .replace(/[״"]/g, "")
-    .trim();
-}
-
 function hasAnyAgreement(row) {
   return Boolean(
     row.agreementIssuerFound ||
-    row.auditMatchRuleType === "INLINE_AGREEMENT" ||
-    row.auditMatchResult === "MATCH_INLINE_AGREEMENT" ||
-    row.auditMatchResult === "FAIL_INLINE_AGREEMENT" ||
-    isPresent(row.depositFeeAgreement) ||
-    isPresent(row.accumulationFeeAgreement) ||
-    isPresent(row.auditReferenceDepositFee) ||
-    isPresent(row.auditReferenceAccumulationFee)
+      row.auditMatchRuleType === "INLINE_AGREEMENT" ||
+      row.auditMatchResult === "MATCH_INLINE_AGREEMENT" ||
+      row.auditMatchResult === "FAIL_INLINE_AGREEMENT" ||
+      isPresent(row.depositFeeAgreement) ||
+      isPresent(row.accumulationFeeAgreement) ||
+      isPresent(row.auditReferenceDepositFee) ||
+      isPresent(row.auditReferenceAccumulationFee)
   );
+}
+
+function hasTierModel(row) {
+  return Boolean(row.hasTierModel);
+}
+
+function isEligibleForTier(row) {
+  return Boolean(row.eligibleTierModel ?? row.eligibleForTier);
+}
+
+function isInTierModel(row) {
+  return Boolean(row.actualInTierModel ?? row.inTierModel);
+}
+
+function countUnique(rows, getter) {
+  const values = new Set();
+
+  for (const row of rows) {
+    const value = getter(row);
+    if (value) values.add(value);
+  }
+
+  return values.size;
+}
+
+function groupBy(rows, getter) {
+  const map = new Map();
+
+  for (const row of rows) {
+    const key = getter(row) || UNKNOWN;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(row);
+  }
+
+  return map;
+}
+
+export function buildDrilldownKey({ statusKey = "", issuer = "" } = {}) {
+  return `${normalizeText(statusKey, "ALL")}__${normalizeText(issuer, UNKNOWN)}`;
 }
 
 // ─── KPI ──────────────────────────────────────────────────────────────────────
 
 export function buildKpi(rows = []) {
   rows = safeRows(rows);
-  const audited  = rows.filter((r) => r.auditStatus !== "excluded");
-  const valid    = audited.filter((r) => r.auditStatus === "valid");
-  const invalid  = audited.filter((r) => r.auditStatus === "invalid");
-  const excluded = rows.filter((r) => r.auditStatus === "excluded");
-  const tier     = rows.filter((r) => r.tierPotentialNotUsed);
-  const noAgree  = audited.filter((r) => !hasAnyAgreement(r));
+
+  const audited = rows.filter((row) => !isExcluded(row));
+  const valid = audited.filter(isValid);
+  const invalid = audited.filter(isInvalid);
+  const excluded = rows.filter(isExcluded);
+  const tier = rows.filter((row) => row.tierPotentialNotUsed);
+  const noAgreement = audited.filter((row) => !hasAnyAgreement(row));
 
   return {
-    totalRows:         rows.length,
-    auditedRows:       audited.length,
-    validRows:         valid.length,
-    invalidRows:       invalid.length,
-    excludedRows:      excluded.length,
-    noAgreementRows:   noAgree.length,
+    totalRows: rows.length,
+    auditedRows: audited.length,
+    validRows: valid.length,
+    invalidRows: invalid.length,
+    excludedRows: excluded.length,
+    noAgreementRows: noAgreement.length,
     tierPotentialRows: tier.length,
-    actionItems:       invalid.length + tier.length + noAgree.length,
-    complianceRate:    audited.length ? valid.length / audited.length : 0,
-    totalAccumulation: audited.reduce((s, r) => s + toSafeNumber(r.accumulation), 0),
+    actionItems: invalid.length + tier.length + noAgreement.length,
+    complianceRate: audited.length ? valid.length / audited.length : 0,
+    totalAccumulation: audited.reduce((sum, row) => sum + toSafeNumber(row.accumulation), 0),
+    uniqueClients: countUnique(audited, getClientKey),
+    productTypes: countUnique(audited, getProductType),
+    brokerManagers: countUnique(audited, (row) => row.brokerName || row.arrangementManagerName),
   };
+}
+
+export function buildProductDistribution(rows = []) {
+  rows = safeRows(rows).filter((row) => !isExcluded(row));
+  const byProduct = groupBy(rows, (row) => getProductConfig(getProductType(row)).label || getProductType(row));
+
+  return [...byProduct.entries()]
+    .map(([productTypeLabel, productRows]) => ({
+      productTypeLabel,
+      policies: productRows.length,
+      clients: countUnique(productRows, getClientKey),
+      accumulation: productRows.reduce((sum, row) => sum + toSafeNumber(row.accumulation), 0),
+    }))
+    .sort((a, b) => b.accumulation - a.accumulation || b.policies - a.policies);
+}
+
+export function buildBrokerDistribution(rows = []) {
+  rows = safeRows(rows).filter((row) => !isExcluded(row));
+  const byBroker = groupBy(rows, (row) => row.brokerName || row.arrangementManagerName || UNKNOWN);
+
+  return [...byBroker.entries()]
+    .map(([brokerName, brokerRows]) => ({
+      brokerName,
+      policies: brokerRows.length,
+      clients: countUnique(brokerRows, getClientKey),
+      accumulation: brokerRows.reduce((sum, row) => sum + toSafeNumber(row.accumulation), 0),
+    }))
+    .sort((a, b) => b.accumulation - a.accumulation || b.policies - a.policies);
 }
 
 // ─── Management Fees Audit ────────────────────────────────────────────────────
 
+function rowNeedsAgreement(row) {
+  const config = getProductConfig(getProductType(row));
+  return Boolean(config.hasDepositFee || config.hasAccumulationFee);
+}
+
+function initCounter(keys) {
+  return Object.fromEntries(keys.map((key) => [key, 0]));
+}
+
+function addDrilldown(drilldown, statusKey, issuer, row) {
+  const key = buildDrilldownKey({ statusKey, issuer });
+
+  if (!drilldown[key]) {
+    drilldown[key] = {
+      statusKey,
+      issuer,
+      rows: [],
+    };
+  }
+
+  drilldown[key].rows.push(row);
+}
+
 export function buildManagementFeesAudit(rows = []) {
   rows = safeRows(rows);
-  const issuers = [...new Set(rows.map((r) => r.issuerCanonical || "לא מזוהה"))]
+
+  const issuers = [...new Set(rows.map((row) => row.issuerCanonical || row.issuerOriginal || UNKNOWN))]
     .filter(Boolean)
     .sort((a, b) => a.localeCompare(b, "he"));
 
-  const init = () => Object.fromEntries(issuers.map((i) => [i, 0]));
-
   const counts = {
-    valid:       init(),
-    invalid:     init(),
-    excluded:    init(),
-    noAgreement: init(),
-    tier:        init(),
-    total:       init(),
-    compliance:  init(),
+    valid: initCounter(issuers),
+    invalid: initCounter(issuers),
+    excluded: initCounter(issuers),
+    noAgreement: initCounter(issuers),
+    tier: initCounter(issuers),
+    total: initCounter(issuers),
+    compliance: initCounter(issuers),
   };
 
-  for (const row of rows) {
-    const iss = row.issuerCanonical || "לא מזוהה";
+  const drilldown = {};
 
-    if (row.auditStatus === "excluded") {
-      counts.excluded[iss]++;
+  for (const row of rows) {
+    const issuer = row.issuerCanonical || row.issuerOriginal || UNKNOWN;
+
+    if (isExcluded(row)) {
+      counts.excluded[issuer] += 1;
+      addDrilldown(drilldown, "excluded", issuer, row);
+      addDrilldown(drilldown, "EXCLUDED", issuer, row);
       continue;
     }
 
-    counts.total[iss]++;
+    counts.total[issuer] += 1;
+    addDrilldown(drilldown, "total", issuer, row);
 
-    if (row.auditStatus === "valid") counts.valid[iss]++;
-    if (row.auditStatus === "invalid") counts.invalid[iss]++;
-    if (!hasAnyAgreement(row)) counts.noAgreement[iss]++;
-    if (row.tierPotentialNotUsed) counts.tier[iss]++;
+    if (isValid(row)) {
+      counts.valid[issuer] += 1;
+      addDrilldown(drilldown, "valid", issuer, row);
+      addDrilldown(drilldown, row.auditMatchRuleType || row.auditMatchResult || "VALID", issuer, row);
+    }
+
+    if (isInvalid(row)) {
+      counts.invalid[issuer] += 1;
+      addDrilldown(drilldown, "invalid", issuer, row);
+      addDrilldown(drilldown, "INVALID", issuer, row);
+    }
+
+    if (rowNeedsAgreement(row) && !hasAnyAgreement(row)) {
+      counts.noAgreement[issuer] += 1;
+      addDrilldown(drilldown, "noAgreement", issuer, row);
+      addDrilldown(drilldown, "MISSING_AGREEMENT", issuer, row);
+    }
+
+    if (row.tierPotentialNotUsed) {
+      counts.tier[issuer] += 1;
+      addDrilldown(drilldown, "tier", issuer, row);
+      addDrilldown(drilldown, "TIER", issuer, row);
+    }
   }
 
-  for (const iss of issuers) {
-    const t = counts.total[iss];
-    counts.compliance[iss] = t > 0 ? counts.valid[iss] / t : null;
+  for (const issuer of issuers) {
+    const total = counts.total[issuer];
+    counts.compliance[issuer] = total > 0 ? counts.valid[issuer] / total : null;
   }
 
-  const LABELS = [
-    { key: "valid",       label: "תקין" },
-    { key: "invalid",     label: "לא תקין" },
-    { key: "excluded",    label: "תפעול בלבד" },
+  const labels = [
+    { key: "valid", label: "תקין" },
+    { key: "invalid", label: "לא תקין" },
+    { key: "excluded", label: "תפעול בלבד" },
     { key: "noAgreement", label: "ללא הסכם" },
-    { key: "tier",        label: "פוטנציאל מודל צבירה" },
-    { key: "total",       label: "סה\"כ נבדקו" },
-    { key: "compliance",  label: "% עמידה" },
+    { key: "tier", label: "פוטנציאל מודל צבירה" },
+    { key: "total", label: "סה\"כ נבדקו" },
+    { key: "compliance", label: "% עמידה" },
   ];
 
   return {
     issuers,
-    rows: LABELS.map(({ key, label }) => ({
+    rows: labels.map(({ key, label }) => ({
       key,
       label,
       ...counts[key],
     })),
+    drilldown,
   };
 }
 
@@ -140,17 +311,13 @@ export function buildManagementFeesAudit(rows = []) {
 
 export function buildInsuranceTrackMarital(rows = []) {
   rows = safeRows(rows);
-  const active = rows.filter((r) => r.auditStatus !== "excluded");
+  const active = rows.filter((row) => !isExcluded(row) && productSupports(row, "hasInsuranceTrack"));
 
-  const maritalVals = [...new Set(active.map((r) =>
-    r.personal_maritalStatus || r.maritalStatus || "לא צוין"
-  ))]
+  const maritalValues = [...new Set(active.map((row) => row.personal_maritalStatus || row.maritalStatus || UNKNOWN))]
     .filter(Boolean)
     .sort((a, b) => a.localeCompare(b, "he"));
 
-  const tracks = [...new Set(active.map((r) =>
-    r.insuranceTrack || "לא צוין"
-  ))]
+  const tracks = [...new Set(active.map((row) => row.insuranceTrack || NO_INSURANCE_TRACK))]
     .filter(Boolean)
     .sort((a, b) => a.localeCompare(b, "he"));
 
@@ -159,14 +326,14 @@ export function buildInsuranceTrackMarital(rows = []) {
       const item = { "מסלול ביטוח": track };
       let total = 0;
 
-      for (const m of maritalVals) {
+      for (const maritalStatus of maritalValues) {
         const count = active.filter(
-          (r) =>
-            (r.insuranceTrack || "לא צוין") === track &&
-            (r.personal_maritalStatus || r.maritalStatus || "לא צוין") === m
+          (row) =>
+            (row.insuranceTrack || NO_INSURANCE_TRACK) === track &&
+            (row.personal_maritalStatus || row.maritalStatus || UNKNOWN) === maritalStatus
         ).length;
 
-        item[m] = count;
+        item[maritalStatus] = count;
         total += count;
       }
 
@@ -176,20 +343,20 @@ export function buildInsuranceTrackMarital(rows = []) {
     .sort((a, b) => b["סה\"כ"] - a["סה\"כ"]);
 
   return {
-    columns: maritalVals,
+    columns: maritalValues,
     rows: matrixRows,
   };
 }
 
-// ─── Investment Track Summary ─────────────────────────────────────────────────
+// ─── Investment Tracks ────────────────────────────────────────────────────────
 
 function buildInvestmentTrackSummary(rows, trackGetter, rowLabel) {
   rows = safeRows(rows);
-  const active = rows.filter((r) => r.auditStatus !== "excluded");
+  const active = rows.filter((row) => !isExcluded(row) && productSupports(row, "hasInvestmentTracks"));
   const byTrack = new Map();
 
   for (const row of active) {
-    const track = normalizeTrack(trackGetter(row)) || "ללא מסלול";
+    const track = normalizeTrack(trackGetter(row));
 
     if (!byTrack.has(track)) {
       byTrack.set(track, {
@@ -205,9 +372,8 @@ function buildInvestmentTrackSummary(rows, trackGetter, rowLabel) {
     item["כמות פוליסות"] += 1;
     item["סך צבירה"] += toSafeNumber(row.accumulation);
 
-    if (row.employeeCode || row.clientId) {
-      item._employees.add(row.employeeCode || row.clientId);
-    }
+    const clientKey = getClientKey(row);
+    if (clientKey) item._employees.add(clientKey);
   }
 
   return [...byTrack.values()]
@@ -223,15 +389,21 @@ function buildInvestmentTrackSummary(rows, trackGetter, rowLabel) {
 
 function buildInvestmentTrackComparison(rows = []) {
   rows = safeRows(rows);
-  const active = rows.filter((r) => r.auditStatus !== "excluded");
-  const byEmployee = new Map();
+  const active = rows.filter(
+    (row) =>
+      !isExcluded(row) &&
+      productSupports(row, "hasRewardsTrack") &&
+      productSupports(row, "hasCompensationTrack")
+  );
+
+  const byClient = new Map();
 
   for (const row of active) {
-    const employeeKey = row.employeeCode || row.clientId || row.personal_fullName || row.clientName;
-    if (!employeeKey) continue;
+    const clientKey = getClientKey(row);
+    if (!clientKey) continue;
 
-    if (!byEmployee.has(employeeKey)) {
-      byEmployee.set(employeeKey, {
+    if (!byClient.has(clientKey)) {
+      byClient.set(clientKey, {
         employeeCode: row.employeeCode || row.clientId || "",
         clientName: row.personal_fullName || row.clientName || "",
         rewardsTracks: new Set(),
@@ -241,27 +413,20 @@ function buildInvestmentTrackComparison(rows = []) {
       });
     }
 
-    const item = byEmployee.get(employeeKey);
-
+    const item = byClient.get(clientKey);
     const rewardsTrack = normalizeTrack(row.investmentTrackRewards);
     const compensationTrack = normalizeTrack(row.investmentTrackCompensation);
 
-    if (rewardsTrack && rewardsTrack !== "ללא מסלול") {
-      item.rewardsTracks.add(rewardsTrack);
-    }
-
-    if (compensationTrack && compensationTrack !== "ללא מסלול") {
-      item.compensationTracks.add(compensationTrack);
-    }
+    if (rewardsTrack && rewardsTrack !== NO_TRACK) item.rewardsTracks.add(rewardsTrack);
+    if (compensationTrack && compensationTrack !== NO_TRACK) item.compensationTracks.add(compensationTrack);
 
     item.accumulation += toSafeNumber(row.accumulation);
     item.policies += 1;
   }
 
-  const details = [...byEmployee.values()].map((item) => {
+  const details = [...byClient.values()].map((item) => {
     const rewards = [...item.rewardsTracks].sort();
     const compensation = [...item.compensationTracks].sort();
-
     const rewardsKey = rewards.join(" | ");
     const compensationKey = compensation.join(" | ");
 
@@ -278,19 +443,19 @@ function buildInvestmentTrackComparison(rows = []) {
     return {
       employeeCode: item.employeeCode,
       clientName: item.clientName,
-      rewardsTracks: rewardsKey || "ללא מסלול",
-      compensationTracks: compensationKey || "ללא מסלול",
+      rewardsTracks: rewardsKey || NO_TRACK,
+      compensationTracks: compensationKey || NO_TRACK,
       status,
       policies: item.policies,
       accumulation: item.accumulation,
     };
   });
 
-  const same = details.filter((d) => d.status === "same");
-  const different = details.filter((d) => d.status === "different");
-  const missingCompensation = details.filter((d) => d.status === "missingCompensation");
-  const missingRewards = details.filter((d) => d.status === "missingRewards");
-  const missingBoth = details.filter((d) => d.status === "missing");
+  const same = details.filter((item) => item.status === "same");
+  const different = details.filter((item) => item.status === "different");
+  const missingCompensation = details.filter((item) => item.status === "missingCompensation");
+  const missingRewards = details.filter((item) => item.status === "missingRewards");
+  const missingBoth = details.filter((item) => item.status === "missing");
 
   return {
     totalEmployees: details.length,
@@ -299,8 +464,8 @@ function buildInvestmentTrackComparison(rows = []) {
     missingCompensationCount: missingCompensation.length,
     missingRewardsCount: missingRewards.length,
     missingBothCount: missingBoth.length,
-    sameAccumulation: same.reduce((s, d) => s + d.accumulation, 0),
-    differentAccumulation: different.reduce((s, d) => s + d.accumulation, 0),
+    sameAccumulation: same.reduce((sum, item) => sum + item.accumulation, 0),
+    differentAccumulation: different.reduce((sum, item) => sum + item.accumulation, 0),
     details: details.sort((a, b) => {
       const order = {
         different: 0,
@@ -318,7 +483,7 @@ function buildInvestmentTrackComparison(rows = []) {
 export function buildInvestmentTrackRewardsMarital(rows = []) {
   return buildInvestmentTrackSummary(
     rows,
-    (r) => r.investmentTrackRewards || "ללא מסלול",
+    (row) => row.investmentTrackRewards || NO_TRACK,
     "מסלול השקעה תגמולים"
   );
 }
@@ -326,7 +491,7 @@ export function buildInvestmentTrackRewardsMarital(rows = []) {
 export function buildInvestmentTrackCompensationMarital(rows = []) {
   return buildInvestmentTrackSummary(
     rows,
-    (r) => r.investmentTrackCompensation || "ללא מסלול",
+    (row) => row.investmentTrackCompensation || NO_TRACK,
     "מסלול השקעה פיצויים"
   );
 }
@@ -335,27 +500,17 @@ export function buildInvestmentTrackCompensationMarital(rows = []) {
 
 export function buildAccumulationTierAnalysis(rows = []) {
   rows = safeRows(rows);
-  const BUCKETS = [
-    "0-50K",
-    "50K-100K",
-    "100K-300K",
-    "300K-500K",
-    "500K+",
-    "לא צוין",
-  ];
 
-  const audited = rows.filter((r) => r.auditStatus !== "excluded");
+  const buckets = ["0-50K", "50K-100K", "100K-300K", "300K-500K", "500K+", UNKNOWN];
+  const audited = rows.filter((row) => !isExcluded(row));
 
-  return BUCKETS
+  return buckets
     .map((bucket) => {
-      const inBucket = audited.filter(
-        (r) => accumulationBucket(r.accumulation) === bucket
-      );
-
-      const withTier = inBucket.filter((r) => r.hasTierModel);
-      const eligible = inBucket.filter((r) => r.eligibleForTier);
-      const inTier   = inBucket.filter((r) => r.inTierModel);
-      const unused   = inBucket.filter((r) => r.tierPotentialNotUsed);
+      const inBucket = audited.filter((row) => accumulationBucket(row.accumulation) === bucket);
+      const withTier = inBucket.filter(hasTierModel);
+      const eligible = inBucket.filter(isEligibleForTier);
+      const inTier = inBucket.filter(isInTierModel);
+      const unused = inBucket.filter((row) => row.tierPotentialNotUsed);
 
       return {
         "מדרגת צבירה": bucket,
@@ -367,58 +522,59 @@ export function buildAccumulationTierAnalysis(rows = []) {
         _hasAny: withTier.length > 0,
       };
     })
-    .filter((r) => r._hasAny || r["סה\"כ פוליסות"] > 0);
+    .filter((row) => row._hasAny || row["סה\"כ פוליסות"] > 0);
 }
 
 // ─── Action Center ────────────────────────────────────────────────────────────
 
 export function buildActionCenter(rows = []) {
   rows = safeRows(rows);
+
   return rows
-    .filter((r) =>
-      r.auditStatus !== "excluded" &&
-      (
-        r.auditStatus === "invalid" ||
-        r.tierPotentialNotUsed ||
-        !hasAnyAgreement(r)
-      )
+    .filter(
+      (row) =>
+        !isExcluded(row) &&
+        (isInvalid(row) || row.tierPotentialNotUsed || (rowNeedsAgreement(row) && !hasAnyAgreement(row)))
     )
-    .map((r) => {
-      const missingAgreement = !hasAnyAgreement(r);
+    .map((row) => {
+      const missingAgreement = rowNeedsAgreement(row) && !hasAnyAgreement(row);
 
       return {
-        employeeCode:            r.employeeCode || "",
-        clientName:              r.personal_fullName || r.clientName || "",
-        issuer:                  r.issuerCanonical || r.issuerOriginal || "",
-        accumulation:            r.accumulation || 0,
-        depositFee:              r.depositFee ?? null,
-        accumulationFee:         r.accumulationFee ?? null,
-        approvedDepositFee:      r.auditReferenceDepositFee ?? r.depositFeeAgreement ?? null,
-        approvedAccumulationFee: r.auditReferenceAccumulationFee ?? r.accumulationFeeAgreement ?? null,
-        auditStatus:             r.auditStatus,
-        auditStatusHe:           r.auditStatusHe || "",
-        issueCategory:           missingAgreement ? "MISSING_AGREEMENT" : (r.issueCategory || ""),
-        requiredAction:          missingAgreement
+        employeeCode: row.employeeCode || "",
+        clientName: row.personal_fullName || row.clientName || "",
+        issuer: row.issuerCanonical || row.issuerOriginal || "",
+        productType: getProductType(row),
+        productTypeLabel: getProductConfig(getProductType(row)).label,
+        accumulation: row.accumulation || 0,
+        depositFee: row.depositFee ?? null,
+        accumulationFee: row.accumulationFee ?? null,
+        approvedDepositFee: row.auditReferenceDepositFee ?? row.depositFeeAgreement ?? null,
+        approvedAccumulationFee: row.auditReferenceAccumulationFee ?? row.accumulationFeeAgreement ?? null,
+        auditStatus: row.auditStatus,
+        auditStatusHe: row.auditStatusHe || "",
+        issueCategory: missingAgreement ? "MISSING_AGREEMENT" : row.issueCategory || "",
+        requiredAction: missingAgreement
           ? "חסר הסכם דמי ניהול — יש לבדוק מול קובץ הסכמים / מנהל הסדר"
-          : (r.requiredAction || ""),
-        priority:                missingAgreement ? "MEDIUM" : (r.priority || ""),
-        tierPotentialNotUsed:    r.tierPotentialNotUsed || false,
-        auditReason:             missingAgreement
+          : row.requiredAction || "",
+        priority: missingAgreement ? "MEDIUM" : row.priority || "",
+        tierPotentialNotUsed: row.tierPotentialNotUsed || false,
+        auditReason: missingAgreement
           ? "לא נמצא הסכם חיצוני ולא נמצאו דמי ניהול מאושרים מתוך דוח היועץ"
-          : (r.auditReason || ""),
+          : row.auditReason || "",
       };
     })
     .sort(
       (a, b) =>
-        ({ HIGH: 0, MEDIUM: 1, "": 2 }[a.priority] ?? 2) -
-        ({ HIGH: 0, MEDIUM: 1, "": 2 }[b.priority] ?? 2)
+        ({ HIGH: 0, MEDIUM: 1, LOW: 2, "": 3 }[a.priority] ?? 3) -
+        ({ HIGH: 0, MEDIUM: 1, LOW: 2, "": 3 }[b.priority] ?? 3)
     );
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
-export function buildPensionAnalytics(rows = []) {
+export function buildUnifiedAnalytics(rows = []) {
   rows = safeRows(rows);
+
   const managementAudit = buildManagementFeesAudit(rows);
   const actionCenter = buildActionCenter(rows);
   const investmentTrackComparison = buildInvestmentTrackComparison(rows);
@@ -426,8 +582,12 @@ export function buildPensionAnalytics(rows = []) {
   return {
     kpi: buildKpi(rows),
 
+    productDistribution: buildProductDistribution(rows),
+    brokerDistribution: buildBrokerDistribution(rows),
+
     managementAudit,
     managementFeesAudit: managementAudit,
+    managementFeesAuditDrilldown: managementAudit.drilldown,
 
     insuranceTrackMarital: buildInsuranceTrackMarital(rows),
 
@@ -435,7 +595,7 @@ export function buildPensionAnalytics(rows = []) {
     investmentTrackCompensationMarital: buildInvestmentTrackCompensationMarital(rows),
     investmentTrackComparison,
 
-    // alias ישן לתאימות אחורה
+    // Legacy alias for existing dashboard compatibility.
     investmentTrackRewardsIssuer: buildInvestmentTrackRewardsMarital(rows),
 
     accumulationTierAnalysis: buildAccumulationTierAnalysis(rows),
@@ -443,4 +603,8 @@ export function buildPensionAnalytics(rows = []) {
     actionDrilldown: actionCenter,
     actionCenter,
   };
+}
+
+export function buildPensionAnalytics(rows = []) {
+  return buildUnifiedAnalytics(rows);
 }

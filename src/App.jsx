@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Component, useState } from "react";
 import * as XLSX from "xlsx";
 
 import UploadPanel from "./components/UploadPanel.jsx";
@@ -12,17 +12,90 @@ import { buildUnifiedPensionPersonalData } from "./parsers/unifiedPensionPersona
 
 import "./styles.css";
 
-async function readWorkbook(file) {
+async function readWorkbook(file, label = "") {
   if (!file) return null;
 
-  const buffer = await file.arrayBuffer();
+  try {
+    const buffer = await file.arrayBuffer();
 
-  return XLSX.read(buffer, {
-    type: "array",
-    cellDates: true,
-    cellNF: false,
-    cellText: false,
-  });
+    return XLSX.read(buffer, {
+      type: "array",
+      cellDates: true,
+      cellNF: false,
+      cellText: false,
+    });
+  } catch (error) {
+    console.error("readWorkbook failed", { label, fileName: file?.name, error });
+    throw new Error(`READ_WORKBOOK_FAILED:${label || file?.name || "unknown"}`);
+  }
+}
+
+function hasWorkbookSheets(workbook) {
+  return Boolean(
+    workbook &&
+      Array.isArray(workbook.SheetNames) &&
+      workbook.SheetNames.length > 0
+  );
+}
+
+function createUserAnalysisError(error) {
+  const message = String(error?.message || "");
+
+  if (message.startsWith("MISSING_REQUIRED_FILES")) {
+    return "חסרים קבצי חובה. יש להעלות דוח נתונים ודוח הסכמים לפני התחלת הניתוח.";
+  }
+
+  if (message.startsWith("READ_WORKBOOK_FAILED")) {
+    return "אחד מקבצי ה־Excel לא נקרא בצורה תקינה. מומלץ לשמור מחדש את הקובץ כ־xlsx ולהעלות שוב.";
+  }
+
+  if (message.startsWith("EMPTY_DATA_FILE")) {
+    return "דוח הנתונים נקרא, אבל לא נמצאו בו שורות פנסיה תקינות. בדוק שזהו דוח הנתונים הנכון ושיש בו גיליון פנסיה.";
+  }
+
+  if (message.startsWith("EMPTY_AGREEMENTS_FILE")) {
+    return "דוח ההסכמים נקרא, אבל לא נמצאו בו הסכמי דמי ניהול תקינים. בדוק שזהו קובץ ההסכמים הנכון.";
+  }
+
+  return "לא הצלחנו לנתח את הקבצים. בדוק שהקבצים הם Excel תקינים ונסה שוב.";
+}
+
+class DashboardErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+
+  componentDidCatch(error, info) {
+    console.error("Dashboard render failed", error, info);
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <section className="card" dir="rtl">
+          <h2>הניתוח הסתיים, אבל התצוגה נתקלה בשגיאה</h2>
+          <p>
+            הנתונים נטענו, אך אחד מרכיבי הדשבורד לא הצליח להתרנדר. אפשר לחזור
+            להעלאה, לבדוק את שיוך הקבצים ולהריץ שוב בלי לרענן את האתר.
+          </p>
+          <button
+            type="button"
+            className="primaryButton"
+            onClick={this.props.onReset}
+          >
+            חזרה להעלאת קבצים
+          </button>
+        </section>
+      );
+    }
+
+    return this.props.children;
+  }
 }
 
 export default function App() {
@@ -37,18 +110,44 @@ export default function App() {
     personalDetailsFile: null,
   });
 
+  function resetAnalysis() {
+    setAnalysisStarted(false);
+    setAnalysisData(null);
+    setAnalysisError("");
+  }
+
   async function handleStartAnalysis() {
+    if (!files.dataFile || !files.agreementsFile || isAnalyzing) {
+      setAnalysisError(createUserAnalysisError(new Error("MISSING_REQUIRED_FILES")));
+      return;
+    }
+
     setIsAnalyzing(true);
     setAnalysisError("");
+    setAnalysisData(null);
 
     try {
-      const dataWorkbook = await readWorkbook(files.dataFile);
-      const agreementsWorkbook = await readWorkbook(files.agreementsFile);
-      const personalDetailsWorkbook = await readWorkbook(files.personalDetailsFile);
+      const dataWorkbook = await readWorkbook(files.dataFile, "דוח נתונים");
+      const agreementsWorkbook = await readWorkbook(files.agreementsFile, "דוח הסכמים");
+      const personalDetailsWorkbook = await readWorkbook(
+        files.personalDetailsFile,
+        "פרטים אישיים"
+      );
+
+      if (!hasWorkbookSheets(dataWorkbook)) throw new Error("EMPTY_DATA_FILE");
+      if (!hasWorkbookSheets(agreementsWorkbook)) throw new Error("EMPTY_AGREEMENTS_FILE");
 
       const pensionRowsRaw = parsePensionFund(dataWorkbook);
       const agreements = parseAgreements(agreementsWorkbook);
       const personalDetails = parsePersonalDetails(personalDetailsWorkbook);
+
+      if (!Array.isArray(pensionRowsRaw) || pensionRowsRaw.length === 0) {
+        throw new Error("EMPTY_DATA_FILE");
+      }
+
+      if (!Array.isArray(agreements) || agreements.length === 0) {
+        throw new Error("EMPTY_AGREEMENTS_FILE");
+      }
 
       const unifiedPensionPersonalData = buildUnifiedPensionPersonalData(
         pensionRowsRaw,
@@ -101,10 +200,9 @@ export default function App() {
       setAnalysisStarted(true);
     } catch (error) {
       console.error(error);
-
-      setAnalysisError(
-        "לא הצלחנו לנתח את הקבצים. בדוק שהקבצים הם Excel תקינים ושהספרייה xlsx מותקנת בפרויקט."
-      );
+      setAnalysisStarted(false);
+      setAnalysisData(null);
+      setAnalysisError(createUserAnalysisError(error));
     } finally {
       setIsAnalyzing(false);
     }
@@ -135,6 +233,7 @@ export default function App() {
             files={files}
             setFiles={setFiles}
             onStart={handleStartAnalysis}
+            isAnalyzing={isAnalyzing}
           />
 
           {isAnalyzing && (
@@ -150,10 +249,12 @@ export default function App() {
           )}
         </>
       ) : (
-        <Dashboard
-          files={files}
-          analysisData={analysisData}
-        />
+        <DashboardErrorBoundary onReset={resetAnalysis}>
+          <Dashboard
+            files={files}
+            analysisData={analysisData}
+          />
+        </DashboardErrorBoundary>
       )}
     </main>
   );

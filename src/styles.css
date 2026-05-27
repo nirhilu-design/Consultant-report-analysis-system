@@ -1344,3 +1344,126 @@ button:disabled {
     width: 100%;
   }
 }
+
+/* v2026_05_27_layout_containment_09
+   Keeps dashboard rows, tabs and KPI cards inside the visible document width. */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+.dashboard,
+.app {
+  width: 100%;
+  max-width: 100vw;
+  overflow-x: hidden;
+}
+
+.dashboard-header,
+.global-scope-bar,
+.tab-bar,
+.dashboard-content {
+  width: 100%;
+  max-width: min(1680px, calc(100vw - 56px));
+  box-sizing: border-box;
+}
+
+.tab-bar {
+  flex-wrap: wrap;
+  overflow-x: visible;
+  align-items: center;
+}
+
+.tab-btn {
+  flex: 0 1 auto;
+  max-width: 100%;
+}
+
+.global-scope-bar,
+.kpi-toolbar,
+.kpi-panel-header,
+.manager-bar-label {
+  flex-wrap: wrap;
+}
+
+.global-manager-filter,
+.manager-filter {
+  max-width: 100%;
+}
+
+.kpi-grid,
+.kpi-grid-executive {
+  grid-template-columns: repeat(auto-fit, minmax(165px, 1fr));
+}
+
+.kpi-card,
+.kpi-panel,
+.kpi-overview,
+.manager-bars,
+.manager-bar-row {
+  min-width: 0;
+}
+
+.kpi-value,
+.kpi-label,
+.manager-bar-label strong,
+.manager-bar-label span {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 1200px) {
+  .dashboard {
+    padding: 20px;
+  }
+
+  .dashboard-header,
+  .global-scope-bar,
+  .tab-bar,
+  .dashboard-content {
+    max-width: calc(100vw - 40px);
+  }
+
+  .tab-bar {
+    gap: 6px;
+    padding: 7px;
+  }
+
+  .tab-btn {
+    padding: 10px 12px;
+    font-size: 13px;
+  }
+
+  .tab-badge {
+    min-width: 20px;
+    height: 20px;
+    margin-right: 6px;
+    font-size: 11px;
+  }
+}
+
+@media (max-width: 700px) {
+  .dashboard {
+    padding: 12px;
+  }
+
+  .dashboard-header,
+  .global-scope-bar,
+  .tab-bar,
+  .dashboard-content {
+    max-width: calc(100vw - 24px);
+  }
+
+  .kpi-grid,
+  .kpi-grid-executive {
+    grid-template-columns: 1fr;
+  }
+}

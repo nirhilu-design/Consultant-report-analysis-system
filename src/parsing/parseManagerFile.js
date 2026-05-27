@@ -1,249 +1,188 @@
-import * as XLSX from "xlsx";
+# src/parsing/parseManagerFile.js
+# CORE HARDENING v19 — Integration Guide
 
-import { parsePensionFund } from "../parsers/pensionFundParser.js";
-import { parseAgreements } from "../parsers/agreementsParser.js";
-import { parsePersonalDetails } from "../parsers/personalDetailsParser.js";
-import { buildPensionSummary } from "../parsers/buildPensionSummary.js";
-import { buildUnifiedPensionPersonalData } from "../parsers/unifiedPensionPersonalDataBuilder.js";
-import { buildPensionAnalytics } from "../unified/analyticsEngine.js";
-import { buildDataQuality } from "../unified/dataQualityEngine.js";
-import {
-  asArray,
-  buildParsingConfidence,
-  createEmptyPersonalDetails,
-  runParsingStage,
-} from "./parsingConfidence.js";
-import { attachManagerToRows, ensureRowsArray, hasAnyAgreement } from "./safeRowBuilder.js";
+המטרה:
+לשלב parsingReport בתוך תוצאת parseManagerFile בלי לשבור את השימושים הקיימים.
 
-async function readWorkbook(file, label = "") {
-  if (!file) return null;
+────────────────────────────────────
+1. להוסיף import
+────────────────────────────────────
 
-  try {
-    const buffer = await file.arrayBuffer();
+בראש הקובץ:
 
-    return XLSX.read(buffer, {
-      type: "array",
-      cellDates: true,
-      cellNF: false,
-      cellText: false,
-    });
-  } catch (error) {
-    console.error("readWorkbook failed", { label, fileName: file?.name, error });
-    throw new Error(`READ_WORKBOOK_FAILED:${label || file?.name || "unknown"}`);
-  }
-}
+import { buildParsingConfidenceReport } from "./parsingConfidence";
 
-function hasWorkbookSheets(workbook) {
-  return Boolean(
-    workbook &&
-      Array.isArray(workbook.SheetNames) &&
-      workbook.SheetNames.length > 0
-  );
-}
+אם הפרויקט משתמש בסיומת js מלאה ב-import:
 
-export function createUserAnalysisError(error) {
-  const message = String(error?.message || "");
+import { buildParsingConfidenceReport } from "./parsingConfidence.js";
 
-  if (message.startsWith("MISSING_REQUIRED_FILES")) {
-    return "חסרים קבצי חובה. לכל מנהל הסדר פעיל יש להעלות דוח נתונים ודוח הסכמים.";
-  }
+────────────────────────────────────
+2. לזהות מה parseManagerFile מחזיר היום
+────────────────────────────────────
 
-  if (message.startsWith("READ_WORKBOOK_FAILED")) {
-    return "אחד מקבצי ה־Excel לא נקרא בצורה תקינה. מומלץ לשמור מחדש את הקובץ כ־xlsx ולהעלות שוב.";
-  }
+יש שני מצבים נפוצים:
 
-  if (message.startsWith("EMPTY_DATA_FILE")) {
-    return "דוח הנתונים נקרא, אבל לא נמצאו בו שורות פנסיה תקינות. בדוק שזהו דוח הנתונים הנכון ושיש בו גיליון פנסיה.";
-  }
+מצב א':
+parseManagerFile מחזיר מערך rows:
 
-  if (message.startsWith("EMPTY_AGREEMENTS_FILE")) {
-    return "דוח ההסכמים נקרא, אבל לא נמצאו בו הסכמי דמי ניהול תקינים. בדוק שזהו קובץ ההסכמים הנכון.";
-  }
+return unifiedRows;
 
-  if (message.startsWith("INVALID_UNIFIED_RESULT")) {
-    return "הנתונים נקראו, אבל שכבת האיחוד החזירה מבנה לא תקין. זה בדרך כלל אומר שאחד הקבצים במבנה שונה מהצפוי.";
-  }
+מצב ב':
+parseManagerFile מחזיר אובייקט:
 
-  if (message.startsWith("ANALYSIS_STAGE_FAILED")) {
-    const stageLabel = error?.stageLabel || "אחד משלבי הניתוח";
-    return `${stageLabel} נכשל. הקבצים לא אבדו — אפשר לבדוק את שיוך הקבצים ולנסות שוב.`;
-  }
+return {
+  rows: unifiedRows,
+  audit,
+  ...
+};
 
-  return "לא הצלחנו לנתח את הקבצים. בדוק שהקבצים הם Excel תקינים ונסה שוב.";
-}
+────────────────────────────────────
+3. אם הקובץ מחזיר מערך בלבד
+────────────────────────────────────
 
-export function buildCombinedPensionSummary(managerResults = []) {
-  const unifiedRows = managerResults.flatMap((result) => asArray(result?.pensionSummary?.unifiedRows));
-  const analytics = buildPensionAnalytics(unifiedRows);
-  const dataQuality = buildDataQuality(unifiedRows);
-  const auditedRows = unifiedRows.filter((row) => row.auditStatus !== "excluded");
+להחליף:
 
-  return {
-    ...analytics,
+return unifiedRows;
+
+ב:
+
+const parsingReport = buildParsingConfidenceReport({
+  rawRows,
+  unifiedRows,
+  detectedHeaders,
+  requiredHeaders,
+  missingRequiredHeaders,
+  aliasMatchedHeaders,
+  invalidRows,
+  managerName,
+  fileName: file?.name || "",
+});
+
+unifiedRows.parsingReport = parsingReport;
+
+return unifiedRows;
+
+הערה:
+זה פתרון backward-compatible יחסית, כי עדיין מוחזר מערך.
+אבל עדיף לטווח ארוך לעבור לאובייקט מסודר.
+
+────────────────────────────────────
+4. אם הקובץ כבר מחזיר אובייקט
+────────────────────────────────────
+
+להחליף:
+
+return {
+  rows: unifiedRows,
+  audit,
+};
+
+ב:
+
+const parsingReport = buildParsingConfidenceReport({
+  rawRows,
+  unifiedRows,
+  detectedHeaders,
+  requiredHeaders,
+  missingRequiredHeaders,
+  aliasMatchedHeaders,
+  invalidRows,
+  managerName,
+  fileName: file?.name || "",
+});
+
+return {
+  rows: unifiedRows,
+  audit,
+  parsingReport,
+};
+
+────────────────────────────────────
+5. אם אין כרגע detectedHeaders
+────────────────────────────────────
+
+אפשר להתחיל זמנית כך:
+
+const detectedHeaders = Object.keys(rawRows?.[0] || {});
+
+ואז:
+
+const parsingReport = buildParsingConfidenceReport({
+  rawRows,
+  unifiedRows,
+  detectedHeaders,
+  managerName,
+  fileName: file?.name || "",
+});
+
+────────────────────────────────────
+6. אם אין rawRows
+────────────────────────────────────
+
+אם יש רק unifiedRows:
+
+const parsingReport = buildParsingConfidenceReport({
+  rawRows: unifiedRows,
+  unifiedRows,
+  detectedHeaders,
+  managerName,
+  fileName: file?.name || "",
+});
+
+זה פחות מדויק אבל עדיין נותן UI ראשוני.
+
+────────────────────────────────────
+7. דוגמה מלאה מינימלית
+────────────────────────────────────
+
+import { buildParsingConfidenceReport } from "./parsingConfidence";
+
+export async function parseManagerFile(file, options = {}) {
+  const managerName = options.managerName || "";
+
+  const rawRows = await readXlsxRows(file);
+  const detectedHeaders = Object.keys(rawRows?.[0] || {});
+
+  const unifiedRows = rawToUnifiedRows(rawRows, {
+    managerName,
+  });
+
+  const parsingReport = buildParsingConfidenceReport({
+    rawRows,
     unifiedRows,
-    dataQuality,
-    managerResults,
-    managementFeesAudit: analytics.managementAudit,
-    actionCenter: analytics.actionCenter || analytics.actionDrilldown || [],
-    actionDrilldown: analytics.actionDrilldown || analytics.actionCenter || [],
-    summary: {
-      total: unifiedRows.length,
-      audited: auditedRows.length,
-      valid: unifiedRows.filter((row) => row.auditStatus === "valid").length,
-      invalid: unifiedRows.filter((row) => row.auditStatus === "invalid").length,
-      excluded: unifiedRows.filter((row) => row.auditStatus === "excluded").length,
-      tierPotential: unifiedRows.filter((row) => row.tierPotentialNotUsed).length,
-      noAgreement: auditedRows.filter((row) => !hasAnyAgreement(row)).length,
-      dataQualityIssues: dataQuality?.summary?.issueCount || 0,
-      dataQualityHighIssues: dataQuality?.summary?.highIssues || 0,
-      managers: managerResults.length,
-    },
-  };
-}
-
-export async function parseManagerFiles(manager, index = 0) {
-  const managerLabel = manager.name || `מנהל הסדר ${index + 1}`;
-
-  const dataWorkbook = await readWorkbook(manager.dataFile, `${managerLabel} — דוח נתונים`);
-  const agreementsWorkbook = await readWorkbook(manager.agreementsFile, `${managerLabel} — דוח הסכמים`);
-  const personalDetailsWorkbook = await readWorkbook(
-    manager.personalDetailsFile,
-    `${managerLabel} — פרטים אישיים`
-  );
-
-  if (!hasWorkbookSheets(dataWorkbook)) throw new Error("EMPTY_DATA_FILE");
-  if (!hasWorkbookSheets(agreementsWorkbook)) throw new Error("EMPTY_AGREEMENTS_FILE");
-
-  const pensionRowsRaw = runParsingStage(
-    "parsePensionFund",
-    `${managerLabel}: קריאת דוח הנתונים`,
-    () => parsePensionFund(dataWorkbook)
-  );
-
-  const agreements = runParsingStage(
-    "parseAgreements",
-    `${managerLabel}: קריאת דוח ההסכמים`,
-    () => parseAgreements(agreementsWorkbook)
-  );
-
-  let personalDetails = createEmptyPersonalDetails();
-  const warnings = [];
-
-  if (personalDetailsWorkbook) {
-    try {
-      personalDetails = parsePersonalDetails(personalDetailsWorkbook);
-    } catch (error) {
-      console.error("optional personal details parsing failed", { managerLabel, error });
-      warnings.push(`${managerLabel}: קובץ הפרטים האישיים לא נותח בהצלחה, ולכן הניתוח ממשיך בלי העשרת פרטים אישיים.`);
-      personalDetails = createEmptyPersonalDetails("personal details parser failed");
-    }
-  }
-
-  const validPensionRowsRaw = ensureRowsArray(pensionRowsRaw, "EMPTY_DATA_FILE");
-  const validAgreements = ensureRowsArray(agreements, "EMPTY_AGREEMENTS_FILE");
-  const pensionRowsRawWithManager = attachManagerToRows(validPensionRowsRaw, manager);
-
-  const unifiedPensionPersonalData = runParsingStage(
-    "buildUnifiedPensionPersonalData",
-    `${managerLabel}: איחוד דוח הנתונים עם פרטים אישיים`,
-    () => buildUnifiedPensionPersonalData(pensionRowsRawWithManager, personalDetails)
-  );
-
-  if (!unifiedPensionPersonalData || !Array.isArray(unifiedPensionPersonalData.rows)) {
-    throw new Error("INVALID_UNIFIED_RESULT");
-  }
-
-  const pensionRows = attachManagerToRows(unifiedPensionPersonalData.rows, manager);
-  const unifiedMetadata = unifiedPensionPersonalData.metadata || {};
-
-  const personalRows =
-    personalDetails?.clientProfiles ||
-    personalDetails?.rows ||
-    personalDetails?.rawRows ||
-    [];
-
-  const personalDetailsMerge = {
-    source: "unifiedPensionPersonalData",
-    managerId: manager.id,
-    managerName: managerLabel,
-    hasPersonalDetailsFile: Boolean(personalDetails?.hasFile),
-    joinKey: "employeeCode",
-    metadata: {
-      pensionRowCount: unifiedMetadata.pensionRows || pensionRows.length,
-      clientProfileCount: unifiedMetadata.personalProfiles || asArray(personalRows).length,
-      matchedPensionRows: unifiedMetadata.matchedPensionRows || 0,
-      unmatchedPensionRows: unifiedMetadata.unmatchedPensionRows || 0,
-      matchedClientProfiles: unifiedMetadata.matchedEmployees || 0,
-      unmatchedClientProfiles: unifiedMetadata.personalProfilesWithoutPensionRows || 0,
-      matchRate: unifiedMetadata.rowMatchRate || 0,
-      matchMethods: {
-        employeeCode: unifiedMetadata.matchedPensionRows || 0,
-      },
-    },
-  };
-
-  const pensionSummary = runParsingStage(
-    "buildPensionSummary",
-    `${managerLabel}: בניית סיכום ואנליטיקה`,
-    () => buildPensionSummary(pensionRows, validAgreements, {
-      personalRows,
-      broker: {
-        brokerId: manager.id,
-        brokerName: managerLabel,
-        batchId: manager.id,
-      },
-      batchId: manager.id,
-    })
-  );
-
-  const parsingConfidence = buildParsingConfidence({
-    dataWorkbook,
-    agreementsWorkbook,
-    personalDetailsWorkbook,
-    pensionRowsRaw: pensionRowsRawWithManager,
-    agreements: validAgreements,
-    personalDetails,
-    unifiedRows: pensionRows,
-    warnings,
+    detectedHeaders,
+    managerName,
+    fileName: file?.name || "",
   });
 
   return {
-    manager: {
-      id: manager.id,
-      name: managerLabel,
-      files: {
-        dataFile: manager.dataFile?.name || "",
-        agreementsFile: manager.agreementsFile?.name || "",
-        personalDetailsFile: manager.personalDetailsFile?.name || "",
-      },
-    },
-    pensionRows,
-    rawPensionRows: pensionRowsRawWithManager,
-    agreements: validAgreements,
-    personalDetails,
-    personalRows,
-    personalDetailsMerge,
-    parsingConfidence,
-    unifiedPensionPersonalData: {
-      ...unifiedPensionPersonalData,
-      rows: pensionRows,
-    },
-    unifiedEmployeeData: {
-      ...unifiedPensionPersonalData,
-      rows: pensionRows,
-    },
-    pensionSummary,
-    warnings,
-    counts: {
-      dataSheets: dataWorkbook.SheetNames.length,
-      agreementSheets: agreementsWorkbook.SheetNames.length,
-      personalDetailsSheets: personalDetailsWorkbook?.SheetNames?.length || 0,
-      rawPensionRows: pensionRowsRawWithManager.length,
-      agreements: validAgreements.length,
-      personalProfiles: asArray(personalDetails?.clientProfiles).length,
-      unifiedRows: pensionRows.length,
-    },
+    rows: unifiedRows,
+    parsingReport,
   };
 }
 
-export { asArray, createEmptyPersonalDetails } from "./parsingConfidence.js";
+────────────────────────────────────
+8. בדיקת Build
+────────────────────────────────────
+
+אחרי השילוב:
+
+npm run build
+
+אם יש שגיאת import:
+לבדוק האם הפרויקט דורש:
+"./parsingConfidence"
+או:
+"./parsingConfidence.js"
+
+────────────────────────────────────
+9. Stop Checkpoint
+────────────────────────────────────
+
+לא להמשיך ל-v20 לפני:
+- upload עובד
+- dashboard לא קורס
+- report מופיע לכל קובץ
+- קובץ בעייתי מציג warning
+- build עובר
+

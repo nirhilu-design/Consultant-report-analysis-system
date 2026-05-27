@@ -67,70 +67,287 @@ function EmptyState({ text = "אין נתונים" }) {
 
 // ─── KPI ──────────────────────────────────────────────────────────────────────
 
-function KpiTab({ kpi }) {
-  if (!kpi) return <EmptyState text="אין נתוני KPI" />;
+function getArrangementManager(row) {
+  const value =
+    row?.arrangementManager ||
+    row?.arrangementManagerName ||
+    row?.personal_arrangementManagerName ||
+    row?.raw?.arrangementManager ||
+    row?.raw?.arrangementManagerName ||
+    row?.raw?.["מנהל הסדר"] ||
+    row?.raw?.["שם מנהל ההסדר"] ||
+    "מנהל הסדר לא מזוהה";
+
+  const text = String(value || "").trim();
+  return text || "מנהל הסדר לא מזוהה";
+}
+
+function buildKpiFromRows(rows = [], actions = []) {
+  const totalRows = rows.length;
+  const validRows = rows.filter((r) => r.auditStatus === "valid").length;
+  const invalidRows = rows.filter((r) => r.auditStatus === "invalid").length;
+  const excludedRows = rows.filter((r) => r.auditStatus === "excluded").length;
+  const auditedRows = validRows + invalidRows;
+  const totalAccumulation = rows.reduce(
+    (sum, r) => sum + Number(r.accumulation || 0),
+    0
+  );
+
+  return {
+    totalRows,
+    auditedRows,
+    validRows,
+    invalidRows,
+    excludedRows,
+    complianceRate: auditedRows ? validRows / auditedRows : 0,
+    actionItems: actions.length,
+    totalAccumulation,
+  };
+}
+
+function buildManagerBreakdown(rows = []) {
+  const map = new Map();
+
+  rows.forEach((row) => {
+    const manager = getArrangementManager(row);
+    if (!map.has(manager)) {
+      map.set(manager, {
+        manager,
+        total: 0,
+        valid: 0,
+        invalid: 0,
+        excluded: 0,
+        accumulation: 0,
+      });
+    }
+
+    const item = map.get(manager);
+    item.total += 1;
+    item.accumulation += Number(row.accumulation || 0);
+
+    if (row.auditStatus === "valid") item.valid += 1;
+    else if (row.auditStatus === "invalid") item.invalid += 1;
+    else if (row.auditStatus === "excluded") item.excluded += 1;
+  });
+
+  return [...map.values()].sort((a, b) => b.total - a.total);
+}
+
+function DonutChart({ segments }) {
+  const total = segments.reduce((sum, item) => sum + Number(item.value || 0), 0);
+  let offset = 25;
+  const radius = 36;
+  const circumference = 2 * Math.PI * radius;
+
+  if (!total) {
+    return (
+      <div className="kpi-chart-empty">
+        <span>אין נתונים להצגה</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="kpi-donut-wrap">
+      <svg viewBox="0 0 100 100" className="kpi-donut" aria-hidden="true">
+        <circle cx="50" cy="50" r={radius} className="donut-base" />
+        {segments.map((segment) => {
+          const value = Number(segment.value || 0);
+          const dash = (value / total) * circumference;
+          const style = {
+            strokeDasharray: `${dash} ${circumference - dash}`,
+            strokeDashoffset: -offset,
+          };
+          offset += dash;
+
+          return (
+            <circle
+              key={segment.label}
+              cx="50"
+              cy="50"
+              r={radius}
+              className={`donut-segment ${segment.className}`}
+              style={style}
+            />
+          );
+        })}
+      </svg>
+
+      <div className="kpi-donut-center">
+        <strong>{fmtNumber(total)}</strong>
+        <span>פוליסות</span>
+      </div>
+    </div>
+  );
+}
+
+function KpiTab({ kpi, rows = [], actions = [], managerFilter, onManagerFilterChange }) {
+  const managerBreakdown = buildManagerBreakdown(rows);
+  const managerOptions = managerBreakdown.map((item) => item.manager);
+
+  const filteredRows =
+    managerFilter === "all"
+      ? rows
+      : rows.filter((row) => getArrangementManager(row) === managerFilter);
+
+  const filteredActions =
+    managerFilter === "all"
+      ? actions
+      : actions.filter((item) => getArrangementManager(item) === managerFilter);
+
+  const displayKpi = filteredRows.length
+    ? buildKpiFromRows(filteredRows, filteredActions)
+    : kpi || buildKpiFromRows([], []);
+
+  if (!displayKpi) return <EmptyState text="אין נתוני KPI" />;
 
   const cards = [
     {
-      label: "סה\"כ פוליסות",
-      value: fmtNumber(kpi.totalRows),
+      label: "סה״כ פוליסות",
+      value: fmtNumber(displayKpi.totalRows),
+      color: "card-blue",
+    },
+    {
+      label: "סך צבירה מנוהלת",
+      value: fmtMoney(displayKpi.totalAccumulation),
       color: "card-blue",
     },
     {
       label: "נבדקו",
-      value: fmtNumber(kpi.auditedRows),
+      value: fmtNumber(displayKpi.auditedRows),
       color: "card-blue",
     },
     {
       label: "תקין",
-      value: fmtNumber(kpi.validRows),
+      value: fmtNumber(displayKpi.validRows),
       color: "card-green",
     },
     {
       label: "לא תקין",
-      value: fmtNumber(kpi.invalidRows),
+      value: fmtNumber(displayKpi.invalidRows),
       color: "card-red",
     },
     {
       label: "תפעול בלבד",
-      value: fmtNumber(kpi.excludedRows),
+      value: fmtNumber(displayKpi.excludedRows),
       color: "card-neutral",
     },
     {
       label: "% עמידה",
-      value: fmtPct(kpi.complianceRate),
-      color: kpi.complianceRate >= 0.9 ? "card-green" : "card-red",
-    },
-    {
-      label: "ללא הסכם",
-      value: fmtNumber(kpi.noAgreementRows),
-      color: "card-red",
-    },
-    {
-      label: "פוטנציאל מודל צבירה",
-      value: fmtNumber(kpi.tierPotentialRows),
-      color: "card-warning",
+      value: fmtPct(displayKpi.complianceRate),
+      color: displayKpi.complianceRate >= 0.9 ? "card-green" : "card-red",
     },
     {
       label: "Action Center",
-      value: fmtNumber(kpi.actionItems),
+      value: fmtNumber(displayKpi.actionItems),
       color: "card-warning",
-    },
-    {
-      label: "סך צבירה מנוהלת",
-      value: fmtMoney(kpi.totalAccumulation),
-      color: "card-blue",
     },
   ];
 
+  const statusSegments = [
+    { label: "תקין", value: displayKpi.validRows, className: "donut-green" },
+    { label: "לא תקין", value: displayKpi.invalidRows, className: "donut-red" },
+    { label: "תפעול בלבד", value: displayKpi.excludedRows, className: "donut-neutral" },
+  ];
+
+  const maxManagerTotal = Math.max(
+    1,
+    ...managerBreakdown.map((item) => item.total || 0)
+  );
+
   return (
-    <div className="kpi-grid">
-      {cards.map(({ label, value, color }) => (
-        <div key={label} className={`kpi-card ${color}`}>
-          <span className="kpi-label">{label}</span>
-          <strong className="kpi-value">{value}</strong>
+    <div className="kpi-overview">
+      <div className="kpi-toolbar">
+        <div>
+          <h2>מבט KPI כולל</h2>
+          <p>סיכום מנהלים לכל הדוחות, עם הכנה לבחירה לפי מנהל הסדר.</p>
         </div>
-      ))}
+
+        <label className="manager-filter">
+          <span>מנהל הסדר</span>
+          <select
+            value={managerFilter}
+            onChange={(event) => onManagerFilterChange(event.target.value)}
+          >
+            <option value="all">כל מנהלי ההסדר</option>
+            {managerOptions.map((manager) => (
+              <option key={manager} value={manager}>
+                {manager}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      <div className="kpi-grid kpi-grid-executive">
+        {cards.map(({ label, value, color }) => (
+          <div key={label} className={`kpi-card ${color}`}>
+            <span className="kpi-label">{label}</span>
+            <strong className="kpi-value">{value}</strong>
+          </div>
+        ))}
+      </div>
+
+      <div className="kpi-visual-grid">
+        <section className="kpi-panel">
+          <div className="kpi-panel-header">
+            <h3>סטטוס בקרה</h3>
+            <span>{fmtNumber(displayKpi.totalRows)} פוליסות</span>
+          </div>
+
+          <div className="kpi-status-layout">
+            <DonutChart segments={statusSegments} />
+
+            <div className="kpi-legend">
+              {statusSegments.map((segment) => {
+                const pct = displayKpi.totalRows
+                  ? (Number(segment.value || 0) / displayKpi.totalRows) * 100
+                  : 0;
+
+                return (
+                  <div key={segment.label} className="kpi-legend-row">
+                    <span className={`legend-dot ${segment.className}`} />
+                    <strong>{segment.label}</strong>
+                    <span>{fmtNumber(segment.value)}</span>
+                    <em>{pct.toFixed(1)}%</em>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </section>
+
+        <section className="kpi-panel">
+          <div className="kpi-panel-header">
+            <h3>פיזור לפי מנהל הסדר</h3>
+            <span>{managerBreakdown.length} מנהלים</span>
+          </div>
+
+          {managerBreakdown.length ? (
+            <div className="manager-bars">
+              {managerBreakdown.map((item) => (
+                <div key={item.manager} className="manager-bar-row">
+                  <div className="manager-bar-label">
+                    <strong>{item.manager}</strong>
+                    <span>
+                      {fmtNumber(item.total)} פוליסות · {fmtMoney(item.accumulation)}
+                    </span>
+                  </div>
+
+                  <div className="manager-bar-track">
+                    <div
+                      className="manager-bar-fill"
+                      style={{ width: `${(item.total / maxManagerTotal) * 100}%` }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <EmptyState text="אין נתוני מנהלי הסדר" />
+          )}
+        </section>
+      </div>
     </div>
   );
 }
@@ -1023,6 +1240,7 @@ const TABS = [
 
 export default function Dashboard({ analysisData }) {
   const [activeTab, setActiveTab] = useState("kpi");
+  const [managerFilter, setManagerFilter] = useState("all");
 
   const { pensionSummary, pensionRows } = analysisData || {};
 
@@ -1048,7 +1266,15 @@ export default function Dashboard({ analysisData }) {
   function renderTab() {
     switch (activeTab) {
       case "kpi":
-        return <KpiTab kpi={kpi} />;
+        return (
+          <KpiTab
+            kpi={kpi}
+            rows={previewRows}
+            actions={actions}
+            managerFilter={managerFilter}
+            onManagerFilterChange={setManagerFilter}
+          />
+        );
 
       case "fees":
         return <ManagementFeesTab audit={feesAudit} />;
@@ -1096,7 +1322,7 @@ export default function Dashboard({ analysisData }) {
         <div>
           <h1 className="dashboard-title">ניתוח דוח פנסיוני</h1>
           <p className="dashboard-subtitle">
-            קרן פנסיה · {pensionRows?.length || 0} פוליסות
+            מבט מנהלי הסדר · {pensionRows?.length || 0} פוליסות
           </p>
         </div>
 

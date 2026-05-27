@@ -1,6 +1,13 @@
 // Path: src/components/Dashboard.jsx
 import { useState, useMemo } from "react";
 import { buildPensionAnalytics } from "../unified/analyticsEngine";
+import {
+  buildKpiFromRows,
+  buildManagerBreakdown,
+  buildManagerOptions,
+  filterDataQualityByRows,
+  filterRowsByManager,
+} from "../unified/dashboardSelectors.js";
 
 function fmtNumber(v) {
   return Number(v || 0).toLocaleString("he-IL");
@@ -67,60 +74,6 @@ function EmptyState({ text = "אין נתונים" }) {
 }
 
 
-function filterRowsByManager(rows = [], managerFilter = "all") {
-  if (!Array.isArray(rows)) return [];
-  if (!managerFilter || managerFilter === "all") return rows;
-  return rows.filter((row) => getArrangementManager(row) === managerFilter);
-}
-
-function buildManagerOptions(rows = []) {
-  return buildManagerBreakdown(rows).map((item) => item.manager);
-}
-
-function filterDataQualityByRows(dataQuality, scopedRows = [], managerFilter = "all") {
-  if (!dataQuality || !managerFilter || managerFilter === "all") return dataQuality;
-
-  const issues = Array.isArray(dataQuality.issues) ? dataQuality.issues : [];
-  const allowedEmployeeCodes = new Set(
-    scopedRows
-      .map((row) => String(row.employeeCode || row.clientId || "").trim())
-      .filter(Boolean)
-  );
-  const allowedIssuers = new Set(
-    scopedRows
-      .map((row) => String(row.issuerCanonical || row.issuerOriginal || "").trim())
-      .filter(Boolean)
-  );
-
-  const filteredIssues = issues.filter((issue) => {
-    const employeeCode = String(issue.employeeCode || issue.clientId || "").trim();
-    const issuer = String(issue.issuer || issue.issuerCanonical || issue.issuerOriginal || "").trim();
-
-    if (employeeCode && allowedEmployeeCodes.has(employeeCode)) return true;
-    if (issuer && allowedIssuers.has(issuer)) return true;
-
-    return false;
-  });
-
-  const byCategory = filteredIssues.reduce((acc, issue) => {
-    const category = issue.category || "לא מסווג";
-    acc[category] = (acc[category] || 0) + 1;
-    return acc;
-  }, {});
-
-  return {
-    ...dataQuality,
-    issues: filteredIssues,
-    byCategory,
-    summary: {
-      ...(dataQuality.summary || {}),
-      issueCount: filteredIssues.length,
-      highIssues: filteredIssues.filter((issue) => issue.severity === "HIGH").length,
-      mediumIssues: filteredIssues.filter((issue) => issue.severity === "MEDIUM").length,
-      lowIssues: filteredIssues.filter((issue) => issue.severity === "LOW").length,
-    },
-  };
-}
 
 function GlobalManagerScope({
   managerFilter,
@@ -160,71 +113,6 @@ function GlobalManagerScope({
 
 // ─── KPI ──────────────────────────────────────────────────────────────────────
 
-function getArrangementManager(row) {
-  const value =
-    row?.arrangementManager ||
-    row?.arrangementManagerName ||
-    row?.personal_arrangementManagerName ||
-    row?.raw?.arrangementManager ||
-    row?.raw?.arrangementManagerName ||
-    row?.raw?.["מנהל הסדר"] ||
-    row?.raw?.["שם מנהל ההסדר"] ||
-    "מנהל הסדר לא מזוהה";
-
-  const text = String(value || "").trim();
-  return text || "מנהל הסדר לא מזוהה";
-}
-
-function buildKpiFromRows(rows = [], actions = []) {
-  const totalRows = rows.length;
-  const validRows = rows.filter((r) => r.auditStatus === "valid").length;
-  const invalidRows = rows.filter((r) => r.auditStatus === "invalid").length;
-  const excludedRows = rows.filter((r) => r.auditStatus === "excluded").length;
-  const auditedRows = validRows + invalidRows;
-  const totalAccumulation = rows.reduce(
-    (sum, r) => sum + Number(r.accumulation || 0),
-    0
-  );
-
-  return {
-    totalRows,
-    auditedRows,
-    validRows,
-    invalidRows,
-    excludedRows,
-    complianceRate: auditedRows ? validRows / auditedRows : 0,
-    actionItems: actions.length,
-    totalAccumulation,
-  };
-}
-
-function buildManagerBreakdown(rows = []) {
-  const map = new Map();
-
-  rows.forEach((row) => {
-    const manager = getArrangementManager(row);
-    if (!map.has(manager)) {
-      map.set(manager, {
-        manager,
-        total: 0,
-        valid: 0,
-        invalid: 0,
-        excluded: 0,
-        accumulation: 0,
-      });
-    }
-
-    const item = map.get(manager);
-    item.total += 1;
-    item.accumulation += Number(row.accumulation || 0);
-
-    if (row.auditStatus === "valid") item.valid += 1;
-    else if (row.auditStatus === "invalid") item.invalid += 1;
-    else if (row.auditStatus === "excluded") item.excluded += 1;
-  });
-
-  return [...map.values()].sort((a, b) => b.total - a.total);
-}
 
 function DonutChart({ segments }) {
   const total = segments.reduce((sum, item) => sum + Number(item.value || 0), 0);

@@ -1,12 +1,46 @@
 // src/parsing/parsingConfidence.js
-// CORE HARDENING v19
-// Parsing Confidence Engine
+// CORE HARDENING v19A
+// Backward-compatible Parsing Confidence Engine
 //
-// Purpose:
-// Give the upload/parsing layer a stable, UI-friendly quality report.
-// This file is intentionally independent from React and Dashboard logic.
+// Important:
+// This file keeps legacy exports such as asArray,
+// because safeRowBuilder.js imports them directly.
 
-const DEFAULT_REQUIRED_HEADERS = [
+export function asArray(value) {
+  if (!value) return [];
+  if (Array.isArray(value)) return value.filter(Boolean);
+  return [value].filter(Boolean);
+}
+
+export function uniqueArray(value) {
+  return Array.from(
+    new Set(
+      asArray(value)
+        .map((item) => String(item).trim())
+        .filter(Boolean)
+    )
+  );
+}
+
+export function isMeaningfulValue(value) {
+  if (value === null || value === undefined) return false;
+  const text = String(value).trim();
+  return text !== "" && text !== "-" && text !== "—" && text.toLowerCase() !== "nan";
+}
+
+export function safeNumber(value) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (value === null || value === undefined) return 0;
+
+  const cleaned = String(value)
+    .replace(/[₪,\s]/g, "")
+    .replace(/[^\d.-]/g, "");
+
+  const parsed = Number(cleaned);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+export const DEFAULT_REQUIRED_HEADERS = [
   "memberName",
   "idNumber",
   "policyNumber",
@@ -15,7 +49,7 @@ const DEFAULT_REQUIRED_HEADERS = [
   "currentBalance",
 ];
 
-const HEADER_LABELS_HE = {
+export const HEADER_LABELS_HE = {
   memberName: "שם מבוטח",
   idNumber: "תעודת זהות",
   policyNumber: "מספר פוליסה / חשבון",
@@ -29,42 +63,13 @@ const HEADER_LABELS_HE = {
   savingsBalance: "יתרת תגמולים",
 };
 
-function normalizeList(value) {
-  if (!value) return [];
-  if (Array.isArray(value)) return value.filter(Boolean);
-  return [value].filter(Boolean);
-}
-
-function uniqueList(list) {
-  return Array.from(new Set(normalizeList(list).map((item) => String(item).trim()).filter(Boolean)));
-}
-
-function isMeaningfulValue(value) {
-  if (value === null || value === undefined) return false;
-  const text = String(value).trim();
-  return text !== "" && text !== "-" && text !== "—" && text.toLowerCase() !== "nan";
-}
-
-function safeNumber(value) {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-
-  if (value === null || value === undefined) return 0;
-
-  const cleaned = String(value)
-    .replace(/[₪,\s]/g, "")
-    .replace(/[^\d.-]/g, "");
-
-  const parsed = Number(cleaned);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function getFieldLabel(fieldName) {
+export function getFieldLabel(fieldName) {
   return HEADER_LABELS_HE[fieldName] || fieldName;
 }
 
-function calculateCompletenessScore({ unifiedRows, requiredHeaders }) {
-  const rows = normalizeList(unifiedRows);
-  const required = normalizeList(requiredHeaders);
+export function calculateCompletenessScore({ unifiedRows = [], requiredHeaders = DEFAULT_REQUIRED_HEADERS } = {}) {
+  const rows = asArray(unifiedRows);
+  const required = asArray(requiredHeaders);
 
   if (!rows.length) return 0;
   if (!required.length) return 100;
@@ -83,20 +88,23 @@ function calculateCompletenessScore({ unifiedRows, requiredHeaders }) {
   return Math.round((filledCells / totalCells) * 100);
 }
 
-function calculateHeaderScore({ detectedHeaders, requiredHeaders, missingRequiredHeaders }) {
-  const required = normalizeList(requiredHeaders);
-
+export function calculateHeaderScore({
+  detectedHeaders = [],
+  requiredHeaders = DEFAULT_REQUIRED_HEADERS,
+  missingRequiredHeaders = [],
+} = {}) {
+  const required = asArray(requiredHeaders);
   if (!required.length) return 100;
 
-  const missingCount = normalizeList(missingRequiredHeaders).length;
+  const missingCount = asArray(missingRequiredHeaders).length;
   const detectedRequiredCount = Math.max(required.length - missingCount, 0);
 
   return Math.round((detectedRequiredCount / required.length) * 100);
 }
 
-function calculateRowScore({ rawRows, unifiedRows }) {
-  const rawCount = normalizeList(rawRows).length;
-  const unifiedCount = normalizeList(unifiedRows).length;
+export function calculateRowScore({ rawRows = [], unifiedRows = [] } = {}) {
+  const rawCount = asArray(rawRows).length;
+  const unifiedCount = asArray(unifiedRows).length;
 
   if (!rawCount && !unifiedCount) return 0;
   if (!rawCount && unifiedCount) return 80;
@@ -105,14 +113,16 @@ function calculateRowScore({ rawRows, unifiedRows }) {
   return Math.round(ratio * 100);
 }
 
-function getConfidenceLevel(score) {
-  if (score >= 90) return "excellent";
-  if (score >= 75) return "good";
-  if (score >= 55) return "partial";
+export function getConfidenceLevel(score) {
+  const numericScore = Number(score || 0);
+
+  if (numericScore >= 90) return "excellent";
+  if (numericScore >= 75) return "good";
+  if (numericScore >= 55) return "partial";
   return "risky";
 }
 
-function getConfidenceTitle(level) {
+export function getConfidenceTitle(level) {
   switch (level) {
     case "excellent":
       return "קליטה מצוינת";
@@ -126,24 +136,24 @@ function getConfidenceTitle(level) {
   }
 }
 
-function buildWarnings({
-  rawRows,
-  unifiedRows,
-  detectedHeaders,
-  missingRequiredHeaders,
-  aliasMatchedHeaders,
-  invalidRows,
-  customWarnings,
-}) {
+export function buildWarnings({
+  rawRows = [],
+  unifiedRows = [],
+  detectedHeaders = [],
+  missingRequiredHeaders = [],
+  aliasMatchedHeaders = [],
+  invalidRows = [],
+  customWarnings = [],
+} = {}) {
   const warnings = [];
 
-  const rawCount = normalizeList(rawRows).length;
-  const unifiedCount = normalizeList(unifiedRows).length;
-  const detectedCount = normalizeList(detectedHeaders).length;
-  const missing = normalizeList(missingRequiredHeaders);
-  const aliasMatches = normalizeList(aliasMatchedHeaders);
-  const invalid = normalizeList(invalidRows);
-  const externalWarnings = normalizeList(customWarnings);
+  const rawCount = asArray(rawRows).length;
+  const unifiedCount = asArray(unifiedRows).length;
+  const detectedCount = asArray(detectedHeaders).length;
+  const missing = asArray(missingRequiredHeaders);
+  const aliasMatches = asArray(aliasMatchedHeaders);
+  const invalid = asArray(invalidRows);
+  const externalWarnings = asArray(customWarnings);
 
   if (!rawCount) {
     warnings.push("לא נמצאו שורות מקור בקובץ.");
@@ -173,7 +183,7 @@ function buildWarnings({
     if (warning) warnings.push(String(warning));
   });
 
-  return uniqueList(warnings);
+  return uniqueArray(warnings);
 }
 
 export function buildParsingConfidenceReport(options = {}) {
@@ -190,13 +200,12 @@ export function buildParsingConfidenceReport(options = {}) {
     fileName = "",
   } = options;
 
-  const safeDetectedHeaders = uniqueList(detectedHeaders);
-  const safeRequiredHeaders = uniqueList(requiredHeaders);
+  const safeDetectedHeaders = uniqueArray(detectedHeaders);
+  const safeRequiredHeaders = uniqueArray(requiredHeaders);
 
-  const calculatedMissing =
-    Array.isArray(missingRequiredHeaders)
-      ? uniqueList(missingRequiredHeaders)
-      : safeRequiredHeaders.filter((field) => !safeDetectedHeaders.includes(field));
+  const calculatedMissing = Array.isArray(missingRequiredHeaders)
+    ? uniqueArray(missingRequiredHeaders)
+    : safeRequiredHeaders.filter((field) => !safeDetectedHeaders.includes(field));
 
   const headerScore = calculateHeaderScore({
     detectedHeaders: safeDetectedHeaders,
@@ -213,8 +222,8 @@ export function buildParsingConfidenceReport(options = {}) {
 
   const score = Math.round(
     headerScore * 0.4 +
-      rowScore * 0.25 +
-      completenessScore * 0.35
+    rowScore * 0.25 +
+    completenessScore * 0.35
   );
 
   const level = getConfidenceLevel(score);
@@ -230,19 +239,19 @@ export function buildParsingConfidenceReport(options = {}) {
   });
 
   return {
-    version: "v19",
+    version: "v19A",
     managerName,
     fileName,
     score,
     level,
     title: getConfidenceTitle(level),
-    rowCount: normalizeList(unifiedRows).length,
-    rawRowCount: normalizeList(rawRows).length,
+    rowCount: asArray(unifiedRows).length,
+    rawRowCount: asArray(rawRows).length,
     detectedHeaders: safeDetectedHeaders,
     requiredHeaders: safeRequiredHeaders,
     missingRequiredHeaders: calculatedMissing,
-    aliasMatchedHeaders: uniqueList(aliasMatchedHeaders),
-    invalidRowCount: normalizeList(invalidRows).length,
+    aliasMatchedHeaders: uniqueArray(aliasMatchedHeaders),
+    invalidRowCount: asArray(invalidRows).length,
     warnings,
     metrics: {
       headerScore,
@@ -253,12 +262,18 @@ export function buildParsingConfidenceReport(options = {}) {
       detectedHeaderCount: safeDetectedHeaders.length,
       requiredHeaderCount: safeRequiredHeaders.length,
       missingRequiredHeaderCount: calculatedMissing.length,
-      aliasMatchedHeaderCount: uniqueList(aliasMatchedHeaders).length,
-      totalBalance: normalizeList(unifiedRows).reduce((sum, row) => {
+      aliasMatchedHeaderCount: uniqueArray(aliasMatchedHeaders).length,
+      totalBalance: asArray(unifiedRows).reduce((sum, row) => {
         return sum + safeNumber(row?.currentBalance);
       }, 0),
     },
   };
+}
+
+// Legacy-compatible alias.
+// Existing files may import buildParsingConfidence instead of buildParsingConfidenceReport.
+export function buildParsingConfidence(options = {}) {
+  return buildParsingConfidenceReport(options);
 }
 
 export function createEmptyParsingConfidenceReport(extra = {}) {

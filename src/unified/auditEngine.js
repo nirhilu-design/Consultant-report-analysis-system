@@ -55,6 +55,14 @@ const MOR_DEFAULT_PENSION_FUND_LIMITS = {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+function safeRows(rows) {
+  return Array.isArray(rows) ? rows.filter(Boolean) : [];
+}
+
+function safeRow(row) {
+  return row && typeof row === "object" ? row : {};
+}
+
 function isPresent(value) {
   return value !== null && value !== undefined && value !== "";
 }
@@ -371,6 +379,8 @@ function evaluateBaseline(row) {
 // ─── Main row evaluation ──────────────────────────────────────────────────────
 
 export function evaluateUnifiedRow(row, agreementOptionsByIssuer = {}) {
+  row = safeRow(row);
+  agreementOptionsByIssuer = agreementOptionsByIssuer && typeof agreementOptionsByIssuer === "object" ? agreementOptionsByIssuer : {};
   if (isOperationOnly(row)) {
     return {
       ...row,
@@ -462,6 +472,7 @@ export function evaluateUnifiedRows({
   unifiedRows = [],
   agreementOptionsByIssuer = {},
 } = {}) {
+  unifiedRows = safeRows(unifiedRows);
   return unifiedRows.map((row) =>
     evaluateUnifiedRow(row, agreementOptionsByIssuer)
   );

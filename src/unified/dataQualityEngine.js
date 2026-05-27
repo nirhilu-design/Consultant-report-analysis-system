@@ -1,4 +1,11 @@
 // Path: src/unified/dataQualityEngine.js
+
+import {
+  PRODUCT_TYPES,
+  ensureUnifiedRows,
+  getProductConfig,
+} from "./unifiedSchema.js";
+
 // ─────────────────────────────────────────────────────────────────────────────
 // SMART PENSION DATA VALIDATION — בדיקת תקינות נתונים פנסיונית
 //
@@ -18,7 +25,19 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 function safeRows(rows) {
-  return Array.isArray(rows) ? rows.filter(Boolean) : [];
+  return ensureUnifiedRows(Array.isArray(rows) ? rows.filter(Boolean) : []);
+}
+
+function getProductType(row) {
+  return getProductConfig(row?.productType) ? row.productType : PRODUCT_TYPES.PENSION;
+}
+
+function productSupports(row, flag) {
+  return Boolean(getProductConfig(getProductType(row))?.[flag]);
+}
+
+function getProductLabel(row) {
+  return getProductConfig(getProductType(row))?.label || "מוצר";
 }
 
 function isPresent(value) {
@@ -155,7 +174,7 @@ function hasDepositOrActiveSignal(row) {
   return hasNumericSignal || hasActiveText;
 }
 
-function looksLikeActivePensionProduct(row) {
+function looksLikeActiveProduct(row) {
   if (isExcludedOrOperationOnly(row)) return false;
 
   return (
@@ -172,6 +191,8 @@ function addIssue(issues, row, issue) {
     employeeCode: row.employeeCode || row.clientId || "",
     clientName: row.personal_fullName || row.clientName || "",
     issuer: row.issuerCanonical || row.issuerOriginal || "",
+    productType: row.productType || PRODUCT_TYPES.PENSION,
+    productLabel: getProductLabel(row),
     accumulation: row.accumulation || 0,
     ...issue,
   });
@@ -220,7 +241,7 @@ export function buildDataQuality(rows = []) {
 
   for (const row of rows) {
     const excluded = isExcludedOrOperationOnly(row);
-    const activeLike = looksLikeActivePensionProduct(row);
+    const activeLike = looksLikeActiveProduct(row);
 
     const employeeCode = normalizeText(row.employeeCode || row.clientId);
     const clientName = normalizeText(row.personal_fullName || row.clientName);
@@ -300,7 +321,7 @@ export function buildDataQuality(rows = []) {
       });
     }
 
-    if (!excluded && !isPresent(row.depositFee)) {
+    if (!excluded && productSupports(row, "hasDepositFee") && !isPresent(row.depositFee)) {
       addIssue(issues, row, {
         severity: "MEDIUM",
         severityLabel: "בינוני",
@@ -312,7 +333,7 @@ export function buildDataQuality(rows = []) {
       });
     }
 
-    if (!excluded && !isPresent(row.accumulationFee)) {
+    if (!excluded && productSupports(row, "hasAccumulationFee") && !isPresent(row.accumulationFee)) {
       addIssue(issues, row, {
         severity: "MEDIUM",
         severityLabel: "בינוני",
@@ -324,7 +345,7 @@ export function buildDataQuality(rows = []) {
       });
     }
 
-    if (depositFee !== null && depositFee > 6) {
+    if (productSupports(row, "hasDepositFee") && depositFee !== null && depositFee > 6) {
       addIssue(issues, row, {
         severity: "HIGH",
         severityLabel: "גבוה",
@@ -336,7 +357,7 @@ export function buildDataQuality(rows = []) {
       });
     }
 
-    if (accumulationFee !== null && accumulationFee > 2) {
+    if (productSupports(row, "hasAccumulationFee") && accumulationFee !== null && accumulationFee > 2) {
       addIssue(issues, row, {
         severity: "HIGH",
         severityLabel: "גבוה",
@@ -348,7 +369,7 @@ export function buildDataQuality(rows = []) {
       });
     }
 
-    if (!excluded && !rewardsTrack) {
+    if (!excluded && productSupports(row, "hasInvestmentTracks") && !rewardsTrack) {
       addIssue(issues, row, {
         severity: "LOW",
         severityLabel: "נמוך",
@@ -360,7 +381,7 @@ export function buildDataQuality(rows = []) {
       });
     }
 
-    if (!excluded && !compensationTrack) {
+    if (!excluded && productSupports(row, "hasCompensationTrack") && !compensationTrack) {
       addIssue(issues, row, {
         severity: "LOW",
         severityLabel: "נמוך",

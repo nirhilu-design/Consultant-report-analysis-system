@@ -2,75 +2,70 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // PENSION FUND PARSER — קריאה ונרמול קובץ פנסיה מדוח מנהל הסדר
 //
-// תיקונים לעומת הגרסה הקודמת:
-//   1. מיפוי עמודות לפי INDEX קבוע — לא לפי שם (כי יש כפל שם "סטטוס")
-//   2. סטטוס בדיקת ד.נ = col 44 (לא col 24 שהוא סטטוס פוליסה בלבד)
-//   3. סה"כ ערכי פידיון = col 45 (מספר לשורות תקינות, טקסט לתפעול)
-//   4. דמי ניהול: הקובץ שומר דצימלי (0.015) — ממירים ל-% (1.5)
-//   5. זיהוי "תפעול בלבד" לפי col 44 בלבד — מדויק ואמין
+// Stability 04:
+//   1. הגנות סביב workbook / SheetNames / Sheets
+//   2. הגנות סביב sheet_to_json כדי שקובץ Excel פגום לא יפיל את האפליקציה
+//   3. הגנות על row שאינו Array
+//   4. שמירה על אותו schema עסקי קיים — בלי שינוי UX ובלי שינוי Audit
 // ─────────────────────────────────────────────────────────────────────────────
 
 import * as XLSX from "xlsx";
 
-// ─── Column index map (verified against real file 2025-10) ───────────────────
-// אם מנהל ההסדר ישנה את מבנה הקובץ — מעדכנים רק כאן.
 const COL = {
-  employeeCode:             0,  // קוד מזהה של העובד
-  idNumber:                 1,  // ת"ז
-  firstName:                2,  // שם פרטי
-  lastName:                 3,  // שם משפחה
-  marketingStatus:          4,  // סטטוס שיווקי
-  agencyCode:               5,  // קוד מזהה של הסוכנות
-  arrangementManager:       6,  // שם מנהל הסדר
-  policyIdCode:             7,  // קוד מזהה פוליסה
-  policyNumber:             8,  // מספר פוליסה
-  employerGroupId:          9,  // קוד מזהה קבוצת מעסיק
-  employerSpecificId:      10,  // קוד מזהה מעסיק ספציפי
-  issuer:                  11,  // קרן פנסיה (שם יצרן)
-  planType:                12,  // סוג תוכנית פנסיה
-  fundName:                13,  // שם קרן הפנסיה
-  joinDate:                14,  // תאריך הצטרפות
-  insuranceStartDate:      15,  // ת.ת.ביטוח
-  compensationPct:         16,  // אחוז פיצויים
-  employerRewardsPct:      17,  // אחוז תגמולי מעסיק
-  employerDisabilityPct:   18,  // אחוז אכ"ע מעסיק
-  employerMiscPct:         19,  // אחוז שונות מעסיק
-  employeeRewardsPct:      20,  // אחוז תגמולי עובד
-  employeeRewards47Pct:    21,  // אחוז תגמולי עובד (47)
-  employeeMiscPct:         22,  // אחוז שונות עובד
-  totalDepositPct:         23,  // סה"כ אחוזי הפקדה
-  policyStatus:            24,  // סטטוס פוליסה (פעיל / לא פעיל) — לא תוצאת בדיקה!
-  investmentTrackCodeR:    25,  // קוד מסלול השקעה - תגמולים
-  investmentTrackNameR:    26,  // שם מסלול השקעה - תגמולים
-  investmentTrackCodeC:    27,  // קוד מסלול השקעה - פיצויים
-  investmentTrackNameC:    28,  // שם מסלול השקעה - פיצויים
-  insuranceTrack:          29,  // מסלול ביטוח בקרן הפנסיה
-  pensionSalary:           30,  // שכר קובע לקרן פנסיה
-  disabilityPensionRate:   31,  // שיעור פנסיית נכות
-  disabilityNote:          32,  // הערות שיעור פנסיית נכות
-  survivorPensionRate:     33,  // שיעור פנסיית שארים מירבית
-  survivorNote:            34,  // הערות שיעור פנסיית שארים
-  disabilityAmountILS:     35,  // סכום בשקלים פנסיית נכות
-  survivorAmountILS:       36,  // סכום בשקלים פנסיית שארים מירבית
-  insuranceEndDate:        37,  // תום תקופת הביטוח בנכות
-  survivorWaiver:          38,  // וויתור על פנסיית שארים
-  depositFee:              39,  // דמי ניהול מפרמיה באחוזים   (דצימלי: 0.015 = 1.5%)
-  accumulationFee:         40,  // דמי ניהול מצבירה באחוזים  (דצימלי: 0.0012 = 0.12%)
-  compensationRedemption:  41,  // ערך פידיון פיצויים
-  depositFeeAgreement:     42,  // דמי ניהול מפרמיה באחוזים בהסכם
-  accumulationFeeAgreement:43,  // דמי ניהול מצבירה באחוזים בהסכם
-  auditStatus:             44,  // סטטוס (תוצאת בדיקה: תקין / לא תקין / תפעול בלבד)
-  totalAccumulation:       45,  // סה"כ ערכי פידיון (מספר לשורות רגילות, טקסט לתפעול)
-  salaryAgency:            46,  // שכר נתוני סוכנות
-  salaryClearinghouse:     47,  // שכר נתוני מסלקה
-  isArrangementAgent:      48,  // האם מנהל ההסדר סוכן בפוליסה
-  disabilityEndAge:        49,  // גיל תום תקופה לאכ"ע
-  policyStatusSource:      50,  // סטטוס פוליסה (מקור)
-  policyStatusClearinghouse:51, // סטטוס פוליסה מסלקה
-  validityMonth:           52,  // חודש נכונות
+  employeeCode: 0,
+  idNumber: 1,
+  firstName: 2,
+  lastName: 3,
+  marketingStatus: 4,
+  agencyCode: 5,
+  arrangementManager: 6,
+  policyIdCode: 7,
+  policyNumber: 8,
+  employerGroupId: 9,
+  employerSpecificId: 10,
+  issuer: 11,
+  planType: 12,
+  fundName: 13,
+  joinDate: 14,
+  insuranceStartDate: 15,
+  compensationPct: 16,
+  employerRewardsPct: 17,
+  employerDisabilityPct: 18,
+  employerMiscPct: 19,
+  employeeRewardsPct: 20,
+  employeeRewards47Pct: 21,
+  employeeMiscPct: 22,
+  totalDepositPct: 23,
+  policyStatus: 24,
+  investmentTrackCodeR: 25,
+  investmentTrackNameR: 26,
+  investmentTrackCodeC: 27,
+  investmentTrackNameC: 28,
+  insuranceTrack: 29,
+  pensionSalary: 30,
+  disabilityPensionRate: 31,
+  disabilityNote: 32,
+  survivorPensionRate: 33,
+  survivorNote: 34,
+  disabilityAmountILS: 35,
+  survivorAmountILS: 36,
+  insuranceEndDate: 37,
+  survivorWaiver: 38,
+  depositFee: 39,
+  accumulationFee: 40,
+  compensationRedemption: 41,
+  depositFeeAgreement: 42,
+  accumulationFeeAgreement: 43,
+  auditStatus: 44,
+  totalAccumulation: 45,
+  salaryAgency: 46,
+  salaryClearinghouse: 47,
+  isArrangementAgent: 48,
+  disabilityEndAge: 49,
+  policyStatusSource: 50,
+  policyStatusClearinghouse: 51,
+  validityMonth: 52,
 };
-
-// ─── Normalizers ──────────────────────────────────────────────────────────────
 
 function normalizeText(value) {
   return String(value ?? "")
@@ -88,21 +83,20 @@ function normalizeNumber(value) {
     .replace(/%/g, "")
     .replace(/[^\d.-]/g, "");
 
+  if (!cleaned) return null;
+
   const parsed = Number(cleaned);
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-// דמי ניהול — הקובץ שומר דצימלי (0.015).
-// מחזירים כאחוז (1.5) לעקביות עם כל המערכת.
-// כלל: אם |value| < 0.1 ו-value ≠ 0 → דצימלי → כפול 100
 function normalizeFeePercent(value) {
   const num = normalizeNumber(value);
   if (num === null) return null;
-  if (Math.abs(num) > 20) return null;           // ודאי לא דמי ניהול
+  if (Math.abs(num) > 20) return null;
   if (num !== 0 && Math.abs(num) < 0.1) {
-    return Number((num * 100).toFixed(4));        // 0.015 → 1.5
+    return Number((num * 100).toFixed(4));
   }
-  return Number(num.toFixed(4));                 // כבר באחוזים
+  return Number(num.toFixed(4));
 }
 
 function normalizeDate(value) {
@@ -111,132 +105,146 @@ function normalizeDate(value) {
   return normalizeText(value) || null;
 }
 
-// ─── Row helpers ──────────────────────────────────────────────────────────────
-
-function isDataRow(row) {
-  // שורה תקפה: חייבת קוד עובד + שם יצרן
-  const code = row[COL.employeeCode];
-  const issuer = row[COL.issuer];
-  return (
-    code !== null &&
-    code !== undefined &&
-    code !== "" &&
-    issuer !== null &&
-    issuer !== undefined &&
-    normalizeText(String(issuer)) !== ""
-  );
+function getSheetNames(workbook) {
+  return Array.isArray(workbook?.SheetNames) ? workbook.SheetNames : [];
 }
 
-// col 44 הוא מקור האמת לזיהוי תפעול בלבד
-function isOperationOnly(row) {
-  return normalizeText(row[COL.auditStatus]).includes("תפעול");
-}
+function readSheetRows(workbook, sheetName) {
+  const sheet = workbook?.Sheets?.[sheetName];
+  if (!sheet) return [];
 
-function getEmployeeCode(row) {
-  const raw = row[COL.employeeCode];
-  if (raw === null || raw === undefined) return "";
-  return String(typeof raw === "number" ? Math.round(raw) : raw).trim();
-}
-
-// col 45 = סה"כ ערכי פידיון.
-// לשורות תפעול הערך הוא הטקסט "תפעול בלבד" — מחזירים null.
-function getTotalAccumulation(row) {
-  const raw = row[COL.totalAccumulation];
-  if (raw === null || raw === undefined) return null;
-  if (typeof raw === "string") return null;      // טקסט = תפעול בלבד
-  return normalizeNumber(raw);
-}
-
-// ─── Main parser ──────────────────────────────────────────────────────────────
-
-export function parsePensionFund(workbook) {
-  if (!workbook) return [];
-
-  const allRows = [];
-
-  workbook.SheetNames.forEach((sheetName) => {
-    // מעבדים רק גיליון שמכיל "פנסיה" בשמו — מדלגים על גיליון הסיכום
-    if (!normalizeText(sheetName).includes("פנסיה")) return;
-
-    const sheet = workbook.Sheets[sheetName];
+  try {
     const rows = XLSX.utils.sheet_to_json(sheet, {
       header: 1,
       defval: null,
       raw: true,
     });
 
+    return Array.isArray(rows) ? rows : [];
+  } catch (error) {
+    console.warn("parsePensionFund: failed reading sheet", {
+      sheetName,
+      error: error?.message || String(error),
+    });
+    return [];
+  }
+}
+
+function getCell(row, index) {
+  return Array.isArray(row) ? row[index] : null;
+}
+
+function isDataRow(row) {
+  if (!Array.isArray(row)) return false;
+
+  const code = getCell(row, COL.employeeCode);
+  const issuer = getCell(row, COL.issuer);
+
+  return (
+    code !== null &&
+    code !== undefined &&
+    code !== "" &&
+    issuer !== null &&
+    issuer !== undefined &&
+    normalizeText(issuer) !== ""
+  );
+}
+
+function isOperationOnly(row) {
+  return normalizeText(getCell(row, COL.auditStatus)).includes("תפעול");
+}
+
+function getEmployeeCode(row) {
+  const raw = getCell(row, COL.employeeCode);
+  if (raw === null || raw === undefined) return "";
+  return String(typeof raw === "number" ? Math.round(raw) : raw).trim();
+}
+
+function getTotalAccumulation(row) {
+  const raw = getCell(row, COL.totalAccumulation);
+  if (raw === null || raw === undefined) return null;
+  if (typeof raw === "string") return null;
+  return normalizeNumber(raw);
+}
+
+export function parsePensionFund(workbook) {
+  const sheetNames = getSheetNames(workbook);
+  if (!sheetNames.length) return [];
+
+  const pensionSheetNames = sheetNames.filter((sheetName) =>
+    normalizeText(sheetName).includes("פנסיה")
+  );
+
+  if (!pensionSheetNames.length) {
+    console.warn("parsePensionFund: no pension sheet was detected", { sheetNames });
+    return [];
+  }
+
+  const allRows = [];
+
+  pensionSheetNames.forEach((sheetName) => {
+    const rows = readSheetRows(workbook, sheetName);
     if (rows.length < 2) return;
 
-    // שורה 0 = כותרות, שורה 1+ = נתונים
     rows.slice(1).forEach((row, idx) => {
       if (!isDataRow(row)) return;
 
       const operationOnly = isOperationOnly(row);
 
       allRows.push({
-        // ── זיהוי ──────────────────────────────────────────────────────
         sheetName,
-        sourceRowIndex:  idx + 2,              // שורה ב-Excel (1-based + header)
-        employeeCode:    getEmployeeCode(row),
+        sourceRowIndex: idx + 2,
+        employeeCode: getEmployeeCode(row),
 
-        // ── יצרן ────────────────────────────────────────────────────────
-        issuerOriginal:  normalizeText(row[COL.issuer]),
-        manager:         normalizeText(row[COL.issuer]), // alias לתאימות לאחור
+        issuerOriginal: normalizeText(getCell(row, COL.issuer)),
+        manager: normalizeText(getCell(row, COL.issuer)),
 
-        // ── מוצר ────────────────────────────────────────────────────────
-        policyNumber:    normalizeText(row[COL.policyNumber]),
-        fundName:        normalizeText(row[COL.fundName]),
-        planType:        normalizeText(row[COL.planType]),
+        policyNumber: normalizeText(getCell(row, COL.policyNumber)),
+        fundName: normalizeText(getCell(row, COL.fundName)),
+        planType: normalizeText(getCell(row, COL.planType)),
 
-        // ── סטטוסים ─────────────────────────────────────────────────────
-        marketingStatus: normalizeText(row[COL.marketingStatus]),
-        policyStatus:    normalizeText(row[COL.policyStatus]),   // col 24
-        auditStatus:     normalizeText(row[COL.auditStatus]),    // col 44
+        marketingStatus: normalizeText(getCell(row, COL.marketingStatus)),
+        policyStatus: normalizeText(getCell(row, COL.policyStatus)),
+        auditStatus: normalizeText(getCell(row, COL.auditStatus)),
         isOperationOnly: operationOnly,
 
-        // ── מסלולים ─────────────────────────────────────────────────────
-        investmentTrackRewards:      normalizeText(row[COL.investmentTrackNameR]),
-        investmentTrackCompensation: normalizeText(row[COL.investmentTrackNameC]),
-        insuranceTrack:              normalizeText(row[COL.insuranceTrack]),
-        survivorWaiver:              normalizeText(row[COL.survivorWaiver]),
+        investmentTrackRewards: normalizeText(getCell(row, COL.investmentTrackNameR)),
+        investmentTrackCompensation: normalizeText(getCell(row, COL.investmentTrackNameC)),
+        insuranceTrack: normalizeText(getCell(row, COL.insuranceTrack)),
+        survivorWaiver: normalizeText(getCell(row, COL.survivorWaiver)),
 
-        // ── דמי ניהול בפועל (דצימלי → אחוז) ───────────────────────────
-        depositFee:      normalizeFeePercent(row[COL.depositFee]),
-        accumulationFee: normalizeFeePercent(row[COL.accumulationFee]),
+        depositFee: normalizeFeePercent(getCell(row, COL.depositFee)),
+        accumulationFee: normalizeFeePercent(getCell(row, COL.accumulationFee)),
 
-        // ── דמי ניהול בהסכם (כפי שמנהל ההסדר רשם) ─────────────────────
-        depositFeeAgreement:      normalizeFeePercent(row[COL.depositFeeAgreement]),
-        accumulationFeeAgreement: normalizeFeePercent(row[COL.accumulationFeeAgreement]),
+        depositFeeAgreement: normalizeFeePercent(getCell(row, COL.depositFeeAgreement)),
+        accumulationFeeAgreement: normalizeFeePercent(getCell(row, COL.accumulationFeeAgreement)),
 
-        // ── כספים ───────────────────────────────────────────────────────
-        accumulation:  getTotalAccumulation(row),  // col 45 — null לתפעול
-        pensionSalary: normalizeNumber(row[COL.pensionSalary]),
+        accumulation: getTotalAccumulation(row),
+        pensionSalary: normalizeNumber(getCell(row, COL.pensionSalary)),
 
-        // ── מידע מעסיק ──────────────────────────────────────────────────
-        arrangementManager: normalizeText(row[COL.arrangementManager]),
-        employerGroupId:    normalizeText(row[COL.employerGroupId]),
-        joinDate:           normalizeDate(row[COL.joinDate]),
-        validityMonth:      normalizeText(row[COL.validityMonth]),
+        arrangementManager: normalizeText(getCell(row, COL.arrangementManager)),
+        employerGroupId: normalizeText(getCell(row, COL.employerGroupId)),
+        joinDate: normalizeDate(getCell(row, COL.joinDate)),
+        validityMonth: normalizeText(getCell(row, COL.validityMonth)),
 
-        // ── raw — לצורך debugging בלבד ──────────────────────────────────
         raw: row,
       });
     });
   });
 
   console.log("parsePensionFund:", {
-    total:         allRows.length,
+    total: allRows.length,
     operationOnly: allRows.filter((r) => r.isOperationOnly).length,
-    withFees:      allRows.filter((r) => r.depositFee !== null || r.accumulationFee !== null).length,
-    withAccum:     allRows.filter((r) => r.accumulation !== null).length,
-    sampleFees:    allRows
+    withFees: allRows.filter((r) => r.depositFee !== null || r.accumulationFee !== null).length,
+    withAccum: allRows.filter((r) => r.accumulation !== null).length,
+    sampleFees: allRows
       .filter((r) => r.depositFee !== null)
       .slice(0, 3)
       .map((r) => ({
         emp: r.employeeCode,
         issuer: r.issuerOriginal,
-        depositFee: r.depositFee + "%",
-        accumulationFee: r.accumulationFee + "%",
+        depositFee: `${r.depositFee}%`,
+        accumulationFee: `${r.accumulationFee}%`,
         accumulation: r.accumulation,
       })),
   });

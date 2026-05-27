@@ -1,8 +1,12 @@
-// NEW FILE
 // Path: src/unified/normalizers.js
+// Stability 05:
+//   1. Header alias helpers for tolerant lookup in object rows.
+//   2. Safer text normalization for Hebrew/English headers.
+//   3. Canonical investment track normalization without changing existing UI schema.
 
 export function normalizeText(value) {
   return String(value ?? "")
+    .replace(/[\u00A0\u200E\u200F]/g, " ")
     .replace(/\s+/g, " ")
     .replace(/[״"]/g, "")
     .trim();
@@ -10,7 +14,20 @@ export function normalizeText(value) {
 
 export function normalizeLooseText(value) {
   return normalizeText(value)
+    .replace(/[’'`]/g, "")
+    .replace(/[־–—]/g, "-")
+    .replace(/[_]+/g, " ")
     .replace(/[^\w\u0590-\u05FF\s/+.-]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function normalizeHeader(value) {
+  return normalizeLooseText(value)
+    .toLowerCase()
+    .replace(/[.:]/g, "")
+    .replace(/\s*[-/]\s*/g, " ")
+    .replace(/\s+/g, " ")
     .trim();
 }
 
@@ -33,11 +50,8 @@ export function normalizePercent(value) {
 
   if (typeof value === "number") {
     if (!Number.isFinite(value)) return null;
-
-    // 0.0015 means 0.15%, while 0.15 means 0.15%.
-    if (value > 0 && value < 0.05) return value * 100;
-
-    return value;
+    if (value > 0 && value < 0.05) return Number((value * 100).toFixed(4));
+    return Number(value.toFixed(4));
   }
 
   const raw = String(value)
@@ -51,9 +65,9 @@ export function normalizePercent(value) {
   const parsed = Number(raw);
   if (!Number.isFinite(parsed)) return null;
 
-  if (parsed > 0 && parsed < 0.05) return parsed * 100;
+  if (parsed > 0 && parsed < 0.05) return Number((parsed * 100).toFixed(4));
 
-  return parsed;
+  return Number(parsed.toFixed(4));
 }
 
 export function isNumericOnly(value) {
@@ -65,7 +79,24 @@ export function getRaw(row) {
   return row?.raw?.raw || row?.raw || row || {};
 }
 
+function buildNormalizedKeyMap(raw = {}) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return new Map();
+
+  const map = new Map();
+
+  Object.keys(raw).forEach((key) => {
+    const normalized = normalizeHeader(key);
+    if (normalized && !map.has(normalized)) {
+      map.set(normalized, key);
+    }
+  });
+
+  return map;
+}
+
 export function getByKeys(raw, keys = []) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return "";
+
   for (const key of keys) {
     if (
       raw[key] !== undefined &&
@@ -73,6 +104,39 @@ export function getByKeys(raw, keys = []) {
       normalizeText(raw[key])
     ) {
       return raw[key];
+    }
+  }
+
+  const normalizedMap = buildNormalizedKeyMap(raw);
+
+  for (const key of keys) {
+    const normalizedKey = normalizeHeader(key);
+    const actualKey = normalizedMap.get(normalizedKey);
+
+    if (
+      actualKey &&
+      raw[actualKey] !== undefined &&
+      raw[actualKey] !== null &&
+      normalizeText(raw[actualKey])
+    ) {
+      return raw[actualKey];
+    }
+  }
+
+  for (const [normalizedActualKey, actualKey] of normalizedMap.entries()) {
+    const matchedAlias = keys.some((key) => {
+      const normalizedAlias = normalizeHeader(key);
+      if (!normalizedAlias || normalizedAlias.length < 3) return false;
+      return normalizedActualKey.includes(normalizedAlias) || normalizedAlias.includes(normalizedActualKey);
+    });
+
+    if (
+      matchedAlias &&
+      raw[actualKey] !== undefined &&
+      raw[actualKey] !== null &&
+      normalizeText(raw[actualKey])
+    ) {
+      return raw[actualKey];
     }
   }
 
@@ -87,15 +151,28 @@ export function firstNonEmpty(...values) {
   return "";
 }
 
-export function normalizeTrackName(value, fallback = "ללא מסלול השקעה") {
+export function normalizeInvestmentTrackName(value, fallback = "ללא מסלול השקעה") {
   const text = normalizeText(value);
-
   if (!text) return fallback;
-
-  // A numeric-only value is usually a track code, not a track name.
   if (isNumericOnly(text)) return fallback;
 
+  const loose = normalizeLooseText(text).toLowerCase();
+
+  if (/s\s*&?\s*p\s*500|sp\s*500|snp\s*500|500\s*s\s*p|מדד.*500|מחקה.*500/.test(loose)) {
+    return "S&P 500";
+  }
+
+  if (/כללי|כללית|מסלול כללי/.test(loose)) return "כללי";
+  if (/הלכה|כשר/.test(loose)) return "הלכה";
+  if (/מניות|מנייתי|מנייתית/.test(loose)) return "מניות";
+  if (/אגח|אג\"ח|אגרות חוב/.test(loose)) return "אג״ח";
+  if (/כספי|שקלי|מקמ|מק\"מ/.test(loose)) return "כספי / שקלי";
+
   return text;
+}
+
+export function normalizeTrackName(value, fallback = "ללא מסלול השקעה") {
+  return normalizeInvestmentTrackName(value, fallback);
 }
 
 export function ageBucket(age) {

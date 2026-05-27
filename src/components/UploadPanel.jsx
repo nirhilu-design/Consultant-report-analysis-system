@@ -8,15 +8,7 @@ const FILE_SLOTS = [
     subtitle: "דוח יועץ / מנהלי הסדר",
     required: true,
     badge: "חובה",
-    keywords: [
-      "דוח יועץ",
-      "יועץ",
-      "נתונים",
-      "קרן פנסיה",
-      "פנסיה",
-      "data",
-      "pension",
-    ],
+    keywords: ["דוח יועץ", "יועץ", "נתונים", "קרן פנסיה", "פנסיה", "data", "pension"],
   },
   {
     key: "agreementsFile",
@@ -24,13 +16,7 @@ const FILE_SLOTS = [
     subtitle: "הסכמי דמי ניהול",
     required: true,
     badge: "חובה",
-    keywords: [
-      "הסכמים",
-      "הסכם",
-      "דמי ניהול",
-      "agreements",
-      "agreement",
-    ],
+    keywords: ["הסכמים", "הסכם", "דמי ניהול", "agreements", "agreement"],
   },
   {
     key: "personalDetailsFile",
@@ -53,22 +39,48 @@ const FILE_SLOTS = [
   },
 ];
 
+function createManager(index = 1) {
+  return {
+    id: `manager_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    name: `מנהל הסדר ${index}`,
+    dataFile: null,
+    agreementsFile: null,
+    personalDetailsFile: null,
+  };
+}
+
+function normalizeManagers(files) {
+  if (Array.isArray(files?.managers) && files.managers.length) {
+    return files.managers.map((manager, index) => ({
+      id: manager.id || `manager_${index + 1}`,
+      name: manager.name || `מנהל הסדר ${index + 1}`,
+      dataFile: manager.dataFile || null,
+      agreementsFile: manager.agreementsFile || null,
+      personalDetailsFile: manager.personalDetailsFile || null,
+    }));
+  }
+
+  return [
+    {
+      id: "manager_1",
+      name: "מנהל הסדר 1",
+      dataFile: files?.dataFile || null,
+      agreementsFile: files?.agreementsFile || null,
+      personalDetailsFile: files?.personalDetailsFile || null,
+    },
+  ];
+}
+
 function isExcelFile(file) {
   if (!file) return false;
-
   const name = file.name || "";
   const ext = name.split(".").pop()?.toLowerCase();
-
   return ext === "xlsx" || ext === "xls";
 }
 
 function formatFileSize(bytes) {
   if (!bytes) return "";
-
-  if (bytes < 1024 * 1024) {
-    return `${Math.round(bytes / 1024)}KB`;
-  }
-
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)}KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
 }
 
@@ -80,9 +92,8 @@ function normalizeFileName(name) {
     .trim();
 }
 
-function guessSlotKey(file, currentFiles) {
+function guessSlotKey(file, currentManager) {
   const name = normalizeFileName(file?.name);
-
   if (!name) return null;
 
   const scored = FILE_SLOTS.map((slot) => {
@@ -93,7 +104,7 @@ function guessSlotKey(file, currentFiles) {
     return {
       key: slot.key,
       score,
-      alreadyHasFile: Boolean(currentFiles?.[slot.key]),
+      alreadyHasFile: Boolean(currentManager?.[slot.key]),
     };
   })
     .filter((item) => item.score > 0)
@@ -104,20 +115,13 @@ function guessSlotKey(file, currentFiles) {
 
   if (scored.length) return scored[0].key;
 
-  const emptySlot = FILE_SLOTS.find((slot) => !currentFiles?.[slot.key]);
-
+  const emptySlot = FILE_SLOTS.find((slot) => !currentManager?.[slot.key]);
   return emptySlot?.key || "dataFile";
 }
 
 function FileStatusIcon({ file, required }) {
-  if (file) {
-    return <span className="uploadStatusIcon success">✓</span>;
-  }
-
-  if (required) {
-    return <span className="uploadStatusIcon required">!</span>;
-  }
-
+  if (file) return <span className="uploadStatusIcon success">✓</span>;
+  if (required) return <span className="uploadStatusIcon required">!</span>;
   return <span className="uploadStatusIcon optional">+</span>;
 }
 
@@ -126,13 +130,14 @@ function DropUpload({
   file,
   isDragging,
   dragTarget,
+  targetKey,
   onFile,
   onRemove,
   onDragEnterSlot,
   onDragLeaveSlot,
   onDropSlot,
 }) {
-  const active = isDragging && dragTarget === slot.key;
+  const active = isDragging && dragTarget === targetKey;
 
   return (
     <label
@@ -144,13 +149,13 @@ function DropUpload({
       ]
         .filter(Boolean)
         .join(" ")}
-      onDragEnter={(event) => onDragEnterSlot(event, slot.key)}
+      onDragEnter={(event) => onDragEnterSlot(event, targetKey)}
       onDragOver={(event) => {
         event.preventDefault();
-        onDragEnterSlot(event, slot.key);
+        onDragEnterSlot(event, targetKey);
       }}
-      onDragLeave={(event) => onDragLeaveSlot(event, slot.key)}
-      onDrop={(event) => onDropSlot(event, slot.key)}
+      onDragLeave={(event) => onDragLeaveSlot(event, targetKey)}
+      onDrop={(event) => onDropSlot(event, targetKey)}
     >
       <input
         type="file"
@@ -171,14 +176,11 @@ function DropUpload({
               {slot.badge}
             </span>
           </div>
-
           <span>{slot.subtitle}</span>
         </div>
       </div>
 
-      <div className="uploadDropHint">
-        {file ? "קובץ נבחר" : "גרור לכאן או לחץ לבחירה"}
-      </div>
+      <div className="uploadDropHint">{file ? "קובץ נבחר" : "גרור לכאן או לחץ לבחירה"}</div>
 
       {file ? (
         <div className="selectedFileCard">
@@ -206,30 +208,56 @@ function DropUpload({
   );
 }
 
-const EMPTY_UPLOAD_FILES = {
-  dataFile: null,
-  agreementsFile: null,
-  personalDetailsFile: null,
-};
-
 export default function UploadPanel({ files, setFiles, onStart, isAnalyzing = false }) {
-  const safeFiles = files || EMPTY_UPLOAD_FILES;
+  const managers = normalizeManagers(files);
   const [isDragging, setIsDragging] = useState(false);
   const [dragTarget, setDragTarget] = useState(null);
   const [error, setError] = useState("");
 
-  const canStart = Boolean(safeFiles.dataFile && safeFiles.agreementsFile);
-
   const progress = useMemo(() => {
-    const uploaded = FILE_SLOTS.filter((slot) => Boolean(safeFiles[slot.key])).length;
+    const total = managers.length * FILE_SLOTS.length;
+    const uploaded = managers.reduce((sum, manager) => {
+      return sum + FILE_SLOTS.filter((slot) => Boolean(manager[slot.key])).length;
+    }, 0);
+    const requiredTotal = managers.length * FILE_SLOTS.filter((slot) => slot.required).length;
+    const requiredUploaded = managers.reduce((sum, manager) => {
+      return sum + FILE_SLOTS.filter((slot) => slot.required && Boolean(manager[slot.key])).length;
+    }, 0);
+
     return {
       uploaded,
-      total: FILE_SLOTS.length,
-      percent: Math.round((uploaded / FILE_SLOTS.length) * 100),
+      total,
+      requiredUploaded,
+      requiredTotal,
+      percent: total ? Math.round((uploaded / total) * 100) : 0,
     };
-  }, [safeFiles]);
+  }, [managers]);
 
-  function setFileForSlot(slotKey, file) {
+  const canStart = managers.length > 0 && managers.every((manager) => manager.dataFile && manager.agreementsFile);
+
+  function updateManagers(updater) {
+    setFiles((prev) => {
+      const currentManagers = normalizeManagers(prev);
+      const nextManagers = updater(currentManagers).map((manager, index) => ({
+        ...manager,
+        name: manager.name || `מנהל הסדר ${index + 1}`,
+      }));
+
+      return { managers: nextManagers };
+    });
+  }
+
+  function setManagerName(managerId, name) {
+    updateManagers((currentManagers) =>
+      currentManagers.map((manager) =>
+        manager.id === managerId
+          ? { ...manager, name }
+          : manager
+      )
+    );
+  }
+
+  function setFileForSlot(managerId, slotKey, file) {
     setError("");
 
     if (file && !isExcelFile(file)) {
@@ -237,13 +265,56 @@ export default function UploadPanel({ files, setFiles, onStart, isAnalyzing = fa
       return;
     }
 
-    setFiles((prev) => ({
-      ...prev,
-      [slotKey]: file,
-    }));
+    updateManagers((currentManagers) =>
+      currentManagers.map((manager) =>
+        manager.id === managerId
+          ? { ...manager, [slotKey]: file }
+          : manager
+      )
+    );
   }
 
-  function assignDroppedFiles(fileList, forcedSlotKey = null) {
+  function addManager() {
+    updateManagers((currentManagers) => [
+      ...currentManagers,
+      createManager(currentManagers.length + 1),
+    ]);
+    setError("");
+  }
+
+  function removeManager(managerId) {
+    updateManagers((currentManagers) => {
+      if (currentManagers.length <= 1) {
+        return currentManagers.map((manager) => ({
+          ...manager,
+          dataFile: null,
+          agreementsFile: null,
+          personalDetailsFile: null,
+        }));
+      }
+
+      return currentManagers.filter((manager) => manager.id !== managerId);
+    });
+    setError("");
+  }
+
+  function clearManager(managerId) {
+    updateManagers((currentManagers) =>
+      currentManagers.map((manager) =>
+        manager.id === managerId
+          ? {
+              ...manager,
+              dataFile: null,
+              agreementsFile: null,
+              personalDetailsFile: null,
+            }
+          : manager
+      )
+    );
+    setError("");
+  }
+
+  function assignDroppedFiles(fileList, forcedManagerId = null, forcedSlotKey = null) {
     const droppedFiles = Array.from(fileList || []);
     const excelFiles = droppedFiles.filter(isExcelFile);
 
@@ -256,20 +327,25 @@ export default function UploadPanel({ files, setFiles, onStart, isAnalyzing = fa
       return;
     }
 
-    setFiles((prev) => {
-      const next = { ...prev };
+    updateManagers((currentManagers) => {
+      const nextManagers = currentManagers.map((manager) => ({ ...manager }));
+      const managerIndex = Math.max(
+        0,
+        nextManagers.findIndex((manager) => manager.id === forcedManagerId)
+      );
 
       if (forcedSlotKey && excelFiles.length === 1) {
-        next[forcedSlotKey] = excelFiles[0];
-        return next;
+        nextManagers[managerIndex][forcedSlotKey] = excelFiles[0];
+        return nextManagers;
       }
 
       for (const file of excelFiles) {
-        const slotKey = guessSlotKey(file, next);
-        next[slotKey] = file;
+        const targetManager = nextManagers[managerIndex] || nextManagers[0];
+        const slotKey = guessSlotKey(file, targetManager);
+        targetManager[slotKey] = file;
       }
 
-      return next;
+      return nextManagers;
     });
 
     if (droppedFiles.length !== excelFiles.length) {
@@ -293,47 +369,43 @@ export default function UploadPanel({ files, setFiles, onStart, isAnalyzing = fa
     event.preventDefault();
     setIsDragging(false);
     setDragTarget(null);
-    assignDroppedFiles(event.dataTransfer.files);
+    assignDroppedFiles(event.dataTransfer.files, managers[0]?.id);
   }
 
-  function handleSlotDragEnter(event, slotKey) {
+  function handleSlotDragEnter(event, targetKey) {
     event.preventDefault();
     setIsDragging(true);
-    setDragTarget(slotKey);
+    setDragTarget(targetKey);
   }
 
-  function handleSlotDragLeave(event, slotKey) {
+  function handleSlotDragLeave(event, targetKey) {
     event.preventDefault();
-
     const currentTarget = event.currentTarget;
     const relatedTarget = event.relatedTarget;
 
-    if (currentTarget && relatedTarget && currentTarget.contains(relatedTarget)) {
-      return;
-    }
-
-    if (dragTarget === slotKey) {
-      setDragTarget(null);
-    }
+    if (currentTarget && relatedTarget && currentTarget.contains(relatedTarget)) return;
+    if (dragTarget === targetKey) setDragTarget(null);
   }
 
-  function handleSlotDrop(event, slotKey) {
+  function handleSlotDrop(event, targetKey) {
     event.preventDefault();
     event.stopPropagation();
-
     setIsDragging(false);
     setDragTarget(null);
 
-    assignDroppedFiles(event.dataTransfer.files, slotKey);
+    const [managerId, slotKey] = targetKey.split("::");
+    assignDroppedFiles(event.dataTransfer.files, managerId, slotKey);
   }
 
   function clearAllFiles() {
-    setFiles({
-      dataFile: null,
-      agreementsFile: null,
-      personalDetailsFile: null,
-    });
-
+    updateManagers((currentManagers) =>
+      currentManagers.map((manager) => ({
+        ...manager,
+        dataFile: null,
+        agreementsFile: null,
+        personalDetailsFile: null,
+      }))
+    );
     setError("");
   }
 
@@ -347,18 +419,18 @@ export default function UploadPanel({ files, setFiles, onStart, isAnalyzing = fa
       <div className="uploadHeader">
         <div>
           <p className="eyebrow">Upload Center</p>
-          <h2>העלאת קבצים לניתוח</h2>
+          <h2>העלאת קבצים לפי מנהלי הסדר</h2>
           <p>
-            העלה את דוח הנתונים ודוח ההסכמים. קובץ הפרטים האישיים מומלץ כדי
-            לקבל ניתוח עשיר ומדויק יותר.
+            לכל מנהל הסדר יש דוח נתונים ודוח הסכמים משלו. אפשר להוסיף מנהלי
+            הסדר, להסיר מנהל, או לנקות קבצים של מנהל ספציפי.
           </p>
         </div>
 
         <div className="uploadProgressCard">
           <strong>
-            {progress.uploaded}/{progress.total}
+            {progress.requiredUploaded}/{progress.requiredTotal}
           </strong>
-          <span>קבצים נבחרו</span>
+          <span>קבצי חובה נבחרו</span>
           <div className="uploadProgressBar">
             <div style={{ width: `${progress.percent}%` }} />
           </div>
@@ -368,68 +440,122 @@ export default function UploadPanel({ files, setFiles, onStart, isAnalyzing = fa
       <div className="uploadGlobalDropZone">
         <div className="uploadGlobalIcon">⇪</div>
         <div>
-          <strong>אפשר לגרור לכאן את כל הקבצים יחד</strong>
+          <strong>אפשר לגרור קבצים לתוך מנהל ההסדר הרלוונטי</strong>
           <span>
-            המערכת תנסה לשייך אוטומטית לפי שם הקובץ: נתונים, הסכמים, פרטים אישיים.
+            בתוך כל ריבוע יש שלושה אזורי העלאה: נתונים, הסכמים ופרטים אישיים.
           </span>
         </div>
       </div>
 
-      <div className="uploadGrid">
-        {FILE_SLOTS.map((slot) => (
-          <DropUpload
-            key={slot.key}
-            slot={slot}
-            file={safeFiles[slot.key]}
-            isDragging={isDragging}
-            dragTarget={dragTarget}
-            onFile={(file) => setFileForSlot(slot.key, file)}
-            onRemove={() => setFileForSlot(slot.key, null)}
-            onDragEnterSlot={handleSlotDragEnter}
-            onDragLeaveSlot={handleSlotDragLeave}
-            onDropSlot={handleSlotDrop}
-          />
-        ))}
+      <div className="managerUploadList">
+        {managers.map((manager, managerIndex) => {
+          const managerComplete = Boolean(manager.dataFile && manager.agreementsFile);
+
+          return (
+            <div className="managerUploadCard" key={manager.id}>
+              <div className="managerUploadHeader">
+                <div>
+                  <span className={managerComplete ? "managerStatus ready" : "managerStatus missing"}>
+                    {managerComplete ? "מוכן לניתוח" : "חסרים קבצי חובה"}
+                  </span>
+                  <input
+                    className="managerNameInput"
+                    value={manager.name}
+                    onChange={(event) => setManagerName(manager.id, event.target.value)}
+                    placeholder={`מנהל הסדר ${managerIndex + 1}`}
+                    disabled={isAnalyzing}
+                  />
+                </div>
+
+                <div className="managerUploadActions">
+                  <button
+                    type="button"
+                    className="secondaryButton smallButton"
+                    onClick={() => clearManager(manager.id)}
+                    disabled={isAnalyzing}
+                  >
+                    נקה מנהל
+                  </button>
+
+                  <button
+                    type="button"
+                    className="dangerButton smallButton"
+                    onClick={() => removeManager(manager.id)}
+                    disabled={isAnalyzing}
+                  >
+                    הסר
+                  </button>
+                </div>
+              </div>
+
+              <div className="uploadGrid managerUploadGrid">
+                {FILE_SLOTS.map((slot) => {
+                  const targetKey = `${manager.id}::${slot.key}`;
+
+                  return (
+                    <DropUpload
+                      key={slot.key}
+                      slot={slot}
+                      file={manager[slot.key]}
+                      isDragging={isDragging}
+                      dragTarget={dragTarget}
+                      targetKey={targetKey}
+                      onFile={(file) => setFileForSlot(manager.id, slot.key, file)}
+                      onRemove={() => setFileForSlot(manager.id, slot.key, null)}
+                      onDragEnterSlot={handleSlotDragEnter}
+                      onDragLeaveSlot={handleSlotDragLeave}
+                      onDropSlot={handleSlotDrop}
+                    />
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
       </div>
 
       {error && <div className="errorBox">{error}</div>}
 
-      <div className="uploadActions">
-        <button
-          className="primaryButton"
-          disabled={!canStart || isAnalyzing}
-          onClick={onStart}
-          type="button"
-        >
-          {isAnalyzing ? "מנתח..." : "התחל ניתוח"}
-        </button>
-
+      <div className="uploadActions uploadActionsSplit">
         <button
           className="secondaryButton"
-          onClick={clearAllFiles}
+          onClick={addManager}
           type="button"
-          disabled={!progress.uploaded || isAnalyzing}
+          disabled={isAnalyzing}
         >
-          נקה קבצים
+          + הוסף מנהל הסדר
         </button>
+
+        <div className="uploadActionsLeft">
+          <button
+            className="primaryButton"
+            disabled={!canStart || isAnalyzing}
+            onClick={onStart}
+            type="button"
+          >
+            {isAnalyzing ? "מנתח..." : "התחל ניתוח"}
+          </button>
+
+          <button
+            className="secondaryButton"
+            onClick={clearAllFiles}
+            type="button"
+            disabled={!progress.uploaded || isAnalyzing}
+          >
+            נקה קבצים
+          </button>
+        </div>
       </div>
 
       {!canStart && (
         <p className="hint">
-          יש להעלות לפחות דוח נתונים ודוח הסכמים לפני התחלת הניתוח.
+          לכל מנהל הסדר פעיל יש להעלות לפחות דוח נתונים ודוח הסכמים לפני התחלת הניתוח.
         </p>
       )}
 
-      {canStart && !safeFiles.personalDetailsFile && (
-        <p className="hint">
-          קובץ פרטים אישיים לא חובה, אבל מומלץ כדי להציג שם, גיל, מצב משפחתי
-          וחיבור טוב יותר לעובדים.
-        </p>
-      )}
-
-      {canStart && safeFiles.personalDetailsFile && (
+      {canStart && (
         <p className="successHint">
-          כל הקבצים הדרושים נקלטו. אפשר להתחיל ניתוח.
+          כל מנהלי ההסדר מוכנים. אפשר להתחיל ניתוח משותף או להוסיף מנהל נוסף.
         </p>
       )}
     </section>

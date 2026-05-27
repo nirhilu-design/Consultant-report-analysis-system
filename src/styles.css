@@ -1162,3 +1162,53 @@ button:disabled {
     min-width: 0;
   }
 }
+
+/* v2026_05_27_global_manager_scope_07 */
+.global-scope-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin: 16px 0 14px;
+  padding: 14px 18px;
+  border: 1px solid #dbe6fb;
+  border-radius: 22px;
+  background: linear-gradient(135deg, #ffffff 0%, #f7faff 100%);
+  box-shadow: 0 12px 28px rgba(16, 45, 92, 0.08);
+}
+
+.global-scope-bar > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.global-scope-bar strong {
+  font-size: 15px;
+  color: #0d1f4f;
+}
+
+.global-scope-bar span,
+.global-scope-bar em {
+  font-size: 13px;
+  color: #61708e;
+  font-style: normal;
+}
+
+.global-manager-filter {
+  min-width: 260px;
+  margin-inline-start: auto;
+}
+
+@media (max-width: 900px) {
+  .global-scope-bar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .global-manager-filter {
+    width: 100%;
+    min-width: 0;
+    margin-inline-start: 0;
+  }
+}

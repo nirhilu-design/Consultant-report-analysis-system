@@ -11,56 +11,16 @@ import { buildPensionSummary } from "./parsers/buildPensionSummary.js";
 import { buildUnifiedPensionPersonalData } from "./parsers/unifiedPensionPersonalDataBuilder.js";
 import { buildPensionAnalytics } from "./unified/analyticsEngine.js";
 import { buildDataQuality } from "./unified/dataQualityEngine.js";
+import {
+  createInitialFilesState,
+  getActiveManagers,
+  getInvalidManagersForAnalysis,
+  normalizeFilesState,
+  normalizeManagers,
+  snapshotUploadSession,
+} from "./upload/uploadSessionModel.js";
 
 import "./styles.css";
-
-const DEFAULT_MANAGER_ID = "manager_1";
-
-function createManager(index = 1) {
-  return {
-    id: `manager_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-    name: `מנהל הסדר ${index}`,
-    dataFile: null,
-    agreementsFile: null,
-    personalDetailsFile: null,
-  };
-}
-
-function createInitialFilesState() {
-  return {
-    managers: [
-      {
-        id: DEFAULT_MANAGER_ID,
-        name: "מנהל הסדר 1",
-        dataFile: null,
-        agreementsFile: null,
-        personalDetailsFile: null,
-      },
-    ],
-  };
-}
-
-function normalizeManagers(filesState) {
-  if (Array.isArray(filesState?.managers) && filesState.managers.length) {
-    return filesState.managers.map((manager, index) => ({
-      id: manager.id || `manager_${index + 1}`,
-      name: manager.name || `מנהל הסדר ${index + 1}`,
-      dataFile: manager.dataFile || null,
-      agreementsFile: manager.agreementsFile || null,
-      personalDetailsFile: manager.personalDetailsFile || null,
-    }));
-  }
-
-  return [
-    {
-      id: DEFAULT_MANAGER_ID,
-      name: "מנהל הסדר 1",
-      dataFile: filesState?.dataFile || null,
-      agreementsFile: filesState?.agreementsFile || null,
-      personalDetailsFile: filesState?.personalDetailsFile || null,
-    },
-  ];
-}
 
 async function readWorkbook(file, label = "") {
   if (!file) return null;
@@ -254,7 +214,8 @@ export default function App() {
   const [analysisData, setAnalysisData] = useState(null);
   const [files, setFiles] = useState(createInitialFilesState);
 
-  const managers = useMemo(() => normalizeManagers(files), [files]);
+  const normalizedFiles = useMemo(() => normalizeFilesState(files), [files]);
+  const managers = useMemo(() => normalizeManagers(normalizedFiles), [normalizedFiles]);
 
   function resetAnalysis() {
     setAnalysisStarted(false);
@@ -404,14 +365,9 @@ export default function App() {
   async function handleStartAnalysis() {
     if (isAnalyzing) return;
 
-    const currentManagers = normalizeManagers(files);
-    const activeManagers = currentManagers.filter(
-      (manager) => manager.dataFile || manager.agreementsFile || manager.personalDetailsFile
-    );
-    const managersToAnalyze = activeManagers.length ? activeManagers : currentManagers;
-    const invalidManagers = managersToAnalyze.filter(
-      (manager) => !manager.dataFile || !manager.agreementsFile
-    );
+    const currentSession = normalizeFilesState(files);
+    const managersToAnalyze = getActiveManagers(currentSession);
+    const invalidManagers = getInvalidManagersForAnalysis(currentSession);
 
     if (invalidManagers.length) {
       setAnalysisError(createUserAnalysisError(new Error("MISSING_REQUIRED_FILES")));
@@ -424,6 +380,7 @@ export default function App() {
 
     const diagnostics = {
       warnings: [],
+      uploadSession: snapshotUploadSession(currentSession),
       managers: managersToAnalyze.map((manager) => ({
         id: manager.id,
         name: manager.name,
@@ -489,6 +446,7 @@ export default function App() {
         pensionSummary,
         managerResults,
         diagnostics,
+        uploadSession: diagnostics.uploadSession,
       });
 
       setAnalysisStarted(true);
@@ -520,7 +478,7 @@ export default function App() {
           </section>
 
           <UploadPanel
-            files={{ ...files, managers }}
+            files={{ ...normalizedFiles, managers }}
             setFiles={setFiles}
             onStart={handleStartAnalysis}
             isAnalyzing={isAnalyzing}
@@ -532,7 +490,7 @@ export default function App() {
         </>
       ) : (
         <DashboardErrorBoundary onReset={resetAnalysis}>
-          <Dashboard files={files} analysisData={analysisData} />
+          <Dashboard files={normalizedFiles} analysisData={analysisData} />
         </DashboardErrorBoundary>
       )}
     </main>

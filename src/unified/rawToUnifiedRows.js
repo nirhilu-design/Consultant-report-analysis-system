@@ -391,6 +391,24 @@ export function buildBaseUnifiedRows({
 
       issuerOriginal,
       issuerCanonical,
+      arrangementManager:
+        sourceRow.arrangementManager ||
+        sourceRow.arrangementManagerName ||
+        sourceRow.personal_arrangementManagerName ||
+        personal.arrangementManagerName ||
+        "",
+      arrangementManagerName:
+        sourceRow.arrangementManagerName ||
+        sourceRow.arrangementManager ||
+        sourceRow.personal_arrangementManagerName ||
+        personal.arrangementManagerName ||
+        "",
+      personal_arrangementManagerName:
+        sourceRow.personal_arrangementManagerName ||
+        personal.arrangementManagerName ||
+        sourceRow.arrangementManagerName ||
+        sourceRow.arrangementManager ||
+        "",
 
       policyNumber: getPolicyNumber(sourceRow),
       fundName: getFundName(sourceRow),

@@ -1,11 +1,28 @@
 // Path: src/unified/analyticsEngine.js
 
+function safeRows(rows) {
+  return Array.isArray(rows) ? rows.filter(Boolean) : [];
+}
+
+function toSafeNumber(value) {
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  if (value === null || value === undefined || value === "") return 0;
+
+  const cleaned = String(value)
+    .replace(/,/g, ".")
+    .replace(/[^0-9.-]/g, "");
+
+  const num = Number(cleaned);
+  return Number.isFinite(num) ? num : 0;
+}
+
 function accumulationBucket(v) {
-  if (!v) return "לא צוין";
-  if (v < 50_000)  return "0-50K";
-  if (v < 100_000) return "50K-100K";
-  if (v < 300_000) return "100K-300K";
-  if (v < 500_000) return "300K-500K";
+  const num = toSafeNumber(v);
+  if (!num || num <= 0) return "לא צוין";
+  if (num < 50_000)  return "0-50K";
+  if (num < 100_000) return "50K-100K";
+  if (num < 300_000) return "100K-300K";
+  if (num < 500_000) return "300K-500K";
   return "500K+";
 }
 
@@ -36,6 +53,7 @@ function hasAnyAgreement(row) {
 // ─── KPI ──────────────────────────────────────────────────────────────────────
 
 export function buildKpi(rows = []) {
+  rows = safeRows(rows);
   const audited  = rows.filter((r) => r.auditStatus !== "excluded");
   const valid    = audited.filter((r) => r.auditStatus === "valid");
   const invalid  = audited.filter((r) => r.auditStatus === "invalid");
@@ -53,13 +71,14 @@ export function buildKpi(rows = []) {
     tierPotentialRows: tier.length,
     actionItems:       invalid.length + tier.length + noAgree.length,
     complianceRate:    audited.length ? valid.length / audited.length : 0,
-    totalAccumulation: audited.reduce((s, r) => s + (r.accumulation || 0), 0),
+    totalAccumulation: audited.reduce((s, r) => s + toSafeNumber(r.accumulation), 0),
   };
 }
 
 // ─── Management Fees Audit ────────────────────────────────────────────────────
 
 export function buildManagementFeesAudit(rows = []) {
+  rows = safeRows(rows);
   const issuers = [...new Set(rows.map((r) => r.issuerCanonical || "לא מזוהה"))]
     .filter(Boolean)
     .sort((a, b) => a.localeCompare(b, "he"));
@@ -120,6 +139,7 @@ export function buildManagementFeesAudit(rows = []) {
 // ─── Insurance Track × Marital Status ────────────────────────────────────────
 
 export function buildInsuranceTrackMarital(rows = []) {
+  rows = safeRows(rows);
   const active = rows.filter((r) => r.auditStatus !== "excluded");
 
   const maritalVals = [...new Set(active.map((r) =>
@@ -164,6 +184,7 @@ export function buildInsuranceTrackMarital(rows = []) {
 // ─── Investment Track Summary ─────────────────────────────────────────────────
 
 function buildInvestmentTrackSummary(rows, trackGetter, rowLabel) {
+  rows = safeRows(rows);
   const active = rows.filter((r) => r.auditStatus !== "excluded");
   const byTrack = new Map();
 
@@ -182,7 +203,7 @@ function buildInvestmentTrackSummary(rows, trackGetter, rowLabel) {
 
     const item = byTrack.get(track);
     item["כמות פוליסות"] += 1;
-    item["סך צבירה"] += Number(row.accumulation || 0);
+    item["סך צבירה"] += toSafeNumber(row.accumulation);
 
     if (row.employeeCode || row.clientId) {
       item._employees.add(row.employeeCode || row.clientId);
@@ -201,6 +222,7 @@ function buildInvestmentTrackSummary(rows, trackGetter, rowLabel) {
 }
 
 function buildInvestmentTrackComparison(rows = []) {
+  rows = safeRows(rows);
   const active = rows.filter((r) => r.auditStatus !== "excluded");
   const byEmployee = new Map();
 
@@ -232,7 +254,7 @@ function buildInvestmentTrackComparison(rows = []) {
       item.compensationTracks.add(compensationTrack);
     }
 
-    item.accumulation += Number(row.accumulation || 0);
+    item.accumulation += toSafeNumber(row.accumulation);
     item.policies += 1;
   }
 
@@ -312,6 +334,7 @@ export function buildInvestmentTrackCompensationMarital(rows = []) {
 // ─── Accumulation Tier Analysis ───────────────────────────────────────────────
 
 export function buildAccumulationTierAnalysis(rows = []) {
+  rows = safeRows(rows);
   const BUCKETS = [
     "0-50K",
     "50K-100K",
@@ -350,6 +373,7 @@ export function buildAccumulationTierAnalysis(rows = []) {
 // ─── Action Center ────────────────────────────────────────────────────────────
 
 export function buildActionCenter(rows = []) {
+  rows = safeRows(rows);
   return rows
     .filter((r) =>
       r.auditStatus !== "excluded" &&
@@ -394,6 +418,7 @@ export function buildActionCenter(rows = []) {
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 export function buildPensionAnalytics(rows = []) {
+  rows = safeRows(rows);
   const managementAudit = buildManagementFeesAudit(rows);
   const actionCenter = buildActionCenter(rows);
   const investmentTrackComparison = buildInvestmentTrackComparison(rows);

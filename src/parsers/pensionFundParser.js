@@ -2,11 +2,11 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // PENSION FUND PARSER — קריאה ונרמול קובץ פנסיה מדוח מנהל הסדר
 //
-// Stability 04:
-//   1. הגנות סביב workbook / SheetNames / Sheets
-//   2. הגנות סביב sheet_to_json כדי שקובץ Excel פגום לא יפיל את האפליקציה
-//   3. הגנות על row שאינו Array
-//   4. שמירה על אותו schema עסקי קיים — בלי שינוי UX ובלי שינוי Audit
+// Stability 05:
+//   1. Header detection עדין: אם כותרות זוהו, נשתמש בהן; אם לא — נשארים עם מיקומי העמודות הקיימים.
+//   2. Header aliases לשמות עמודות נפוצים כדי להקטין תלות בסדר עמודות קשיח.
+//   3. המשך הגנות Stability 04 סביב workbook / sheets / rows.
+//   4. אותו schema עסקי מוחזר — בלי שינוי Dashboard / Audit / UX.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import * as XLSX from "xlsx";
@@ -67,10 +67,55 @@ const COL = {
   validityMonth: 52,
 };
 
+const HEADER_ALIASES = {
+  employeeCode: ["קוד מזהה של העובד", "קוד עובד", "מספר עובד", "עובד"],
+  issuer: ["קרן פנסיה", "חברת ביטוח", "גוף מנהל", "יצרן", "שם יצרן", "מנהל"],
+  policyNumber: ["מספר פוליסה", "מספר חשבון", "מספר עמית", "מספר קופה"],
+  fundName: ["שם קרן הפנסיה", "שם קופה", "שם מוצר", "שם תוכנית", "שם תכנית"],
+  planType: ["סוג תוכנית", "סוג תכנית", "סוג מוצר"],
+  marketingStatus: ["סטטוס שיווקי", "סטטוס לקוח", "סוג שירות"],
+  policyStatus: ["סטטוס פוליסה", "סטטוס מוצר"],
+  auditStatus: ["סטטוס", "סטטוס2", "סטטוס בדיקה", "סוג טיפול"],
+  investmentTrackNameR: [
+    "שם מסלול השקעה - תגמולים",
+    "מסלול השקעה תגמולים",
+    "מסלול תגמולים",
+    "שם מסלול תגמולים",
+  ],
+  investmentTrackNameC: [
+    "שם מסלול השקעה - פיצויים",
+    "מסלול השקעה פיצויים",
+    "מסלול פיצויים",
+    "שם מסלול פיצויים",
+  ],
+  insuranceTrack: ["מסלול ביטוח בקרן הפנסיה", "מסלול ביטוח", "כיסוי ביטוחי"],
+  survivorWaiver: ["ויתור שארים", "כיסוי שארים", "שאירים"],
+  depositFee: ["דמי ניהול מפרמיה באחוזים", "דמי ניהול מהפקדה", "דמי ניהול מהפקדות", "מהפקדה"],
+  accumulationFee: ["דמי ניהול מצבירה באחוזים", "דמי ניהול מצבירה", "דמי ניהול מהצבירה", "מצבירה"],
+  depositFeeAgreement: ["דמי ניהול מהפקדה הסכם", "הסכם מהפקדה", "דמי ניהול מפרמיה בהסכם"],
+  accumulationFeeAgreement: ["דמי ניהול מצבירה הסכם", "הסכם מצבירה", "דמי ניהול מהצבירה בהסכם"],
+  totalAccumulation: ["סהכ ערכי פידיון", "סה\"כ ערכי פידיון", "סה״כ ערכי פידיון", "ערך פדיון כולל", "צבירה", "יתרה"],
+  pensionSalary: ["שכר פנסיוני", "שכר", "משכורת", "שכר מבוטח"],
+  arrangementManager: ["מנהל הסדר", "סוכן", "סוכנות"],
+  employerGroupId: ["מספר ח.פ מעסיק", "חפ מעסיק", "מזהה מעסיק"],
+  joinDate: ["תאריך הצטרפות", "מועד הצטרפות"],
+  validityMonth: ["חודש נכונות", "חודש דיווח", "חודש תוקף"],
+};
+
 function normalizeText(value) {
   return String(value ?? "")
+    .replace(/[\u00A0\u200E\u200F]/g, " ")
     .replace(/\s+/g, " ")
     .replace(/[״"]/g, "")
+    .trim();
+}
+
+function normalizeHeader(value) {
+  return normalizeText(value)
+    .toLowerCase()
+    .replace(/[.:]/g, "")
+    .replace(/[־–—_-]/g, " ")
+    .replace(/\s+/g, " ")
     .trim();
 }
 
@@ -134,11 +179,66 @@ function getCell(row, index) {
   return Array.isArray(row) ? row[index] : null;
 }
 
-function isDataRow(row) {
+function buildHeaderIndex(headerRow) {
+  if (!Array.isArray(headerRow)) return {};
+
+  const normalizedCells = headerRow.map((cell) => normalizeHeader(cell));
+  const indexMap = {};
+
+  Object.entries(HEADER_ALIASES).forEach(([field, aliases]) => {
+    const normalizedAliases = aliases.map((alias) => normalizeHeader(alias)).filter(Boolean);
+
+    const exactIndex = normalizedCells.findIndex((cell) => normalizedAliases.includes(cell));
+    if (exactIndex >= 0) {
+      indexMap[field] = exactIndex;
+      return;
+    }
+
+    const fuzzyIndex = normalizedCells.findIndex((cell) => {
+      if (!cell || cell.length < 3) return false;
+      return normalizedAliases.some((alias) => alias && alias.length >= 3 && (cell.includes(alias) || alias.includes(cell)));
+    });
+
+    if (fuzzyIndex >= 0) indexMap[field] = fuzzyIndex;
+  });
+
+  return indexMap;
+}
+
+function detectHeaderInfo(rows) {
+  const candidates = rows.slice(0, 10).map((row, index) => ({
+    index,
+    map: buildHeaderIndex(row),
+  }));
+
+  const best = candidates
+    .map((candidate) => ({
+      ...candidate,
+      score: ["employeeCode", "issuer", "depositFee", "accumulationFee", "totalAccumulation"].filter(
+        (field) => candidate.map[field] !== undefined
+      ).length,
+    }))
+    .sort((a, b) => b.score - a.score)[0];
+
+  if (best?.score >= 2) return best;
+  return { index: 0, map: {} };
+}
+
+function getField(row, indexMap, field) {
+  const dynamicIndex = indexMap?.[field];
+  if (dynamicIndex !== undefined) {
+    const dynamicValue = getCell(row, dynamicIndex);
+    if (dynamicValue !== null && dynamicValue !== undefined && normalizeText(dynamicValue) !== "") return dynamicValue;
+  }
+
+  return getCell(row, COL[field]);
+}
+
+function isDataRow(row, indexMap) {
   if (!Array.isArray(row)) return false;
 
-  const code = getCell(row, COL.employeeCode);
-  const issuer = getCell(row, COL.issuer);
+  const code = getField(row, indexMap, "employeeCode");
+  const issuer = getField(row, indexMap, "issuer");
 
   return (
     code !== null &&
@@ -150,20 +250,20 @@ function isDataRow(row) {
   );
 }
 
-function isOperationOnly(row) {
-  return normalizeText(getCell(row, COL.auditStatus)).includes("תפעול");
+function isOperationOnly(row, indexMap) {
+  return normalizeText(getField(row, indexMap, "auditStatus")).includes("תפעול");
 }
 
-function getEmployeeCode(row) {
-  const raw = getCell(row, COL.employeeCode);
+function getEmployeeCode(row, indexMap) {
+  const raw = getField(row, indexMap, "employeeCode");
   if (raw === null || raw === undefined) return "";
   return String(typeof raw === "number" ? Math.round(raw) : raw).trim();
 }
 
-function getTotalAccumulation(row) {
-  const raw = getCell(row, COL.totalAccumulation);
+function getTotalAccumulation(row, indexMap) {
+  const raw = getField(row, indexMap, "totalAccumulation");
   if (raw === null || raw === undefined) return null;
-  if (typeof raw === "string") return null;
+  if (typeof raw === "string" && !/[0-9]/.test(raw)) return null;
   return normalizeNumber(raw);
 }
 
@@ -175,57 +275,68 @@ export function parsePensionFund(workbook) {
     normalizeText(sheetName).includes("פנסיה")
   );
 
+  const selectedSheetNames = pensionSheetNames.length ? pensionSheetNames : sheetNames;
   if (!pensionSheetNames.length) {
-    console.warn("parsePensionFund: no pension sheet was detected", { sheetNames });
-    return [];
+    console.warn("parsePensionFund: no pension sheet was detected, using all sheets as fallback", { sheetNames });
   }
 
   const allRows = [];
+  const parserWarnings = [];
 
-  pensionSheetNames.forEach((sheetName) => {
+  selectedSheetNames.forEach((sheetName) => {
     const rows = readSheetRows(workbook, sheetName);
     if (rows.length < 2) return;
 
-    rows.slice(1).forEach((row, idx) => {
-      if (!isDataRow(row)) return;
+    const headerInfo = detectHeaderInfo(rows);
+    const indexMap = headerInfo.map || {};
+    const hasDynamicHeaders = Object.keys(indexMap).length >= 2;
 
-      const operationOnly = isOperationOnly(row);
+    if (!hasDynamicHeaders) {
+      parserWarnings.push(`לא זוהו מספיק כותרות בגיליון ${sheetName}; נעשה שימוש במיקומי העמודות הקיימים.`);
+    }
+
+    rows.slice(headerInfo.index + 1).forEach((row, idx) => {
+      if (!isDataRow(row, indexMap)) return;
+
+      const operationOnly = isOperationOnly(row, indexMap);
 
       allRows.push({
         sheetName,
-        sourceRowIndex: idx + 2,
-        employeeCode: getEmployeeCode(row),
+        sourceRowIndex: headerInfo.index + idx + 2,
+        parserVersion: "stability_05",
+        parserWarnings,
+        employeeCode: getEmployeeCode(row, indexMap),
 
-        issuerOriginal: normalizeText(getCell(row, COL.issuer)),
-        manager: normalizeText(getCell(row, COL.issuer)),
+        issuerOriginal: normalizeText(getField(row, indexMap, "issuer")),
+        manager: normalizeText(getField(row, indexMap, "issuer")),
 
-        policyNumber: normalizeText(getCell(row, COL.policyNumber)),
-        fundName: normalizeText(getCell(row, COL.fundName)),
-        planType: normalizeText(getCell(row, COL.planType)),
+        policyNumber: normalizeText(getField(row, indexMap, "policyNumber")),
+        fundName: normalizeText(getField(row, indexMap, "fundName")),
+        planType: normalizeText(getField(row, indexMap, "planType")),
 
-        marketingStatus: normalizeText(getCell(row, COL.marketingStatus)),
-        policyStatus: normalizeText(getCell(row, COL.policyStatus)),
-        auditStatus: normalizeText(getCell(row, COL.auditStatus)),
+        marketingStatus: normalizeText(getField(row, indexMap, "marketingStatus")),
+        policyStatus: normalizeText(getField(row, indexMap, "policyStatus")),
+        auditStatus: normalizeText(getField(row, indexMap, "auditStatus")),
         isOperationOnly: operationOnly,
 
-        investmentTrackRewards: normalizeText(getCell(row, COL.investmentTrackNameR)),
-        investmentTrackCompensation: normalizeText(getCell(row, COL.investmentTrackNameC)),
-        insuranceTrack: normalizeText(getCell(row, COL.insuranceTrack)),
-        survivorWaiver: normalizeText(getCell(row, COL.survivorWaiver)),
+        investmentTrackRewards: normalizeText(getField(row, indexMap, "investmentTrackNameR")),
+        investmentTrackCompensation: normalizeText(getField(row, indexMap, "investmentTrackNameC")),
+        insuranceTrack: normalizeText(getField(row, indexMap, "insuranceTrack")),
+        survivorWaiver: normalizeText(getField(row, indexMap, "survivorWaiver")),
 
-        depositFee: normalizeFeePercent(getCell(row, COL.depositFee)),
-        accumulationFee: normalizeFeePercent(getCell(row, COL.accumulationFee)),
+        depositFee: normalizeFeePercent(getField(row, indexMap, "depositFee")),
+        accumulationFee: normalizeFeePercent(getField(row, indexMap, "accumulationFee")),
 
-        depositFeeAgreement: normalizeFeePercent(getCell(row, COL.depositFeeAgreement)),
-        accumulationFeeAgreement: normalizeFeePercent(getCell(row, COL.accumulationFeeAgreement)),
+        depositFeeAgreement: normalizeFeePercent(getField(row, indexMap, "depositFeeAgreement")),
+        accumulationFeeAgreement: normalizeFeePercent(getField(row, indexMap, "accumulationFeeAgreement")),
 
-        accumulation: getTotalAccumulation(row),
-        pensionSalary: normalizeNumber(getCell(row, COL.pensionSalary)),
+        accumulation: getTotalAccumulation(row, indexMap),
+        pensionSalary: normalizeNumber(getField(row, indexMap, "pensionSalary")),
 
-        arrangementManager: normalizeText(getCell(row, COL.arrangementManager)),
-        employerGroupId: normalizeText(getCell(row, COL.employerGroupId)),
-        joinDate: normalizeDate(getCell(row, COL.joinDate)),
-        validityMonth: normalizeText(getCell(row, COL.validityMonth)),
+        arrangementManager: normalizeText(getField(row, indexMap, "arrangementManager")),
+        employerGroupId: normalizeText(getField(row, indexMap, "employerGroupId")),
+        joinDate: normalizeDate(getField(row, indexMap, "joinDate")),
+        validityMonth: normalizeText(getField(row, indexMap, "validityMonth")),
 
         raw: row,
       });
@@ -233,10 +344,12 @@ export function parsePensionFund(workbook) {
   });
 
   console.log("parsePensionFund:", {
+    version: "stability_05",
     total: allRows.length,
     operationOnly: allRows.filter((r) => r.isOperationOnly).length,
     withFees: allRows.filter((r) => r.depositFee !== null || r.accumulationFee !== null).length,
     withAccum: allRows.filter((r) => r.accumulation !== null).length,
+    warnings: [...new Set(parserWarnings)],
     sampleFees: allRows
       .filter((r) => r.depositFee !== null)
       .slice(0, 3)

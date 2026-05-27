@@ -6,6 +6,7 @@ import {
   PRODUCT_TYPES,
   getProductConfig,
   createEmptyUnifiedRow,
+  ensureUnifiedRow,
 } from "./unifiedSchema.js";
 
 import {
@@ -358,7 +359,7 @@ export function buildBaseUnifiedRows({
 
     const accumulation = getAccumulation(sourceRow);
 
-    return {
+    return ensureUnifiedRow({
       ...createEmptyUnifiedRow(),
 
       brokerId: broker.brokerId || DEFAULT_BROKER.brokerId,
@@ -448,6 +449,6 @@ export function buildBaseUnifiedRows({
         : "",
 
       raw: sourceRow,
-    };
+    });
   });
 }

@@ -206,21 +206,28 @@ function DropUpload({
   );
 }
 
+const EMPTY_UPLOAD_FILES = {
+  dataFile: null,
+  agreementsFile: null,
+  personalDetailsFile: null,
+};
+
 export default function UploadPanel({ files, setFiles, onStart, isAnalyzing = false }) {
+  const safeFiles = files || EMPTY_UPLOAD_FILES;
   const [isDragging, setIsDragging] = useState(false);
   const [dragTarget, setDragTarget] = useState(null);
   const [error, setError] = useState("");
 
-  const canStart = Boolean(files.dataFile && files.agreementsFile);
+  const canStart = Boolean(safeFiles.dataFile && safeFiles.agreementsFile);
 
   const progress = useMemo(() => {
-    const uploaded = FILE_SLOTS.filter((slot) => Boolean(files[slot.key])).length;
+    const uploaded = FILE_SLOTS.filter((slot) => Boolean(safeFiles[slot.key])).length;
     return {
       uploaded,
       total: FILE_SLOTS.length,
       percent: Math.round((uploaded / FILE_SLOTS.length) * 100),
     };
-  }, [files]);
+  }, [safeFiles]);
 
   function setFileForSlot(slotKey, file) {
     setError("");
@@ -373,7 +380,7 @@ export default function UploadPanel({ files, setFiles, onStart, isAnalyzing = fa
           <DropUpload
             key={slot.key}
             slot={slot}
-            file={files[slot.key]}
+            file={safeFiles[slot.key]}
             isDragging={isDragging}
             dragTarget={dragTarget}
             onFile={(file) => setFileForSlot(slot.key, file)}
@@ -413,14 +420,14 @@ export default function UploadPanel({ files, setFiles, onStart, isAnalyzing = fa
         </p>
       )}
 
-      {canStart && !files.personalDetailsFile && (
+      {canStart && !safeFiles.personalDetailsFile && (
         <p className="hint">
           קובץ פרטים אישיים לא חובה, אבל מומלץ כדי להציג שם, גיל, מצב משפחתי
           וחיבור טוב יותר לעובדים.
         </p>
       )}
 
-      {canStart && files.personalDetailsFile && (
+      {canStart && safeFiles.personalDetailsFile && (
         <p className="successHint">
           כל הקבצים הדרושים נקלטו. אפשר להתחיל ניתוח.
         </p>

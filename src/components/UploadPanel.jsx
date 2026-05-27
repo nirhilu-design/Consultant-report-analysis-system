@@ -1,5 +1,10 @@
 // Path: src/components/UploadPanel.jsx
+// CORE HARDENING v19A
+// Purpose: keep the existing upload architecture, add safe hooks for ParsingQualityPanel,
+// and avoid creating UploadArea.jsx / UploadCard.jsx duplicates.
+
 import { useMemo, useState } from "react";
+import ParsingQualityPanel from "./ParsingQualityPanel.jsx";
 import {
   buildUploadProgress,
   canStartAnalysis,
@@ -21,12 +26,121 @@ function FileStatusIcon({ file, required }) {
   return <span className="uploadStatusIcon optional">+</span>;
 }
 
+function asArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function normalizeParsingReport(report, manager) {
+  if (!report) return null;
+
+  const score = Number(report.score ?? report.confidenceScore ?? 0);
+  const rawStatus = report.level || report.status || "";
+
+  let level = rawStatus;
+  if (rawStatus === "high") level = "excellent";
+  if (rawStatus === "medium") level = "partial";
+  if (rawStatus === "low") level = "risky";
+
+  if (!level) {
+    if (score >= 90) level = "excellent";
+    else if (score >= 75) level = "good";
+    else if (score >= 55) level = "partial";
+    else level = "risky";
+  }
+
+  const title =
+    report.title ||
+    (level === "excellent"
+      ? "קליטה מצוינת"
+      : level === "good"
+        ? "קליטה תקינה"
+        : level === "partial"
+          ? "קליטה חלקית"
+          : "קליטה דורשת בדיקה");
+
+  const detectedHeaders = asArray(report.detectedHeaders);
+  const requiredHeaders = asArray(report.requiredHeaders);
+  const missingRequiredHeaders = asArray(report.missingRequiredHeaders || report.missingHeaders);
+  const aliasMatchedHeaders = asArray(report.aliasMatchedHeaders);
+  const checks = asArray(report.checks);
+
+  const generatedWarnings = checks
+    .filter((check) => check && !check.passed && !check.optional)
+    .map((check) => `בדיקה לא עברה: ${check.label || check.key || "שלב לא מזוהה"}`);
+
+  const warnings = [...asArray(report.warnings), ...generatedWarnings].filter(Boolean);
+
+  return {
+    ...report,
+    score,
+    level,
+    title,
+    managerName: report.managerName || manager?.name || "",
+    fileName: report.fileName || manager?.dataFile?.name || "",
+    rowCount:
+      report.rowCount ??
+      report.summary?.rowCount ??
+      report.counts?.unifiedRows ??
+      report.counts?.rawPensionRows ??
+      0,
+    detectedHeaders,
+    requiredHeaders,
+    missingRequiredHeaders,
+    aliasMatchedHeaders,
+    warnings,
+    summary: {
+      ...(report.summary || {}),
+      detectedHeaderCount:
+        report.summary?.detectedHeaderCount ??
+        detectedHeaders.length ??
+        0,
+      requiredHeaderCount:
+        report.summary?.requiredHeaderCount ??
+        requiredHeaders.length ??
+        0,
+      aliasMatchedHeaderCount:
+        report.summary?.aliasMatchedHeaderCount ??
+        aliasMatchedHeaders.length ??
+        0,
+    },
+  };
+}
+
+function getManagerParsingReport(manager, managerResults = []) {
+  const directReport =
+    manager?.parsingReport ||
+    manager?.parsingConfidence ||
+    manager?.qualityReport ||
+    null;
+
+  if (directReport) return normalizeParsingReport(directReport, manager);
+
+  const result = asArray(managerResults).find((item) => {
+    if (!item || !manager) return false;
+    return (
+      item.managerId === manager.id ||
+      item.id === manager.id ||
+      item.managerName === manager.name ||
+      item.name === manager.name
+    );
+  });
+
+  const resultReport =
+    result?.parsingReport ||
+    result?.parsingConfidence ||
+    result?.qualityReport ||
+    null;
+
+  return normalizeParsingReport(resultReport, manager);
+}
+
 function DropUpload({
   slot,
   file,
   isDragging,
   dragTarget,
   targetKey,
+  disabled,
   onFile,
   onRemove,
   onDragEnterSlot,
@@ -42,20 +156,28 @@ function DropUpload({
         file ? "hasFile" : "",
         active ? "dragActive" : "",
         slot.required ? "requiredSlot" : "optionalSlot",
+        disabled ? "disabledUploadBox" : "",
       ]
         .filter(Boolean)
         .join(" ")}
-      onDragEnter={(event) => onDragEnterSlot(event, targetKey)}
+      onDragEnter={(event) => {
+        if (!disabled) onDragEnterSlot(event, targetKey);
+      }}
       onDragOver={(event) => {
         event.preventDefault();
-        onDragEnterSlot(event, targetKey);
+        if (!disabled) onDragEnterSlot(event, targetKey);
       }}
-      onDragLeave={(event) => onDragLeaveSlot(event, targetKey)}
-      onDrop={(event) => onDropSlot(event, targetKey)}
+      onDragLeave={(event) => {
+        if (!disabled) onDragLeaveSlot(event, targetKey);
+      }}
+      onDrop={(event) => {
+        if (!disabled) onDropSlot(event, targetKey);
+      }}
     >
       <input
         type="file"
         accept=".xlsx,.xls"
+        disabled={disabled}
         onChange={(event) => {
           onFile(event.target.files?.[0] || null);
           event.currentTarget.value = "";
@@ -88,6 +210,7 @@ function DropUpload({
           <button
             type="button"
             className="removeFileButton"
+            disabled={disabled}
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
@@ -104,7 +227,13 @@ function DropUpload({
   );
 }
 
-export default function UploadPanel({ files, setFiles, onStart, isAnalyzing = false }) {
+export default function UploadPanel({
+  files,
+  setFiles,
+  onStart,
+  isAnalyzing = false,
+  managerResults = [],
+}) {
   const normalizedFiles = normalizeFilesState(files);
   const managers = normalizeManagers(normalizedFiles);
   const [isDragging, setIsDragging] = useState(false);
@@ -143,6 +272,16 @@ export default function UploadPanel({ files, setFiles, onStart, isAnalyzing = fa
     );
   }
 
+  function clearManagerParsingState(manager) {
+    return {
+      ...manager,
+      parsingReport: null,
+      parsingConfidence: null,
+      qualityReport: null,
+      parsingError: null,
+    };
+  }
+
   function setFileForSlot(managerId, slotKey, file) {
     setError("");
 
@@ -154,7 +293,7 @@ export default function UploadPanel({ files, setFiles, onStart, isAnalyzing = fa
     updateManagers((currentManagers) =>
       currentManagers.map((manager) =>
         manager.id === managerId
-          ? { ...manager, [slotKey]: file }
+          ? clearManagerParsingState({ ...manager, [slotKey]: file })
           : manager
       )
     );
@@ -171,12 +310,14 @@ export default function UploadPanel({ files, setFiles, onStart, isAnalyzing = fa
   function removeManager(managerId) {
     updateManagers((currentManagers) => {
       if (currentManagers.length <= 1) {
-        return currentManagers.map((manager) => ({
-          ...manager,
-          dataFile: null,
-          agreementsFile: null,
-          personalDetailsFile: null,
-        }));
+        return currentManagers.map((manager) =>
+          clearManagerParsingState({
+            ...manager,
+            dataFile: null,
+            agreementsFile: null,
+            personalDetailsFile: null,
+          })
+        );
       }
 
       return currentManagers.filter((manager) => manager.id !== managerId);
@@ -188,12 +329,12 @@ export default function UploadPanel({ files, setFiles, onStart, isAnalyzing = fa
     updateManagers((currentManagers) =>
       currentManagers.map((manager) =>
         manager.id === managerId
-          ? {
+          ? clearManagerParsingState({
               ...manager,
               dataFile: null,
               agreementsFile: null,
               personalDetailsFile: null,
-            }
+            })
           : manager
       )
     );
@@ -215,13 +356,14 @@ export default function UploadPanel({ files, setFiles, onStart, isAnalyzing = fa
 
     updateManagers((currentManagers) => {
       const nextManagers = currentManagers.map((manager) => ({ ...manager }));
-      const managerIndex = Math.max(
-        0,
-        nextManagers.findIndex((manager) => manager.id === forcedManagerId)
-      );
+      const foundIndex = nextManagers.findIndex((manager) => manager.id === forcedManagerId);
+      const managerIndex = foundIndex >= 0 ? foundIndex : 0;
 
       if (forcedSlotKey && excelFiles.length === 1) {
-        nextManagers[managerIndex][forcedSlotKey] = excelFiles[0];
+        nextManagers[managerIndex] = clearManagerParsingState({
+          ...nextManagers[managerIndex],
+          [forcedSlotKey]: excelFiles[0],
+        });
         return nextManagers;
       }
 
@@ -229,6 +371,7 @@ export default function UploadPanel({ files, setFiles, onStart, isAnalyzing = fa
         const targetManager = nextManagers[managerIndex] || nextManagers[0];
         const slotKey = guessSlotKey(file, targetManager);
         targetManager[slotKey] = file;
+        Object.assign(targetManager, clearManagerParsingState(targetManager));
       }
 
       return nextManagers;
@@ -241,7 +384,7 @@ export default function UploadPanel({ files, setFiles, onStart, isAnalyzing = fa
 
   function handlePageDragOver(event) {
     event.preventDefault();
-    setIsDragging(true);
+    if (!isAnalyzing) setIsDragging(true);
   }
 
   function handlePageDragLeave(event) {
@@ -255,11 +398,14 @@ export default function UploadPanel({ files, setFiles, onStart, isAnalyzing = fa
     event.preventDefault();
     setIsDragging(false);
     setDragTarget(null);
+
+    if (isAnalyzing) return;
     assignDroppedFiles(event.dataTransfer.files, managers[0]?.id);
   }
 
   function handleSlotDragEnter(event, targetKey) {
     event.preventDefault();
+    if (isAnalyzing) return;
     setIsDragging(true);
     setDragTarget(targetKey);
   }
@@ -279,18 +425,22 @@ export default function UploadPanel({ files, setFiles, onStart, isAnalyzing = fa
     setIsDragging(false);
     setDragTarget(null);
 
+    if (isAnalyzing) return;
+
     const [managerId, slotKey] = targetKey.split("::");
     assignDroppedFiles(event.dataTransfer.files, managerId, slotKey);
   }
 
   function clearAllFiles() {
     updateManagers((currentManagers) =>
-      currentManagers.map((manager) => ({
-        ...manager,
-        dataFile: null,
-        agreementsFile: null,
-        personalDetailsFile: null,
-      }))
+      currentManagers.map((manager) =>
+        clearManagerParsingState({
+          ...manager,
+          dataFile: null,
+          agreementsFile: null,
+          personalDetailsFile: null,
+        })
+      )
     );
     setError("");
   }
@@ -336,6 +486,7 @@ export default function UploadPanel({ files, setFiles, onStart, isAnalyzing = fa
       <div className="managerUploadList">
         {managers.map((manager, managerIndex) => {
           const managerComplete = hasRequiredFiles(manager);
+          const parsingReport = getManagerParsingReport(manager, managerResults);
 
           return (
             <div className="managerUploadCard" key={manager.id}>
@@ -386,6 +537,7 @@ export default function UploadPanel({ files, setFiles, onStart, isAnalyzing = fa
                       isDragging={isDragging}
                       dragTarget={dragTarget}
                       targetKey={targetKey}
+                      disabled={isAnalyzing}
                       onFile={(file) => setFileForSlot(manager.id, slot.key, file)}
                       onRemove={() => setFileForSlot(manager.id, slot.key, null)}
                       onDragEnterSlot={handleSlotDragEnter}
@@ -395,6 +547,10 @@ export default function UploadPanel({ files, setFiles, onStart, isAnalyzing = fa
                   );
                 })}
               </div>
+
+              {parsingReport && (
+                <ParsingQualityPanel report={parsingReport} />
+              )}
             </div>
           );
         })}

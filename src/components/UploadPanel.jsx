@@ -1,10 +1,15 @@
 // Path: src/components/UploadPanel.jsx
-// CORE HARDENING v19A
-// Purpose: keep the existing upload architecture, add safe hooks for ParsingQualityPanel,
-// and avoid creating UploadArea.jsx / UploadCard.jsx duplicates.
+// CORE HARDENING v24
+// Full file replacement — Advanced Upload Validation / Pre-Backend Readiness
+//
+// Notes:
+// - No backend dependency.
+// - No localStorage/session persistence.
+// - Keeps current architecture: managers + FILE_SLOTS.
+// - Does not change Dashboard or analytics.
+// - Adds upload validation summary per manager.
 
 import { useMemo, useState } from "react";
-import ParsingQualityPanel from "./ParsingQualityPanel.jsx";
 import {
   buildUploadProgress,
   canStartAnalysis,
@@ -19,6 +24,7 @@ import {
   guessSlotKey,
   isExcelFile,
 } from "../upload/uploadFileSlots.js";
+import UploadStatusSummary from "./UploadStatusSummary.jsx";
 
 function FileStatusIcon({ file, required }) {
   if (file) return <span className="uploadStatusIcon success">✓</span>;
@@ -26,121 +32,121 @@ function FileStatusIcon({ file, required }) {
   return <span className="uploadStatusIcon optional">+</span>;
 }
 
-function asArray(value) {
-  return Array.isArray(value) ? value : [];
+function getFileExtension(fileName = "") {
+  const parts = String(fileName).toLowerCase().split(".");
+  return parts.length > 1 ? `.${parts.pop()}` : "";
 }
 
-function normalizeParsingReport(report, manager) {
-  if (!report) return null;
-
-  const score = Number(report.score ?? report.confidenceScore ?? 0);
-  const rawStatus = report.level || report.status || "";
-
-  let level = rawStatus;
-  if (rawStatus === "high") level = "excellent";
-  if (rawStatus === "medium") level = "partial";
-  if (rawStatus === "low") level = "risky";
-
-  if (!level) {
-    if (score >= 90) level = "excellent";
-    else if (score >= 75) level = "good";
-    else if (score >= 55) level = "partial";
-    else level = "risky";
+function validateFileObject(file) {
+  if (!file) {
+    return {
+      valid: false,
+      status: "missing",
+      errors: ["לא נבחר קובץ."],
+    };
   }
 
-  const title =
-    report.title ||
-    (level === "excellent"
-      ? "קליטה מצוינת"
-      : level === "good"
-        ? "קליטה תקינה"
-        : level === "partial"
-          ? "קליטה חלקית"
-          : "קליטה דורשת בדיקה");
+  const errors = [];
 
-  const detectedHeaders = asArray(report.detectedHeaders);
-  const requiredHeaders = asArray(report.requiredHeaders);
-  const missingRequiredHeaders = asArray(report.missingRequiredHeaders || report.missingHeaders);
-  const aliasMatchedHeaders = asArray(report.aliasMatchedHeaders);
-  const checks = asArray(report.checks);
+  if (!isExcelFile(file)) {
+    errors.push("סוג הקובץ אינו נתמך. יש להעלות xlsx או xls בלבד.");
+  }
 
-  const generatedWarnings = checks
-    .filter((check) => check && !check.passed && !check.optional)
-    .map((check) => `בדיקה לא עברה: ${check.label || check.key || "שלב לא מזוהה"}`);
-
-  const warnings = [...asArray(report.warnings), ...generatedWarnings].filter(Boolean);
+  if (Number(file.size || 0) <= 0) {
+    errors.push("הקובץ ריק או לא תקין.");
+  }
 
   return {
-    ...report,
-    score,
-    level,
-    title,
-    managerName: report.managerName || manager?.name || "",
-    fileName: report.fileName || manager?.dataFile?.name || "",
-    rowCount:
-      report.rowCount ??
-      report.summary?.rowCount ??
-      report.counts?.unifiedRows ??
-      report.counts?.rawPensionRows ??
-      0,
-    detectedHeaders,
-    requiredHeaders,
-    missingRequiredHeaders,
-    aliasMatchedHeaders,
-    warnings,
-    summary: {
-      ...(report.summary || {}),
-      detectedHeaderCount:
-        report.summary?.detectedHeaderCount ??
-        detectedHeaders.length ??
-        0,
-      requiredHeaderCount:
-        report.summary?.requiredHeaderCount ??
-        requiredHeaders.length ??
-        0,
-      aliasMatchedHeaderCount:
-        report.summary?.aliasMatchedHeaderCount ??
-        aliasMatchedHeaders.length ??
-        0,
-    },
+    valid: errors.length === 0,
+    status: errors.length ? "invalid" : "ready",
+    errors,
+    extension: getFileExtension(file.name),
+    fileName: file.name,
+    fileSize: file.size,
   };
 }
 
-function getManagerParsingReport(manager, managerResults = []) {
-  const directReport =
-    manager?.parsingReport ||
-    manager?.parsingConfidence ||
-    manager?.qualityReport ||
-    null;
+function validateManagerFiles(manager) {
+  const slotResults = FILE_SLOTS.map((slot) => {
+    const file = manager?.[slot.key] || null;
+    const fileValidation = validateFileObject(file);
 
-  if (directReport) return normalizeParsingReport(directReport, manager);
+    const valid = slot.required
+      ? fileValidation.valid
+      : !file || fileValidation.valid;
 
-  const result = asArray(managerResults).find((item) => {
-    if (!item || !manager) return false;
-    return (
-      item.managerId === manager.id ||
-      item.id === manager.id ||
-      item.managerName === manager.name ||
-      item.name === manager.name
-    );
+    const errors = [];
+
+    if (slot.required && !file) {
+      errors.push(`חסר ${slot.title}.`);
+    }
+
+    if (file && fileValidation.errors.length) {
+      errors.push(...fileValidation.errors);
+    }
+
+    return {
+      key: slot.key,
+      title: slot.title,
+      required: Boolean(slot.required),
+      hasFile: Boolean(file),
+      valid,
+      status: valid ? (file ? "ready" : "optional") : file ? "invalid" : "missing",
+      errors,
+      fileName: file?.name || "",
+      fileSize: file?.size || 0,
+    };
   });
 
-  const resultReport =
-    result?.parsingReport ||
-    result?.parsingConfidence ||
-    result?.qualityReport ||
-    null;
+  const requiredSlots = slotResults.filter((slot) => slot.required);
+  const requiredReady = requiredSlots.filter((slot) => slot.valid && slot.hasFile).length;
+  const invalidSlots = slotResults.filter((slot) => !slot.valid);
+  const uploadedSlots = slotResults.filter((slot) => slot.hasFile);
 
-  return normalizeParsingReport(resultReport, manager);
+  let status = "EMPTY";
+  let label = "טרם הועלו קבצים";
+  let tone = "neutral";
+
+  if (invalidSlots.length === 0 && requiredReady === requiredSlots.length) {
+    status = "READY";
+    label = "מוכן לניתוח";
+    tone = "ready";
+  } else if (uploadedSlots.length > 0) {
+    status = "PARTIAL";
+    label = "חסרים קבצי חובה";
+    tone = "partial";
+  } else {
+    status = "EMPTY";
+    label = "ממתין לקבצים";
+    tone = "neutral";
+  }
+
+  if (invalidSlots.some((slot) => slot.hasFile)) {
+    status = "INVALID";
+    label = "יש קובץ לא תקין";
+    tone = "invalid";
+  }
+
+  return {
+    valid: status === "READY",
+    status,
+    label,
+    tone,
+    slotResults,
+    requiredReady,
+    requiredTotal: requiredSlots.length,
+    uploadedCount: uploadedSlots.length,
+    invalidCount: invalidSlots.length,
+  };
 }
 
 function DropUpload({
   slot,
   file,
+  validation,
   isDragging,
   dragTarget,
   targetKey,
-  disabled,
   onFile,
   onRemove,
   onDragEnterSlot,
@@ -148,6 +154,7 @@ function DropUpload({
   onDropSlot,
 }) {
   const active = isDragging && dragTarget === targetKey;
+  const hasErrors = Boolean(validation?.errors?.length);
 
   return (
     <label
@@ -156,28 +163,21 @@ function DropUpload({
         file ? "hasFile" : "",
         active ? "dragActive" : "",
         slot.required ? "requiredSlot" : "optionalSlot",
-        disabled ? "disabledUploadBox" : "",
+        hasErrors ? "uploadBoxInvalid" : "",
       ]
         .filter(Boolean)
         .join(" ")}
-      onDragEnter={(event) => {
-        if (!disabled) onDragEnterSlot(event, targetKey);
-      }}
+      onDragEnter={(event) => onDragEnterSlot(event, targetKey)}
       onDragOver={(event) => {
         event.preventDefault();
-        if (!disabled) onDragEnterSlot(event, targetKey);
+        onDragEnterSlot(event, targetKey);
       }}
-      onDragLeave={(event) => {
-        if (!disabled) onDragLeaveSlot(event, targetKey);
-      }}
-      onDrop={(event) => {
-        if (!disabled) onDropSlot(event, targetKey);
-      }}
+      onDragLeave={(event) => onDragLeaveSlot(event, targetKey)}
+      onDrop={(event) => onDropSlot(event, targetKey)}
     >
       <input
         type="file"
         accept=".xlsx,.xls"
-        disabled={disabled}
         onChange={(event) => {
           onFile(event.target.files?.[0] || null);
           event.currentTarget.value = "";
@@ -210,7 +210,6 @@ function DropUpload({
           <button
             type="button"
             className="removeFileButton"
-            disabled={disabled}
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
@@ -223,17 +222,19 @@ function DropUpload({
       ) : (
         <p className="uploadHint">Excel בלבד · xlsx / xls</p>
       )}
+
+      {hasErrors && (
+        <div className="uploadSlotErrors">
+          {validation.errors.map((message, index) => (
+            <span key={`${slot.key}-error-${index}`}>{message}</span>
+          ))}
+        </div>
+      )}
     </label>
   );
 }
 
-export default function UploadPanel({
-  files,
-  setFiles,
-  onStart,
-  isAnalyzing = false,
-  managerResults = [],
-}) {
+export default function UploadPanel({ files, setFiles, onStart, isAnalyzing = false }) {
   const normalizedFiles = normalizeFilesState(files);
   const managers = normalizeManagers(normalizedFiles);
   const [isDragging, setIsDragging] = useState(false);
@@ -244,7 +245,22 @@ export default function UploadPanel({
     return buildUploadProgress(normalizedFiles, FILE_SLOTS);
   }, [normalizedFiles]);
 
-  const canStart = canStartAnalysis(normalizedFiles);
+  const managerValidations = useMemo(() => {
+    return managers.map((manager) => ({
+      managerId: manager.id,
+      validation: validateManagerFiles(manager),
+    }));
+  }, [managers]);
+
+  const hasInvalidUploadedFiles = managerValidations.some(({ validation }) => {
+    return validation.status === "INVALID";
+  });
+
+  const canStart = canStartAnalysis(normalizedFiles) && !hasInvalidUploadedFiles;
+
+  function getManagerValidation(managerId) {
+    return managerValidations.find((item) => item.managerId === managerId)?.validation;
+  }
 
   function updateManagers(updater) {
     setFiles((prev) => {
@@ -272,16 +288,6 @@ export default function UploadPanel({
     );
   }
 
-  function clearManagerParsingState(manager) {
-    return {
-      ...manager,
-      parsingReport: null,
-      parsingConfidence: null,
-      qualityReport: null,
-      parsingError: null,
-    };
-  }
-
   function setFileForSlot(managerId, slotKey, file) {
     setError("");
 
@@ -290,10 +296,15 @@ export default function UploadPanel({
       return;
     }
 
+    if (file && Number(file.size || 0) <= 0) {
+      setError("הקובץ שנבחר ריק או לא תקין.");
+      return;
+    }
+
     updateManagers((currentManagers) =>
       currentManagers.map((manager) =>
         manager.id === managerId
-          ? clearManagerParsingState({ ...manager, [slotKey]: file })
+          ? { ...manager, [slotKey]: file }
           : manager
       )
     );
@@ -310,14 +321,12 @@ export default function UploadPanel({
   function removeManager(managerId) {
     updateManagers((currentManagers) => {
       if (currentManagers.length <= 1) {
-        return currentManagers.map((manager) =>
-          clearManagerParsingState({
-            ...manager,
-            dataFile: null,
-            agreementsFile: null,
-            personalDetailsFile: null,
-          })
-        );
+        return currentManagers.map((manager) => ({
+          ...manager,
+          dataFile: null,
+          agreementsFile: null,
+          personalDetailsFile: null,
+        }));
       }
 
       return currentManagers.filter((manager) => manager.id !== managerId);
@@ -329,12 +338,12 @@ export default function UploadPanel({
     updateManagers((currentManagers) =>
       currentManagers.map((manager) =>
         manager.id === managerId
-          ? clearManagerParsingState({
+          ? {
               ...manager,
               dataFile: null,
               agreementsFile: null,
               personalDetailsFile: null,
-            })
+            }
           : manager
       )
     );
@@ -344,10 +353,16 @@ export default function UploadPanel({
   function assignDroppedFiles(fileList, forcedManagerId = null, forcedSlotKey = null) {
     const droppedFiles = Array.from(fileList || []);
     const excelFiles = droppedFiles.filter(isExcelFile);
+    const emptyFiles = droppedFiles.filter((file) => Number(file.size || 0) <= 0);
 
     setError("");
 
     if (!droppedFiles.length) return;
+
+    if (emptyFiles.length) {
+      setError("חלק מהקבצים לא נקלטו כי הם ריקים או לא תקינים.");
+      return;
+    }
 
     if (!excelFiles.length) {
       setError("לא זוהה קובץ Excel. יש להעלות קובצי xlsx או xls בלבד.");
@@ -356,14 +371,11 @@ export default function UploadPanel({
 
     updateManagers((currentManagers) => {
       const nextManagers = currentManagers.map((manager) => ({ ...manager }));
-      const foundIndex = nextManagers.findIndex((manager) => manager.id === forcedManagerId);
-      const managerIndex = foundIndex >= 0 ? foundIndex : 0;
+      const foundManagerIndex = nextManagers.findIndex((manager) => manager.id === forcedManagerId);
+      const managerIndex = foundManagerIndex >= 0 ? foundManagerIndex : 0;
 
       if (forcedSlotKey && excelFiles.length === 1) {
-        nextManagers[managerIndex] = clearManagerParsingState({
-          ...nextManagers[managerIndex],
-          [forcedSlotKey]: excelFiles[0],
-        });
+        nextManagers[managerIndex][forcedSlotKey] = excelFiles[0];
         return nextManagers;
       }
 
@@ -371,7 +383,6 @@ export default function UploadPanel({
         const targetManager = nextManagers[managerIndex] || nextManagers[0];
         const slotKey = guessSlotKey(file, targetManager);
         targetManager[slotKey] = file;
-        Object.assign(targetManager, clearManagerParsingState(targetManager));
       }
 
       return nextManagers;
@@ -384,7 +395,7 @@ export default function UploadPanel({
 
   function handlePageDragOver(event) {
     event.preventDefault();
-    if (!isAnalyzing) setIsDragging(true);
+    setIsDragging(true);
   }
 
   function handlePageDragLeave(event) {
@@ -398,14 +409,11 @@ export default function UploadPanel({
     event.preventDefault();
     setIsDragging(false);
     setDragTarget(null);
-
-    if (isAnalyzing) return;
     assignDroppedFiles(event.dataTransfer.files, managers[0]?.id);
   }
 
   function handleSlotDragEnter(event, targetKey) {
     event.preventDefault();
-    if (isAnalyzing) return;
     setIsDragging(true);
     setDragTarget(targetKey);
   }
@@ -425,24 +433,36 @@ export default function UploadPanel({
     setIsDragging(false);
     setDragTarget(null);
 
-    if (isAnalyzing) return;
-
     const [managerId, slotKey] = targetKey.split("::");
     assignDroppedFiles(event.dataTransfer.files, managerId, slotKey);
   }
 
   function clearAllFiles() {
     updateManagers((currentManagers) =>
-      currentManagers.map((manager) =>
-        clearManagerParsingState({
-          ...manager,
-          dataFile: null,
-          agreementsFile: null,
-          personalDetailsFile: null,
-        })
-      )
+      currentManagers.map((manager) => ({
+        ...manager,
+        dataFile: null,
+        agreementsFile: null,
+        personalDetailsFile: null,
+      }))
     );
     setError("");
+  }
+
+  function handleStartAnalysis() {
+    setError("");
+
+    if (hasInvalidUploadedFiles) {
+      setError("יש קובץ לא תקין. יש להסיר אותו או להעלות קובץ Excel תקין לפני התחלת הניתוח.");
+      return;
+    }
+
+    if (!canStartAnalysis(normalizedFiles)) {
+      setError("חסרים קבצי חובה. לכל מנהל הסדר פעיל נדרש דוח נתונים ודוח הסכמים.");
+      return;
+    }
+
+    onStart();
   }
 
   return (
@@ -485,15 +505,15 @@ export default function UploadPanel({
 
       <div className="managerUploadList">
         {managers.map((manager, managerIndex) => {
-          const managerComplete = hasRequiredFiles(manager);
-          const parsingReport = getManagerParsingReport(manager, managerResults);
+          const managerValidation = getManagerValidation(manager.id);
+          const managerComplete = hasRequiredFiles(manager) && managerValidation?.status !== "INVALID";
 
           return (
             <div className="managerUploadCard" key={manager.id}>
               <div className="managerUploadHeader">
                 <div>
                   <span className={managerComplete ? "managerStatus ready" : "managerStatus missing"}>
-                    {managerComplete ? "מוכן לניתוח" : "חסרים קבצי חובה"}
+                    {managerComplete ? "מוכן לניתוח" : managerValidation?.label || "חסרים קבצי חובה"}
                   </span>
                   <input
                     className="managerNameInput"
@@ -525,19 +545,24 @@ export default function UploadPanel({
                 </div>
               </div>
 
+              <UploadStatusSummary validation={managerValidation} />
+
               <div className="uploadGrid managerUploadGrid">
                 {FILE_SLOTS.map((slot) => {
                   const targetKey = `${manager.id}::${slot.key}`;
+                  const slotValidation = managerValidation?.slotResults?.find(
+                    (item) => item.key === slot.key
+                  );
 
                   return (
                     <DropUpload
                       key={slot.key}
                       slot={slot}
                       file={manager[slot.key]}
+                      validation={slotValidation}
                       isDragging={isDragging}
                       dragTarget={dragTarget}
                       targetKey={targetKey}
-                      disabled={isAnalyzing}
                       onFile={(file) => setFileForSlot(manager.id, slot.key, file)}
                       onRemove={() => setFileForSlot(manager.id, slot.key, null)}
                       onDragEnterSlot={handleSlotDragEnter}
@@ -547,10 +572,6 @@ export default function UploadPanel({
                   );
                 })}
               </div>
-
-              {parsingReport && (
-                <ParsingQualityPanel report={parsingReport} />
-              )}
             </div>
           );
         })}
@@ -572,7 +593,7 @@ export default function UploadPanel({
           <button
             className="primaryButton"
             disabled={!canStart || isAnalyzing}
-            onClick={onStart}
+            onClick={handleStartAnalysis}
             type="button"
           >
             {isAnalyzing ? "מנתח..." : "התחל ניתוח"}

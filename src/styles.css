@@ -1756,3 +1756,198 @@ body,
     flex-direction: column;
   }
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   CORE HARDENING v26C — Product Mode Selector + Product Preview
+───────────────────────────────────────────────────────────────────────────── */
+
+.productModeSelector {
+  margin: 18px 0;
+  padding: 16px;
+  border: 1px solid #dbe3ef;
+  border-radius: 18px;
+  background: #f8fafc;
+  font-family: Calibri, Arial, sans-serif;
+  direction: rtl;
+}
+
+.productModeSelectorHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+
+.productModeSelectorHeader strong {
+  display: block;
+  color: #14213d;
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.productModeSelectorHeader span {
+  color: #64748b;
+  font-size: 13px;
+}
+
+.productModeOptions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.productModeOption {
+  border: 1px solid #dbe3ef;
+  background: #ffffff;
+  border-radius: 16px;
+  padding: 14px;
+  text-align: right;
+  cursor: pointer;
+  font-family: Calibri, Arial, sans-serif;
+  transition: 0.18s ease;
+}
+
+.productModeOption:hover {
+  border-color: #94a3b8;
+  transform: translateY(-1px);
+}
+
+.productModeOption.active {
+  border-color: #1d4ed8;
+  background: #eff6ff;
+  box-shadow: 0 10px 24px rgba(29, 78, 216, 0.08);
+}
+
+.productModeOption strong {
+  display: block;
+  color: #14213d;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.productModeOption span {
+  display: block;
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.productPreviewPage {
+  display: grid;
+  gap: 18px;
+}
+
+.productPreviewHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 22px;
+  border-radius: 24px;
+  background: linear-gradient(135deg, #eff6ff, #ffffff);
+  border: 1px solid #dbeafe;
+}
+
+.productPreviewHeader h1 {
+  margin: 4px 0 6px;
+  color: #14213d;
+  font-size: 28px;
+}
+
+.productPreviewHeader p {
+  margin: 0;
+  color: #475569;
+  max-width: 760px;
+}
+
+.productPreviewKpiGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.productPreviewKpiGrid article {
+  padding: 16px;
+  border-radius: 18px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 12px 26px rgba(15, 23, 42, 0.05);
+}
+
+.productPreviewKpiGrid span {
+  display: block;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.productPreviewKpiGrid strong {
+  display: block;
+  margin-top: 6px;
+  color: #14213d;
+  font-size: 22px;
+  font-weight: 900;
+}
+
+.productPreviewGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.chipList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chipList span {
+  display: inline-flex;
+  align-items: center;
+  padding: 7px 10px;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #1e3a8a;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.warningList {
+  margin: 0;
+  padding: 0 18px 0 0;
+  color: #92400e;
+}
+
+.warningList li {
+  margin-bottom: 6px;
+}
+
+.tableScroll {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.productRowsTable {
+  min-width: 920px;
+}
+
+.productRowsTable th {
+  white-space: nowrap;
+}
+
+.productRowsTable td {
+  vertical-align: top;
+}
+
+@media (max-width: 900px) {
+  .productModeOptions,
+  .productPreviewKpiGrid,
+  .productPreviewGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .productPreviewHeader,
+  .productModeSelectorHeader {
+    flex-direction: column;
+  }
+}

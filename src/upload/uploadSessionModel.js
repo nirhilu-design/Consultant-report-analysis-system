@@ -1,10 +1,24 @@
 // Path: src/upload/uploadSessionModel.js
+// CORE HARDENING v26C
+// Upload Session Model with Product Mode support
 
 export const DEFAULT_MANAGER_ID = "manager_1";
+
+export const PRODUCT_MODES = {
+  PENSION: "pension",
+  HISHTALMUT: "hishtalmut",
+};
+
+export const DEFAULT_PRODUCT_MODE = PRODUCT_MODES.PENSION;
 
 export const FILE_SLOT_KEYS = ["dataFile", "agreementsFile", "personalDetailsFile"];
 
 export const REQUIRED_FILE_SLOT_KEYS = ["dataFile", "agreementsFile"];
+
+export function normalizeProductMode(productMode) {
+  if (productMode === PRODUCT_MODES.HISHTALMUT) return PRODUCT_MODES.HISHTALMUT;
+  return PRODUCT_MODES.PENSION;
+}
 
 export function createManager(index = 1) {
   return {
@@ -30,16 +44,17 @@ export function createDefaultManager() {
   };
 }
 
+export function createUploadSessionId() {
+  return `upload_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
 export function createInitialFilesState() {
   return {
     uploadSessionId: createUploadSessionId(),
-    uploadSessionVersion: "CORE_HARDENING_v12",
+    uploadSessionVersion: "CORE_HARDENING_v26C",
+    productMode: DEFAULT_PRODUCT_MODE,
     managers: [createDefaultManager()],
   };
-}
-
-export function createUploadSessionId() {
-  return `upload_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
 export function hasAnyFile(manager) {
@@ -93,8 +108,18 @@ export function normalizeManagers(filesState) {
 export function normalizeFilesState(filesState) {
   return {
     uploadSessionId: filesState?.uploadSessionId || createUploadSessionId(),
-    uploadSessionVersion: filesState?.uploadSessionVersion || "CORE_HARDENING_v12",
+    uploadSessionVersion: filesState?.uploadSessionVersion || "CORE_HARDENING_v26C",
+    productMode: normalizeProductMode(filesState?.productMode),
     managers: normalizeManagers(filesState),
+  };
+}
+
+export function setProductModeOnFilesState(filesState, productMode) {
+  const normalized = normalizeFilesState(filesState);
+
+  return {
+    ...normalized,
+    productMode: normalizeProductMode(productMode),
   };
 }
 
@@ -156,6 +181,7 @@ export function snapshotUploadSession(filesState) {
   return {
     id: normalized.uploadSessionId,
     version: normalized.uploadSessionVersion,
+    productMode: normalized.productMode,
     managerCount: normalized.managers.length,
     activeManagerCount: activeManagers.length,
     readyManagerCount: normalized.managers.filter(hasRequiredFiles).length,

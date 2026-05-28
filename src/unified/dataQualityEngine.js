@@ -5,6 +5,7 @@ import {
   ensureUnifiedRows,
   getProductConfig,
 } from "./unifiedSchema.js";
+import { buildUnifiedValidationReport } from "./unifiedValidationRules.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SMART PENSION DATA VALIDATION — בדיקת תקינות נתונים פנסיונית
@@ -238,6 +239,27 @@ export function buildDataQuality(rows = []) {
   rows = safeRows(rows);
   const issues = [];
   const activeRows = rows.filter((r) => !isExcludedOrOperationOnly(r));
+  const validationReport = buildUnifiedValidationReport(rows);
+
+  validationReport.issues.forEach((validationIssue) => {
+    issues.push({
+      rowNumber: validationIssue.rowNumber || "",
+      employeeCode: validationIssue.employeeCode || "",
+      clientName: validationIssue.clientName || "",
+      issuer: validationIssue.issuer || "",
+      productType: validationIssue.productType || PRODUCT_TYPES.PENSION,
+      productLabel: validationIssue.productLabel || "מוצר",
+      accumulation: validationIssue.accumulation || 0,
+      severity: validationIssue.severity || "INFO",
+      severityLabel: validationIssue.severityLabel || "מידע",
+      category: validationIssue.category || "Unified Validation",
+      issueCode: validationIssue.issueCode || "UNIFIED_VALIDATION_ISSUE",
+      issueLabel: validationIssue.issueLabel || "בדיקת Unified Validation",
+      businessMeaning: validationIssue.businessMeaning || "נמצאה אינדיקציה הדורשת בדיקה בשכבת הנתונים המאוחדים.",
+      recommendation: validationIssue.recommendation || "לבדוק את שורת המקור ואת מיפוי השדות ל־Unified Schema.",
+      metadata: validationIssue.metadata || {},
+    });
+  });
 
   for (const row of rows) {
     const excluded = isExcludedOrOperationOnly(row);
@@ -446,9 +468,11 @@ export function buildDataQuality(rows = []) {
       infoIssues: bySeverity.INFO,
       actionableIssues: bySeverity.HIGH + bySeverity.MEDIUM + bySeverity.LOW,
       trackSimilarity,
+      validation: validationReport.summary,
     },
     bySeverity,
     byCategory,
+    validation: validationReport,
     issues: issues.sort(
       (a, b) =>
         severityRank(a.severity) - severityRank(b.severity) ||

@@ -25,6 +25,7 @@ import {
   isExcelFile,
 } from "../upload/uploadFileSlots.js";
 import UploadStatusSummary from "./UploadStatusSummary.jsx";
+import ProductModeSelector, { PRODUCT_MODES, getProductModeLabel } from "./ProductModeSelector.jsx";
 
 function FileStatusIcon({ file, required }) {
   if (file) return <span className="uploadStatusIcon success">✓</span>;
@@ -49,7 +50,7 @@ function validateFileObject(file) {
   const errors = [];
 
   if (!isExcelFile(file)) {
-    errors.push("סוג הקובץ אינו נתמך. יש להעלות xlsx או xls בלבד.");
+    errors.push("סוג הקובץ אינו נתמך. יש להעלות xlsx, xls או xlsm בלבד.");
   }
 
   if (Number(file.size || 0) <= 0) {
@@ -220,7 +221,7 @@ function DropUpload({
           </button>
         </div>
       ) : (
-        <p className="uploadHint">Excel בלבד · xlsx / xls</p>
+        <p className="uploadHint">Excel בלבד · xlsx / xls / xlsm</p>
       )}
 
       {hasErrors && (
@@ -236,6 +237,7 @@ function DropUpload({
 
 export default function UploadPanel({ files, setFiles, onStart, isAnalyzing = false }) {
   const normalizedFiles = normalizeFilesState(files);
+  const productMode = normalizedFiles.productMode || PRODUCT_MODES.PENSION;
   const managers = normalizeManagers(normalizedFiles);
   const [isDragging, setIsDragging] = useState(false);
   const [dragTarget, setDragTarget] = useState(null);
@@ -260,6 +262,15 @@ export default function UploadPanel({ files, setFiles, onStart, isAnalyzing = fa
 
   function getManagerValidation(managerId) {
     return managerValidations.find((item) => item.managerId === managerId)?.validation;
+  }
+
+
+  function setProductMode(productModeValue) {
+    setFiles((prev) => ({
+      ...normalizeFilesState(prev),
+      productMode: productModeValue,
+    }));
+    setError("");
   }
 
   function updateManagers(updater) {
@@ -365,7 +376,7 @@ export default function UploadPanel({ files, setFiles, onStart, isAnalyzing = fa
     }
 
     if (!excelFiles.length) {
-      setError("לא זוהה קובץ Excel. יש להעלות קובצי xlsx או xls בלבד.");
+      setError("לא זוהה קובץ Excel. יש להעלות קובצי xlsx, xls או xlsm בלבד.");
       return;
     }
 
@@ -458,7 +469,7 @@ export default function UploadPanel({ files, setFiles, onStart, isAnalyzing = fa
     }
 
     if (!canStartAnalysis(normalizedFiles)) {
-      setError("חסרים קבצי חובה. לכל מנהל הסדר פעיל נדרש דוח נתונים ודוח הסכמים.");
+      setError("חסרים קבצי חובה. לכל מנהל הסדר פעיל נדרש קלט מידע וקלט הסכמים.");
       return;
     }
 
@@ -493,12 +504,18 @@ export default function UploadPanel({ files, setFiles, onStart, isAnalyzing = fa
         </div>
       </div>
 
+      <ProductModeSelector
+        value={productMode}
+        onChange={setProductMode}
+        disabled={isAnalyzing}
+      />
+
       <div className="uploadGlobalDropZone">
         <div className="uploadGlobalIcon">⇪</div>
         <div>
           <strong>אפשר לגרור קבצים לתוך מנהל ההסדר הרלוונטי</strong>
           <span>
-            מנהל ריק לא חוסם התחלת ניתוח. רק מנהל שהתחלת להזין בו קבצים חייב לכלול דוח נתונים ודוח הסכמים.
+            מצב נוכחי: {getProductModeLabel(productMode)}. מנהל ריק לא חוסם התחלת ניתוח. רק מנהל שהתחלת להזין בו קבצים חייב לכלול קלט מידע ודוח הסכמים.
           </span>
         </div>
       </div>
@@ -612,7 +629,7 @@ export default function UploadPanel({ files, setFiles, onStart, isAnalyzing = fa
 
       {!canStart && (
         <p className="hint">
-          לכל מנהל הסדר פעיל יש להעלות לפחות דוח נתונים ודוח הסכמים לפני התחלת הניתוח. מנהלים ריקים נשארים כטיוטה ולא חוסמים את ההרצה.
+          לכל מנהל הסדר פעיל יש להעלות לפחות קלט מידע וקלט הסכמים לפני התחלת הניתוח. מנהלים ריקים נשארים כטיוטה ולא חוסמים את ההרצה.
         </p>
       )}
 

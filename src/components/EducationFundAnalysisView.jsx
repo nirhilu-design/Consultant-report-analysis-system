@@ -14,7 +14,7 @@
 // - It expects education fund rows from analysisData.productResults.hishtalmut.
 // - Personal details are optional. If birth date is unavailable, age analysis falls back gracefully.
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 
 const EDUCATION_TABS = [
   {
@@ -200,18 +200,28 @@ function getEducationFundData(analysisData) {
   };
 
   const summary = {
-    ...calculatedSummary,
     ...(productResult.productSummary || {}),
     ...(productResult.educationFundSummary || {}),
     ...(productResult.summary || {}),
     ...(analysisData?.educationFundSummary || {}),
     ...(analysisData?.productSummary || {}),
+    // Calculated summary must be last. Some combined summaries can legally miss counters
+    // or keep zero values before rows are normalized, but the UI should reflect the rows
+    // that are actually available to this component.
+    ...calculatedSummary,
   };
 
-  const warnings = [
+  let warnings = [
     ...asArray(productResult?.diagnostics?.warnings),
     ...asArray(productResult?.warnings),
   ];
+
+  if (rows.length) {
+    warnings = warnings.filter((message) => {
+      const text = normalizeText(message);
+      return !(text.includes("לא זוהו שורות") || text.includes("לא נמצאו שורות"));
+    });
+  }
 
   if (!directRows.length && fallbackRows.length) {
     warnings.push("הניתוח משתמש בנתוני rawRows כגיבוי כי unifiedRows לא נמצאו בתוצאת קרן ההשתלמות.");
@@ -228,6 +238,101 @@ function getEducationFundData(analysisData) {
     warnings: [...new Set(warnings.filter(Boolean))],
   };
 }
+
+function getArrangementManagerKey(row) {
+  return (
+    normalizeText(row.arrangementManagerId) ||
+    normalizeText(row.managerId) ||
+    normalizeText(row.uploadManagerName) ||
+    normalizeText(row.arrangementManagerName) ||
+    normalizeText(row.arrangementManager) ||
+    "unknown_manager"
+  );
+}
+
+function getArrangementManagerName(row) {
+  return (
+    normalizeText(row.arrangementManagerName) ||
+    normalizeText(row.uploadManagerName) ||
+    normalizeText(row.arrangementManager) ||
+    normalizeText(row.managerName) ||
+    "מנהל הסדר לא ידוע"
+  );
+}
+
+function buildArrangementManagerOptions(rows) {
+  const map = new Map();
+
+  rows.forEach((row) => {
+    const key = getArrangementManagerKey(row);
+    const name = getArrangementManagerName(row);
+    const current = map.get(key) || {
+      key,
+      name,
+      rowCount: 0,
+      totalAccumulation: 0,
+      totalMonthlyDeposits: 0,
+      sourceFiles: new Set(),
+    };
+
+    current.rowCount += 1;
+    current.totalAccumulation += safeNumber(row.currentBalance);
+    current.totalMonthlyDeposits += safeNumber(row.monthlyDeposit);
+    if (row.sourceFileName) current.sourceFiles.add(row.sourceFileName);
+    map.set(key, current);
+  });
+
+  return Array.from(map.values())
+    .map((manager) => ({
+      ...manager,
+      sourceFiles: Array.from(manager.sourceFiles),
+    }))
+    .sort((a, b) => b.totalAccumulation - a.totalAccumulation);
+}
+
+function ManagerScopeSelector({ options, selectedKey, onChange }) {
+  if (options.length <= 1) {
+    return null;
+  }
+
+  const totalAccumulation = options.reduce((sum, option) => sum + safeNumber(option.totalAccumulation), 0);
+  const totalRows = options.reduce((sum, option) => sum + Number(option.rowCount || 0), 0);
+
+  return (
+    <section className="workspaceCard educationManagerScopeCard">
+      <div>
+        <h3>בחירת שכבת ניתוח</h3>
+        <p className="hint">
+          כברירת מחדל מוצגת אגריגציה של כל מנהלי ההסדר. ניתן לעבור למנהל הסדר בודד בלי לשנות את הטאבים או את מבנה הניתוח.
+        </p>
+      </div>
+
+      <div className="educationManagerScopeTabs" dir="rtl">
+        <button
+          type="button"
+          className={selectedKey === "all" ? "active" : ""}
+          onClick={() => onChange("all")}
+        >
+          <strong>כל מנהלי ההסדר</strong>
+          <span>{formatCurrency(totalAccumulation)} · {totalRows} שורות</span>
+        </button>
+
+        {options.map((option) => (
+          <button
+            key={option.key}
+            type="button"
+            className={selectedKey === option.key ? "active" : ""}
+            onClick={() => onChange(option.key)}
+          >
+            <strong>{option.name}</strong>
+            <span>{formatCurrency(option.totalAccumulation)} · {option.rowCount} שורות</span>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function getMemberKey(row) {
   return (
     normalizeText(row.employeeCode) ||
@@ -864,9 +969,26 @@ function ManagersTab({ rows }) {
 export default function EducationFundAnalysisView({ analysisData }) {
   const { rows, summary, warnings } = getEducationFundData(analysisData);
   const [activeTab, setActiveTab] = useState("fees");
+  const [selectedManagerKey, setSelectedManagerKey] = useState("all");
 
-  const totalAccumulation = rows.reduce((sum, row) => sum + safeNumber(row.currentBalance), 0);
-  const totalMonthlyDeposits = rows.reduce((sum, row) => sum + safeNumber(row.monthlyDeposit), 0);
+  const managerOptions = useMemo(() => buildArrangementManagerOptions(rows), [rows]);
+  const selectedRows = useMemo(() => {
+    if (selectedManagerKey === "all") return rows;
+    return rows.filter((row) => getArrangementManagerKey(row) === selectedManagerKey);
+  }, [rows, selectedManagerKey]);
+
+  useEffect(() => {
+    if (selectedManagerKey === "all") return;
+    if (!managerOptions.some((option) => option.key === selectedManagerKey)) {
+      setSelectedManagerKey("all");
+    }
+  }, [managerOptions, selectedManagerKey]);
+
+  const selectedManager = managerOptions.find((option) => option.key === selectedManagerKey) || null;
+  const scopeLabel = selectedManagerKey === "all" ? "כל מנהלי ההסדר" : selectedManager?.name || "מנהל הסדר";
+  const totalAccumulation = selectedRows.reduce((sum, row) => sum + safeNumber(row.currentBalance), 0);
+  const totalMonthlyDeposits = selectedRows.reduce((sum, row) => sum + safeNumber(row.monthlyDeposit), 0);
+  const issuerCount = new Set(selectedRows.map((row) => row.issuerOriginal || row.issuer).filter(Boolean)).size;
 
   return (
     <section className="educationFundAnalysisView" dir="rtl">
@@ -875,16 +997,23 @@ export default function EducationFundAnalysisView({ analysisData }) {
           <p className="eyebrow">Education Fund</p>
           <h2>ניתוח קרן השתלמות</h2>
           <p>
-            ניתוח לפי דמי ניהול, צבירה, התאמת מסלול השקעה לגיל וצבירות לפי מנהלי השקעות.
+            ניתוח לפי דמי ניהול, צבירה, התאמת מסלול השקעה לגיל וצבירות לפי מנהלי השקעות — באגריגציה כוללת או לפי מנהל הסדר.
           </p>
         </div>
       </div>
 
+      <ManagerScopeSelector
+        options={managerOptions}
+        selectedKey={selectedManagerKey}
+        onChange={setSelectedManagerKey}
+      />
+
       <div className="educationTopKpiGrid">
-        <KpiCard label="שורות שנקלטו" value={summary.unifiedRowCount || rows.length || 0} />
-        <KpiCard label="סה״כ צבירה" value={formatCurrency(summary.totalAccumulation || totalAccumulation)} />
-        <KpiCard label="הפקדה / פרמיה אחרונה" value={formatCurrency(summary.totalMonthlyDeposits || totalMonthlyDeposits)} />
-        <KpiCard label="גופים מנהלים" value={summary.issuerCount || new Set(rows.map((row) => row.issuerOriginal || row.issuer).filter(Boolean)).size} />
+        <KpiCard label="שכבת ניתוח" value={scopeLabel} />
+        <KpiCard label="שורות שנקלטו" value={selectedRows.length || summary.unifiedRowCount || 0} />
+        <KpiCard label="סה״כ צבירה" value={formatCurrency(totalAccumulation || summary.totalAccumulation)} />
+        <KpiCard label="הפקדה / פרמיה אחרונה" value={formatCurrency(totalMonthlyDeposits || summary.totalMonthlyDeposits)} />
+        <KpiCard label="גופים מנהלים" value={issuerCount || summary.issuerCount || 0} />
       </div>
 
       {warnings.length > 0 && (
@@ -910,10 +1039,10 @@ export default function EducationFundAnalysisView({ analysisData }) {
 
       <EducationTabs activeTab={activeTab} onChange={setActiveTab} />
 
-      {activeTab === "fees" && <FeesTab rows={rows} />}
-      {activeTab === "accumulation" && <AccumulationTab rows={rows} />}
-      {activeTab === "tracksByAge" && <TracksByAgeTab rows={rows} />}
-      {activeTab === "managers" && <ManagersTab rows={rows} />}
+      {activeTab === "fees" && <FeesTab rows={selectedRows} />}
+      {activeTab === "accumulation" && <AccumulationTab rows={selectedRows} />}
+      {activeTab === "tracksByAge" && <TracksByAgeTab rows={selectedRows} />}
+      {activeTab === "managers" && <ManagersTab rows={selectedRows} />}
     </section>
   );
 }

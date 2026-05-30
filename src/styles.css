@@ -2108,3 +2108,234 @@ body,
     grid-template-columns: 1fr;
   }
 }
+
+/* CORE HARDENING v28 — Education Fund Analysis View */
+
+.educationFundAnalysisView {
+  display: grid;
+  gap: 16px;
+}
+
+.educationTopKpiGrid,
+.educationKpiGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.educationKpiCard {
+  padding: 16px;
+  border-radius: 18px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 12px 26px rgba(15, 23, 42, 0.05);
+}
+
+.educationKpiCard span {
+  display: block;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.educationKpiCard strong {
+  display: block;
+  margin-top: 6px;
+  color: #14213d;
+  font-size: 22px;
+  font-weight: 900;
+}
+
+.educationKpiCard small {
+  display: block;
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.educationAnalysisTabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px;
+  border-radius: 18px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+
+.educationAnalysisTabs button {
+  border: 1px solid #dbe3ef;
+  background: #ffffff;
+  color: #334155;
+  border-radius: 999px;
+  padding: 10px 16px;
+  font-family: Calibri, Arial, sans-serif;
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.educationAnalysisTabs button.active {
+  border-color: #1d4ed8;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.educationTabPanel {
+  display: grid;
+  gap: 16px;
+}
+
+.educationStatusPill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  background: #e2e8f0;
+  color: #334155;
+  white-space: nowrap;
+}
+
+.educationStatusPill.ok {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.educationStatusPill.warning,
+.educationStatusPill.review {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.educationStatusPill.unknown {
+  background: #e2e8f0;
+  color: #475569;
+}
+
+.educationBucketGrid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.educationBucketCard {
+  padding: 14px;
+  border-radius: 16px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+
+.educationBucketCard strong {
+  display: block;
+  color: #14213d;
+  font-size: 15px;
+}
+
+.educationBucketCard span {
+  display: block;
+  margin-top: 6px;
+  color: #1d4ed8;
+  font-size: 18px;
+  font-weight: 900;
+}
+
+.educationBucketCard small {
+  display: block;
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.educationMiniBar {
+  width: 100%;
+  height: 8px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  overflow: hidden;
+  margin-top: 10px;
+}
+
+.educationMiniBar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #1d4ed8;
+}
+
+.educationInsightList {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.educationInsightList li {
+  padding: 12px;
+  border-radius: 14px;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+}
+
+.educationInsightList strong {
+  display: block;
+  color: #9a3412;
+}
+
+.educationInsightList span {
+  display: block;
+  margin-top: 4px;
+  color: #7c2d12;
+  font-size: 13px;
+}
+
+.educationManagerBars {
+  display: grid;
+  gap: 12px;
+}
+
+.educationManagerBarRow {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+}
+
+.educationManagerBarRow > div:first-child {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.educationManagerBarRow strong {
+  color: #14213d;
+}
+
+.educationManagerBarRow span {
+  color: #64748b;
+  font-size: 13px;
+}
+
+@media (max-width: 1100px) {
+  .educationTopKpiGrid,
+  .educationKpiGrid,
+  .educationBucketGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 700px) {
+  .educationTopKpiGrid,
+  .educationKpiGrid,
+  .educationBucketGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .educationManagerBarRow > div:first-child {
+    flex-direction: column;
+  }
+}

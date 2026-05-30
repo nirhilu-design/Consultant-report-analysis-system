@@ -299,7 +299,7 @@ function buildEducationFundSummary({ rowsRaw, agreements, unifiedRows }) {
   };
 }
 
-function buildEducationFundWarnings({ dataFile, agreementsFile, rowsRaw, agreements, unifiedRows, summary }) {
+function buildEducationFundWarnings({ dataFile, agreementsFile, personalDetailsFile, rowsRaw, agreements, unifiedRows, summary }) {
   const warnings = [];
 
   if (!dataFile) warnings.push("לא הועלה קובץ מידע לקרן השתלמות.");
@@ -366,6 +366,7 @@ export async function parseEducationFundManagerFiles({
     ...buildEducationFundWarnings({
       dataFile,
       agreementsFile,
+      personalDetailsFile,
       rowsRaw,
       agreements,
       unifiedRows,

@@ -7,8 +7,7 @@
 
 import { Component, useMemo, useState } from "react";
 import UploadPanel from "./components/UploadPanel.jsx";
-import Dashboard from "./components/Dashboard.jsx";
-import ProductAnalysisPreview from "./components/ProductAnalysisPreview.jsx";
+import AnalysisWorkspace from "./components/AnalysisWorkspace.jsx";
 
 import {
   asArray,
@@ -271,7 +270,13 @@ export default function App() {
           ? await runEducationFundAnalysis(currentSession, managersToAnalyze, diagnostics)
           : await runPensionAnalysis(currentSession, managersToAnalyze, diagnostics);
 
-      setAnalysisData(nextAnalysisData);
+      setAnalysisData({
+        ...nextAnalysisData,
+        activeProductMode: currentSession.activeProductMode || currentSession.productMode,
+        productResults: {
+          [currentSession.activeProductMode || currentSession.productMode]: nextAnalysisData,
+        },
+      });
       setAnalysisStarted(true);
     } catch (error) {
       console.error(error);
@@ -314,15 +319,11 @@ export default function App() {
         </>
       ) : (
         <DashboardErrorBoundary onReset={resetAnalysis}>
-          {analysisData?.productMode === PRODUCT_MODES.HISHTALMUT ? (
-            <ProductAnalysisPreview
-              productMode={PRODUCT_MODES.HISHTALMUT}
-              analysisData={analysisData}
-              onBack={resetAnalysis}
-            />
-          ) : (
-            <Dashboard files={normalizedFiles} analysisData={analysisData} />
-          )}
+          <AnalysisWorkspace
+            files={normalizedFiles}
+            analysisData={analysisData}
+            onBack={resetAnalysis}
+          />
         </DashboardErrorBoundary>
       )}
     </main>

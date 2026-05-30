@@ -121,7 +121,7 @@ export default function App() {
 
   const normalizedFiles = useMemo(() => normalizeFilesState(files), [files]);
   const managers = useMemo(() => normalizeManagers(normalizedFiles), [normalizedFiles]);
-  const productMode = normalizedFiles.productMode || PRODUCT_MODES.PENSION;
+  const productMode = normalizedFiles.activeProductMode || normalizedFiles.productMode || PRODUCT_MODES.PENSION;
 
   function resetAnalysis() {
     setAnalysisStarted(false);
@@ -250,7 +250,7 @@ export default function App() {
     setAnalysisData(null);
 
     const diagnostics = {
-      productMode: currentSession.productMode,
+      productMode: currentSession.activeProductMode || currentSession.productMode,
       warnings: [],
       uploadSession: snapshotUploadSession(currentSession),
       managers: managersToAnalyze.map((manager) => ({
@@ -267,7 +267,7 @@ export default function App() {
 
     try {
       const nextAnalysisData =
-        currentSession.productMode === PRODUCT_MODES.HISHTALMUT
+        (currentSession.activeProductMode || currentSession.productMode) === PRODUCT_MODES.HISHTALMUT
           ? await runEducationFundAnalysis(currentSession, managersToAnalyze, diagnostics)
           : await runPensionAnalysis(currentSession, managersToAnalyze, diagnostics);
 

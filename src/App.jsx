@@ -1,9 +1,19 @@
 // Path: src/App.jsx
-// CORE HARDENING v26C
-// Product Mode Selector Integration
+// CORE HARDENING v27C
+// Unified Multi Product Analysis Engine
 //
-// Pension flow remains unchanged.
-// Education fund flow is parallel and renders ProductAnalysisPreview, not the pension Dashboard.
+// Purpose:
+// One Analyze action should process every uploaded product group:
+// - pension
+// - hishtalmut
+//
+// Then AnalysisWorkspace receives:
+// analysisData.productResults = {
+//   pension: ...,
+//   hishtalmut: ...
+// }
+//
+// This keeps one central analysis screen with product tabs.
 
 import { Component, useMemo, useState } from "react";
 import UploadPanel from "./components/UploadPanel.jsx";
@@ -24,6 +34,8 @@ import {
   createInitialFilesState,
   getActiveManagers,
   getInvalidManagersForAnalysis,
+  hasAnyFile,
+  hasRequiredFiles,
   normalizeFilesState,
   normalizeManagers,
   snapshotUploadSession,
@@ -74,19 +86,25 @@ function combineEducationFundSummary(managerResults) {
 
   const issuers = [
     ...new Set(
-      summaries.flatMap((summary) => Array.isArray(summary.issuers) ? summary.issuers : [])
+      summaries.flatMap((summary) =>
+        Array.isArray(summary.issuers) ? summary.issuers : []
+      )
     ),
   ];
 
   const funds = [
     ...new Set(
-      summaries.flatMap((summary) => Array.isArray(summary.funds) ? summary.funds : [])
+      summaries.flatMap((summary) =>
+        Array.isArray(summary.funds) ? summary.funds : []
+      )
     ),
   ];
 
   const tracks = [
     ...new Set(
-      summaries.flatMap((summary) => Array.isArray(summary.tracks) ? summary.tracks : [])
+      summaries.flatMap((summary) =>
+        Array.isArray(summary.tracks) ? summary.tracks : []
+      )
     ),
   ];
 
@@ -111,6 +129,39 @@ function combineEducationFundSummary(managerResults) {
   };
 }
 
+function getProductsReadyForAnalysis(currentSession) {
+  const productModes = [PRODUCT_MODES.PENSION, PRODUCT_MODES.HISHTALMUT];
+
+  return productModes.filter((productMode) => {
+    const activeManagers = getActiveManagers(currentSession, productMode);
+    const managersWithFiles = activeManagers.filter((manager) => hasAnyFile(manager, productMode));
+
+    if (!managersWithFiles.length) return false;
+
+    return managersWithFiles.every((manager) => hasRequiredFiles(manager, productMode));
+  });
+}
+
+function getProductsWithPartialFiles(currentSession) {
+  const productModes = [PRODUCT_MODES.PENSION, PRODUCT_MODES.HISHTALMUT];
+
+  return productModes.filter((productMode) => {
+    const activeManagers = getActiveManagers(currentSession, productMode);
+    const managersWithFiles = activeManagers.filter((manager) => hasAnyFile(manager, productMode));
+
+    if (!managersWithFiles.length) return false;
+
+    return managersWithFiles.some((manager) => !hasRequiredFiles(manager, productMode));
+  });
+}
+
+function getDefaultSelectedProduct(productResults, activeProductMode) {
+  if (productResults[activeProductMode]) return activeProductMode;
+  if (productResults[PRODUCT_MODES.PENSION]) return PRODUCT_MODES.PENSION;
+  if (productResults[PRODUCT_MODES.HISHTALMUT]) return PRODUCT_MODES.HISHTALMUT;
+  return activeProductMode || PRODUCT_MODES.PENSION;
+}
+
 export default function App() {
   const [analysisStarted, setAnalysisStarted] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -120,7 +171,10 @@ export default function App() {
 
   const normalizedFiles = useMemo(() => normalizeFilesState(files), [files]);
   const managers = useMemo(() => normalizeManagers(normalizedFiles), [normalizedFiles]);
-  const productMode = normalizedFiles.activeProductMode || normalizedFiles.productMode || PRODUCT_MODES.PENSION;
+  const productMode =
+    normalizedFiles.activeProductMode ||
+    normalizedFiles.productMode ||
+    PRODUCT_MODES.PENSION;
 
   function resetAnalysis() {
     setAnalysisStarted(false);
@@ -128,7 +182,8 @@ export default function App() {
     setAnalysisError("");
   }
 
-  async function runPensionAnalysis(currentSession, managersToAnalyze, diagnostics) {
+  async function runPensionAnalysis(currentSession, diagnostics) {
+    const managersToAnalyze = getActiveManagers(currentSession, PRODUCT_MODES.PENSION);
     const managerResults = [];
 
     for (let index = 0; index < managersToAnalyze.length; index += 1) {
@@ -163,6 +218,8 @@ export default function App() {
 
     return {
       productMode: PRODUCT_MODES.PENSION,
+      productType: PRODUCT_MODES.PENSION,
+      productLabel: "פנסיה",
       pensionRows,
       rawPensionRows,
       agreements,
@@ -186,7 +243,8 @@ export default function App() {
     };
   }
 
-  async function runEducationFundAnalysis(currentSession, managersToAnalyze, diagnostics) {
+  async function runEducationFundAnalysis(currentSession, diagnostics) {
+    const managersToAnalyze = getActiveManagers(currentSession, PRODUCT_MODES.HISHTALMUT);
     const managerResults = [];
 
     for (let index = 0; index < managersToAnalyze.length; index += 1) {
@@ -207,8 +265,12 @@ export default function App() {
     }
 
     const unifiedRows = managerResults.flatMap((result) => asArray(result.unifiedRows));
-    const rawRows = managerResults.flatMap((result) => asArray(result.rowsRaw || result.educationFundRowsRaw));
-    const agreements = managerResults.flatMap((result) => asArray(result.agreements || result.educationFundAgreements));
+    const rawRows = managerResults.flatMap((result) =>
+      asArray(result.rowsRaw || result.educationFundRowsRaw)
+    );
+    const agreements = managerResults.flatMap((result) =>
+      asArray(result.agreements || result.educationFundAgreements)
+    );
     const productSummary = combineEducationFundSummary(managerResults);
 
     diagnostics.counts = {
@@ -226,6 +288,8 @@ export default function App() {
       rawRows,
       agreements,
       productSummary,
+      educationFundSummary: productSummary,
+      educationFundRows: unifiedRows,
       managerResults,
       diagnostics,
       uploadSession: diagnostics.uploadSession,
@@ -236,10 +300,15 @@ export default function App() {
     if (isAnalyzing) return;
 
     const currentSession = normalizeFilesState(files);
-    const managersToAnalyze = getActiveManagers(currentSession);
-    const invalidManagers = getInvalidManagersForAnalysis(currentSession);
+    const readyProducts = getProductsReadyForAnalysis(currentSession);
+    const partialProducts = getProductsWithPartialFiles(currentSession);
 
-    if (invalidManagers.length) {
+    if (partialProducts.length) {
+      setAnalysisError(createUserAnalysisError(new Error("MISSING_REQUIRED_FILES")));
+      return;
+    }
+
+    if (!readyProducts.length) {
       setAnalysisError(createUserAnalysisError(new Error("MISSING_REQUIRED_FILES")));
       return;
     }
@@ -248,35 +317,81 @@ export default function App() {
     setAnalysisError("");
     setAnalysisData(null);
 
-    const diagnostics = {
-      productMode: currentSession.activeProductMode || currentSession.productMode,
-      warnings: [],
-      uploadSession: snapshotUploadSession(currentSession),
-      managers: managersToAnalyze.map((manager) => ({
-        id: manager.id,
-        name: manager.name,
-        files: {
-          dataFile: manager.dataFile?.name || "",
-          agreementsFile: manager.agreementsFile?.name || "",
-          personalDetailsFile: manager.personalDetailsFile?.name || "",
-        },
-      })),
-      counts: {},
-    };
+    const uploadSession = snapshotUploadSession(currentSession);
+    const productResults = {};
+    const productDiagnostics = {};
+    const allWarnings = [];
 
     try {
-      const nextAnalysisData =
-        (currentSession.activeProductMode || currentSession.productMode) === PRODUCT_MODES.HISHTALMUT
-          ? await runEducationFundAnalysis(currentSession, managersToAnalyze, diagnostics)
-          : await runPensionAnalysis(currentSession, managersToAnalyze, diagnostics);
+      if (readyProducts.includes(PRODUCT_MODES.PENSION)) {
+        const diagnostics = {
+          productMode: PRODUCT_MODES.PENSION,
+          warnings: [],
+          uploadSession,
+          managers: getActiveManagers(currentSession, PRODUCT_MODES.PENSION).map((manager) => ({
+            id: manager.id,
+            name: manager.name,
+            files: {
+              dataFile: manager.dataFile?.name || "",
+              agreementsFile: manager.agreementsFile?.name || "",
+              personalDetailsFile: manager.personalDetailsFile?.name || "",
+            },
+          })),
+          counts: {},
+        };
+
+        const pensionResult = await runPensionAnalysis(currentSession, diagnostics);
+        productResults[PRODUCT_MODES.PENSION] = pensionResult;
+        productDiagnostics[PRODUCT_MODES.PENSION] = diagnostics;
+        allWarnings.push(...diagnostics.warnings);
+      }
+
+      if (readyProducts.includes(PRODUCT_MODES.HISHTALMUT)) {
+        const diagnostics = {
+          productMode: PRODUCT_MODES.HISHTALMUT,
+          warnings: [],
+          uploadSession,
+          managers: getActiveManagers(currentSession, PRODUCT_MODES.HISHTALMUT).map((manager) => ({
+            id: manager.id,
+            name: manager.name,
+            files: {
+              dataFile: manager.dataFile?.name || "",
+              agreementsFile: manager.agreementsFile?.name || "",
+              personalDetailsFile: manager.personalDetailsFile?.name || "",
+            },
+          })),
+          counts: {},
+        };
+
+        const educationFundResult = await runEducationFundAnalysis(currentSession, diagnostics);
+        productResults[PRODUCT_MODES.HISHTALMUT] = educationFundResult;
+        productDiagnostics[PRODUCT_MODES.HISHTALMUT] = diagnostics;
+        allWarnings.push(...diagnostics.warnings);
+      }
+
+      const activeProductMode = getDefaultSelectedProduct(productResults, currentSession.activeProductMode);
+
+      const primaryResult =
+        productResults[activeProductMode] ||
+        productResults[PRODUCT_MODES.PENSION] ||
+        productResults[PRODUCT_MODES.HISHTALMUT];
 
       setAnalysisData({
-        ...nextAnalysisData,
-        activeProductMode: currentSession.activeProductMode || currentSession.productMode,
-        productResults: {
-          [currentSession.activeProductMode || currentSession.productMode]: nextAnalysisData,
+        ...primaryResult,
+        activeProductMode,
+        productMode: activeProductMode,
+        productResults,
+        productDiagnostics,
+        availableProducts: Object.keys(productResults),
+        diagnostics: {
+          productMode: activeProductMode,
+          warnings: [...new Set(allWarnings)],
+          uploadSession,
+          productDiagnostics,
         },
+        uploadSession,
       });
+
       setAnalysisStarted(true);
     } catch (error) {
       console.error(error);
@@ -299,9 +414,9 @@ export default function App() {
               <h1>מערכת ניתוח דוח יועץ לפי מוצר</h1>
 
               <p>
-                בחר מוצר, העלה קלט מידע וקלט הסכמים לכל מנהל הסדר, והריץ ניתוח
-                לפי מסלול המוצר. פנסיה ממשיכה בדשבורד הרגיל, וקרן השתלמות מוצגת
-                בשלב זה בתצוגת Preview ייעודית.
+                העלה קבצים לכמה מוצרים במקביל והריץ ניתוח אחד. לאחר הניתוח
+                תעבור למרכז ניתוח מוצרים שבו אפשר לבחור בין פנסיה, קרן השתלמות
+                ומוצרים נוספים בהמשך.
               </p>
             </div>
           </section>
@@ -313,7 +428,7 @@ export default function App() {
             isAnalyzing={isAnalyzing}
           />
 
-          {isAnalyzing && <div className="statusBox">מנתח את הקבצים...</div>}
+          {isAnalyzing && <div className="statusBox">מנתח את כל המוצרים שהועלו...</div>}
 
           {analysisError && <div className="errorBox">{analysisError}</div>}
         </>

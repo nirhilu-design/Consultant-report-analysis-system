@@ -1,5 +1,5 @@
 // Path: src/components/EducationFundAnalysisView.jsx
-// CORE HARDENING v33
+// CORE HARDENING v36
 // Education Fund Analysis View — קרן השתלמות
 //
 // Tabs:
@@ -419,75 +419,131 @@ function classifyTrackRisk(trackName) {
 
   if (!text) return "לא ידוע";
 
-  if (/מניית|מניות|s&p|sp500|נאסדק|nasdaq|100%|מחקה מדד/i.test(text)) {
+  if (/מניית|מניות|s&p|s\s*and\s*p|sp500|נאסדק|nasdaq|100%|מחקה מדד|מדדי מניות/i.test(text)) {
     return "גבוה";
   }
 
-  if (/כללי|לבני 50|עד 50|50 ומטה|מסלול כללי/i.test(text)) {
-    return "בינוני";
+  if (/אג"ח|אגח|שקלי|כספי|סולידי|פנסיונרים|קצר/i.test(text)) {
+    return "נמוך";
   }
 
-  if (/אג"ח|אגח|שקלי|כספי|סולידי|לבני 60|60 ומעלה|פנסיונרים/i.test(text)) {
-    return "נמוך";
+  if (/כללי|לבני|גילאי|50|60|מסלול כללי|ברירת מחדל/i.test(text)) {
+    return "בינוני";
   }
 
   return "בינוני";
 }
 
-function getSuggestedRiskByAge(age) {
-  if (age === null || age === undefined) return "לא ידוע";
-  if (age < 40) return "גבוה/בינוני";
-  if (age < 55) return "בינוני";
-  return "נמוך/בינוני";
+function classifyAgeDesignatedTrack(trackName) {
+  const text = normalizeText(trackName);
+  if (!text) {
+    return { type: "unknown", label: "לא זוהה", minAge: null, maxAge: null };
+  }
+
+  if (/60\s*(ומעלה|\+|פלוס)|לבני\s*60|גילאי\s*60|בני\s*60/i.test(text)) {
+    return { type: "ageDesignated", label: "מיועד לגיל 60+", minAge: 60, maxAge: null };
+  }
+
+  if (/50\s*[-–]\s*60|50\s*(עד|\/)\s*60|לבני\s*50\s*(עד|[-–])\s*60|גילאי\s*50\s*(עד|[-–])\s*60/i.test(text)) {
+    return { type: "ageDesignated", label: "מיועד לגיל 50–60", minAge: 50, maxAge: 60 };
+  }
+
+  if (/(עד|מתחת|פחות מ|קטן מ)\s*50|50\s*(ומטה|ומטה)|לבני\s*50\s*(ומטה|ומטה)|גילאי\s*עד\s*50/i.test(text)) {
+    return { type: "ageDesignated", label: "מיועד עד גיל 50", minAge: null, maxAge: 50 };
+  }
+
+  if (/כללי|ברירת מחדל|מסלול כללי/i.test(text)) {
+    return { type: "general", label: "מסלול כללי", minAge: null, maxAge: null };
+  }
+
+  return { type: "riskOnly", label: "ללא יעד גיל מפורש", minAge: null, maxAge: null };
 }
 
-function checkTrackAgeFit(age, trackRisk) {
-  const suggested = getSuggestedRiskByAge(age);
+function getSuggestedRiskByAge(age) {
+  if (age === null || age === undefined) return "לא ידוע";
+  if (age < 50) return "עד גיל 50 / בינוני-גבוה";
+  if (age < 60) return "גילאי 50–60 / בינוני";
+  return "60+ / נמוך-בינוני";
+}
 
-  if (age === null || age === undefined || trackRisk === "לא ידוע") {
+function getAgeRuleLabel(age) {
+  if (age === null || age === undefined) return "לא ידוע";
+  if (age < 50) return "עד גיל 50";
+  if (age < 60) return "גילאי 50–60";
+  return "גיל 60+";
+}
+
+function checkTrackAgeFit(age, trackRisk, trackName = "") {
+  const suggested = getSuggestedRiskByAge(age);
+  const ageTrack = classifyAgeDesignatedTrack(trackName);
+
+  if (age === null || age === undefined || !normalizeText(trackName)) {
     return {
       status: "unknown",
       label: "חסר גיל / מסלול",
-      explanation: "לא ניתן לבדוק התאמת מסלול ללא גיל לקוח או שם מסלול השקעה.",
+      explanation: "לא ניתן לבדוק התאמת מסלול ללא גיל מקובץ פרטים אישיים או ללא שם מסלול השקעה.",
+      suggested,
+      ageRuleLabel: getAgeRuleLabel(age),
+      ageTrackLabel: ageTrack.label,
     };
   }
 
-  if (age < 40) {
-    if (trackRisk === "נמוך") {
+  if (ageTrack.type === "ageDesignated") {
+    const belowMin = ageTrack.minAge !== null && age < ageTrack.minAge;
+    const aboveMax = ageTrack.maxAge !== null && age >= ageTrack.maxAge;
+
+    if (belowMin || aboveMax) {
       return {
         status: "review",
-        label: "דורש בדיקה",
-        explanation: "לקוח צעיר יחסית במסלול סולידי. ייתכן שהחשיפה אינה תואמת אופק השקעה ארוך.",
+        label: "לא תואם גיל",
+        explanation: `המסלול ${ageTrack.label}, בעוד שהעובד נמצא בקבוצת ${getAgeRuleLabel(age)}. יש לבדוק העברה למסלול גיל מתאים או אישור בחירה מודעת.`,
+        suggested,
+        ageRuleLabel: getAgeRuleLabel(age),
+        ageTrackLabel: ageTrack.label,
       };
     }
 
     return {
       status: "ok",
-      label: "נראה סביר",
-      explanation: "רמת הסיכון נראית תואמת לגיל צעיר/אופק ארוך.",
+      label: "תואם גיל",
+      explanation: `המסלול ${ageTrack.label} ותואם לקבוצת הגיל של העובד.`,
+      suggested,
+      ageRuleLabel: getAgeRuleLabel(age),
+      ageTrackLabel: ageTrack.label,
     };
   }
 
-  if (age < 55) {
-    return {
-      status: "ok",
-      label: "נראה סביר",
-      explanation: "מסלול ביניים/כללי לרוב מתאים לבדיקה פרטנית בגילאי ביניים.",
-    };
-  }
-
-  if (trackRisk === "גבוה") {
+  if (age < 50 && trackRisk === "נמוך") {
     return {
       status: "review",
-      label: "דורש בדיקה",
-      explanation: "לקוח מבוגר יחסית במסלול עם חשיפה מנייתית גבוהה. יש לבדוק התאמה לאופק ולסיבולת סיכון.",
+      label: "סולידי לצעיר",
+      explanation: "עובד מתחת לגיל 50 במסלול סולידי/כספי. לא בהכרח שגיאה, אבל דורש בדיקת התאמה לאופק השקעה ארוך.",
+      suggested,
+      ageRuleLabel: getAgeRuleLabel(age),
+      ageTrackLabel: ageTrack.label,
+    };
+  }
+
+  if (age >= 60 && trackRisk === "גבוה") {
+    return {
+      status: "review",
+      label: "מנייתי לגיל 60+",
+      explanation: "עובד בגיל 60 ומעלה במסלול בעל סיכון גבוה. יש לבדוק התאמה לאופק, סיבולת סיכון וצורך בנזילות.",
+      suggested,
+      ageRuleLabel: getAgeRuleLabel(age),
+      ageTrackLabel: ageTrack.label,
     };
   }
 
   return {
     status: "ok",
-    label: "נראה סביר",
-    explanation: "רמת הסיכון נראית סבירה ביחס לגיל מבוגר יותר.",
+    label: ageTrack.type === "general" ? "כללי / לבדיקה פרטנית" : "נראה סביר",
+    explanation: ageTrack.type === "general"
+      ? "מסלול כללי אינו מסלול גיל מפורש. הוא לא מסומן כחריגה, אבל מומלץ לבדוק אם קיימת מדיניות לקוח למסלול תלוי גיל."
+      : "לא זוהתה חריגה ברורה בין גיל העובד לבין מאפייני המסלול.",
+    suggested,
+    ageRuleLabel: getAgeRuleLabel(age),
+    ageTrackLabel: ageTrack.label,
   };
 }
 
@@ -741,7 +797,7 @@ function buildAgeTrackAnalysis(rows) {
     const age = calculateAge(extractBirthDateFromRow(row));
     const trackName = row.investmentTrack || row.investmentTrackRewards || row.investmentTrackCompensation || "";
     const trackRisk = classifyTrackRisk(trackName);
-    const fit = checkTrackAgeFit(age, trackRisk);
+    const fit = checkTrackAgeFit(age, trackRisk, trackName);
 
     return {
       ...row,
@@ -749,7 +805,9 @@ function buildAgeTrackAnalysis(rows) {
       ageBucket: getAgeBucket(age),
       trackName,
       trackRisk,
-      suggestedRisk: getSuggestedRiskByAge(age),
+      suggestedRisk: fit.suggested || getSuggestedRiskByAge(age),
+      suggestedAgeRule: fit.ageRuleLabel || getAgeRuleLabel(age),
+      detectedTrackAgeRule: fit.ageTrackLabel || classifyAgeDesignatedTrack(trackName).label,
       ageTrackStatus: fit.status,
       ageTrackLabel: fit.label,
       ageTrackExplanation: fit.explanation,
@@ -1106,7 +1164,7 @@ function TracksByAgeTab({ rows }) {
       <section className="workspaceCard">
         <h3>התאמת מסלול השקעה לפי גיל</h3>
         <p className="hint">
-          הבדיקה כאן היא אינדיקציה בלבד: היא משווה בין גיל הלקוח, שם מסלול ההשקעה ורמת סיכון משוערת.
+          הבדיקה כאן היא אינדיקציה ייעוצית: קודם היא מזהה מסלולים תלויי גיל כמו עד 50, 50–60 ו־60+, ורק לאחר מכן בודקת רמת סיכון משוערת במסלולים שאינם תלויי גיל מפורשים.
           מקור הגיל הוא קובץ הפרטים האישיים הרוחבי; אם הוא כבר הועלה תחת קרנות הפנסיה, המערכת משתמשת בו גם כאן ואין צורך להעלות אותו שוב תחת השתלמות.
         </p>
         {!hasPersonalDetailsData && (
@@ -1124,8 +1182,10 @@ function TracksByAgeTab({ rows }) {
                 <th>קבוצת גיל</th>
                 <th>מסלול</th>
                 <th>סיכון מסלול</th>
-                <th>סיכון מוצע</th>
+                <th>קבוצת גיל מומלצת</th>
+                <th>יעד גיל מהמסלול</th>
                 <th>סטטוס</th>
+                <th>הסבר</th>
               </tr>
             </thead>
 
@@ -1137,12 +1197,14 @@ function TracksByAgeTab({ rows }) {
                   <td>{row.ageBucket}</td>
                   <td>{row.trackName || "-"}</td>
                   <td>{row.trackRisk}</td>
-                  <td>{row.suggestedRisk}</td>
+                  <td>{row.suggestedAgeRule || row.suggestedRisk}</td>
+                  <td>{row.detectedTrackAgeRule || "-"}</td>
                   <td>
                     <span className={`educationStatusPill ${row.ageTrackStatus}`}>
                       {row.ageTrackLabel}
                     </span>
                   </td>
+                  <td>{row.ageTrackExplanation || "-"}</td>
                 </tr>
               ))}
             </tbody>

@@ -250,13 +250,28 @@ export default function App() {
     for (let index = 0; index < managersToAnalyze.length; index += 1) {
       const manager = managersToAnalyze[index];
 
+      const pensionManagers = getActiveManagers(currentSession, PRODUCT_MODES.PENSION);
+      const pensionPersonalDetailsByManagerId = new Map(
+        pensionManagers
+          .filter((pensionManager) => Boolean(pensionManager.personalDetailsFile))
+          .map((pensionManager) => [pensionManager.id, pensionManager.personalDetailsFile])
+      );
+
+      const sharedPersonalDetailsFile =
+        manager.personalDetailsFile ||
+        pensionPersonalDetailsByManagerId.get(manager.id) ||
+        pensionManagers[index]?.personalDetailsFile ||
+        null;
+
       const result = await parseEducationFundManagerFiles({
         dataFile: manager.dataFile,
         agreementsFile: manager.agreementsFile,
-        personalDetailsFile: manager.personalDetailsFile,
+        personalDetailsFile: sharedPersonalDetailsFile,
         manager: {
           ...manager,
           index,
+          personalDetailsFile: sharedPersonalDetailsFile,
+          personalDetailsSourceProduct: manager.personalDetailsFile ? PRODUCT_MODES.HISHTALMUT : PRODUCT_MODES.PENSION,
         },
       });
 

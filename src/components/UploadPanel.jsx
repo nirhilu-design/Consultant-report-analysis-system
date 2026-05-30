@@ -14,9 +14,14 @@ import {
   buildUploadProgress,
   canStartAnalysis,
   createManager,
+  getProductFiles,
+  getProductUploadOverview,
   hasRequiredFiles,
   normalizeFilesState,
   normalizeManagers,
+  setProductFile,
+  clearProductFiles,
+  clearAllProductsFiles,
 } from "../upload/uploadSessionModel.js";
 import {
   FILE_SLOTS,
@@ -237,28 +242,35 @@ function DropUpload({
 
 export default function UploadPanel({ files, setFiles, onStart, isAnalyzing = false }) {
   const normalizedFiles = normalizeFilesState(files);
-  const productMode = normalizedFiles.productMode || PRODUCT_MODES.PENSION;
+  const productMode = normalizedFiles.activeProductMode || normalizedFiles.productMode || PRODUCT_MODES.PENSION;
   const managers = normalizeManagers(normalizedFiles);
   const [isDragging, setIsDragging] = useState(false);
   const [dragTarget, setDragTarget] = useState(null);
   const [error, setError] = useState("");
 
   const progress = useMemo(() => {
-    return buildUploadProgress(normalizedFiles, FILE_SLOTS);
+    return buildUploadProgress(normalizedFiles, FILE_SLOTS, productMode);
   }, [normalizedFiles]);
 
   const managerValidations = useMemo(() => {
     return managers.map((manager) => ({
       managerId: manager.id,
-      validation: validateManagerFiles(manager),
+      validation: validateManagerFiles({
+        ...manager,
+        ...getProductFiles(manager, productMode),
+      }),
     }));
-  }, [managers]);
+  }, [managers, productMode]);
+
+  const productOverview = useMemo(() => {
+    return getProductUploadOverview(normalizedFiles);
+  }, [normalizedFiles]);
 
   const hasInvalidUploadedFiles = managerValidations.some(({ validation }) => {
     return validation.status === "INVALID";
   });
 
-  const canStart = canStartAnalysis(normalizedFiles) && !hasInvalidUploadedFiles;
+  const canStart = canStartAnalysis(normalizedFiles, productMode) && !hasInvalidUploadedFiles;
 
   function getManagerValidation(managerId) {
     return managerValidations.find((item) => item.managerId === managerId)?.validation;
@@ -268,6 +280,7 @@ export default function UploadPanel({ files, setFiles, onStart, isAnalyzing = fa
   function setProductMode(productModeValue) {
     setFiles((prev) => ({
       ...normalizeFilesState(prev),
+      activeProductMode: productModeValue,
       productMode: productModeValue,
     }));
     setError("");
@@ -315,7 +328,7 @@ export default function UploadPanel({ files, setFiles, onStart, isAnalyzing = fa
     updateManagers((currentManagers) =>
       currentManagers.map((manager) =>
         manager.id === managerId
-          ? { ...manager, [slotKey]: file }
+          ? setProductFile(manager, productMode, slotKey, file)
           : manager
       )
     );
@@ -349,12 +362,7 @@ export default function UploadPanel({ files, setFiles, onStart, isAnalyzing = fa
     updateManagers((currentManagers) =>
       currentManagers.map((manager) =>
         manager.id === managerId
-          ? {
-              ...manager,
-              dataFile: null,
-              agreementsFile: null,
-              personalDetailsFile: null,
-            }
+          ? clearProductFiles(manager, productMode)
           : manager
       )
     );
@@ -386,14 +394,21 @@ export default function UploadPanel({ files, setFiles, onStart, isAnalyzing = fa
       const managerIndex = foundManagerIndex >= 0 ? foundManagerIndex : 0;
 
       if (forcedSlotKey && excelFiles.length === 1) {
-        nextManagers[managerIndex][forcedSlotKey] = excelFiles[0];
+        nextManagers[managerIndex] = setProductFile(
+          nextManagers[managerIndex],
+          productMode,
+          forcedSlotKey,
+          excelFiles[0]
+        );
         return nextManagers;
       }
 
       for (const file of excelFiles) {
         const targetManager = nextManagers[managerIndex] || nextManagers[0];
-        const slotKey = guessSlotKey(file, targetManager);
-        targetManager[slotKey] = file;
+        const productFiles = getProductFiles(targetManager, productMode);
+        const slotKey = guessSlotKey(file, productFiles);
+        const updatedManager = setProductFile(targetManager, productMode, slotKey, file);
+        Object.assign(targetManager, updatedManager);
       }
 
       return nextManagers;
@@ -450,12 +465,7 @@ export default function UploadPanel({ files, setFiles, onStart, isAnalyzing = fa
 
   function clearAllFiles() {
     updateManagers((currentManagers) =>
-      currentManagers.map((manager) => ({
-        ...manager,
-        dataFile: null,
-        agreementsFile: null,
-        personalDetailsFile: null,
-      }))
+      currentManagers.map((manager) => clearAllProductsFiles(manager))
     );
     setError("");
   }
@@ -468,7 +478,7 @@ export default function UploadPanel({ files, setFiles, onStart, isAnalyzing = fa
       return;
     }
 
-    if (!canStartAnalysis(normalizedFiles)) {
+    if (!canStartAnalysis(normalizedFiles, productMode)) {
       setError("חסרים קבצי חובה. לכל מנהל הסדר פעיל נדרש קלט מידע וקלט הסכמים.");
       return;
     }
@@ -508,6 +518,7 @@ export default function UploadPanel({ files, setFiles, onStart, isAnalyzing = fa
         value={productMode}
         onChange={setProductMode}
         disabled={isAnalyzing}
+        overview={productOverview}
       />
 
       <div className="uploadGlobalDropZone">
@@ -515,15 +526,16 @@ export default function UploadPanel({ files, setFiles, onStart, isAnalyzing = fa
         <div>
           <strong>אפשר לגרור קבצים לתוך מנהל ההסדר הרלוונטי</strong>
           <span>
-            מצב נוכחי: {getProductModeLabel(productMode)}. מנהל ריק לא חוסם התחלת ניתוח. רק מנהל שהתחלת להזין בו קבצים חייב לכלול קלט מידע ודוח הסכמים.
+            מצב נוכחי: {getProductModeLabel(productMode)}. מעבר בין מוצרים לא מוחק קבצים שכבר הועלו. מנהל ריק לא חוסם התחלת ניתוח.
           </span>
         </div>
       </div>
 
       <div className="managerUploadList">
         {managers.map((manager, managerIndex) => {
+          const productFiles = getProductFiles(manager, productMode);
           const managerValidation = getManagerValidation(manager.id);
-          const managerComplete = hasRequiredFiles(manager) && managerValidation?.status !== "INVALID";
+          const managerComplete = hasRequiredFiles(manager, productMode) && managerValidation?.status !== "INVALID";
 
           return (
             <div className="managerUploadCard" key={manager.id}>
@@ -575,7 +587,7 @@ export default function UploadPanel({ files, setFiles, onStart, isAnalyzing = fa
                     <DropUpload
                       key={slot.key}
                       slot={slot}
-                      file={manager[slot.key]}
+                      file={productFiles[slot.key]}
                       validation={slotValidation}
                       isDragging={isDragging}
                       dragTarget={dragTarget}

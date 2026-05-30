@@ -9,6 +9,7 @@
 import * as XLSX from "xlsx";
 import { parseEducationFund } from "../parsers/educationFundParser.js";
 import { parseEducationFundAgreements } from "../parsers/educationFundAgreementsParser.js";
+import { parsePersonalDetails } from "../parsers/personalDetailsParser.js";
 import {
   buildParsingConfidenceReport,
   asArray,
@@ -17,7 +18,7 @@ import {
 
 const PRODUCT_TYPE = "hishtalmut";
 const PRODUCT_LABEL = "קרן השתלמות";
-const PARSER_VERSION = "education_fund_integration_v31_multi_manager";
+const PARSER_VERSION = "education_fund_integration_v33";
 
 function normalizeText(value) {
   return String(value ?? "")
@@ -59,6 +60,46 @@ async function readWorkbook(file) {
     cellNF: false,
     cellText: false,
   });
+}
+
+
+function normalizeIdentity(value) {
+  const text = normalizeText(value);
+  if (!text) return "";
+  return text.replace(/[^0-9A-Za-zא-ת]/g, "");
+}
+
+function buildPersonalDetailsIndex(personalDetails) {
+  const profiles = asArray(personalDetails?.clientProfiles);
+  const map = new Map();
+
+  profiles.forEach((profile) => {
+    const keys = [
+      normalizeIdentity(profile.employeeCode),
+      normalizeIdentity(profile.idNumber),
+      normalizeIdentity(profile.identityKey),
+    ].filter(Boolean);
+
+    keys.forEach((key) => {
+      if (!map.has(key)) map.set(key, profile);
+    });
+  });
+
+  return map;
+}
+
+function findPersonalProfile(row, personalIndex) {
+  const keys = [
+    normalizeIdentity(row.employeeCode),
+    normalizeIdentity(row.idNumber),
+    normalizeIdentity(row.memberKey),
+  ].filter(Boolean);
+
+  for (const key of keys) {
+    if (personalIndex.has(key)) return personalIndex.get(key);
+  }
+
+  return null;
 }
 
 function getAgreementCandidates(row, agreements) {
@@ -133,16 +174,7 @@ function getFeeStatus(actualFee, agreementFee, sourceStatus) {
   return "warning";
 }
 
-function getManagerIdentity(manager = {}) {
-  const index = Number.isFinite(Number(manager.index)) ? Number(manager.index) : 0;
-  return {
-    id: manager?.id || `manager_${index + 1}`,
-    name: manager?.name || `מנהל הסדר ${index + 1}`,
-    index,
-  };
-}
-
-function toUnifiedEducationFundRow(row, agreement, manager = {}, sourceFileName = "") {
+function toUnifiedEducationFundRow(row, agreement, manager = {}, personalProfile = null, dataFileName = "") {
   const actualAccumulationFee = row.accumulationFee ?? null;
   const agreementAccumulationFee =
     row.accumulationFeeAgreement ??
@@ -150,8 +182,6 @@ function toUnifiedEducationFundRow(row, agreement, manager = {}, sourceFileName 
     null;
 
   const feeGap = calculateFeeGap(actualAccumulationFee, agreementAccumulationFee);
-
-  const managerIdentity = getManagerIdentity(manager);
 
   return {
     sourceProduct: PRODUCT_TYPE,
@@ -163,15 +193,14 @@ function toUnifiedEducationFundRow(row, agreement, manager = {}, sourceFileName 
     sourceRowIndex: row.sourceRowIndex,
     sourceSheetName: row.sheetName,
 
-    managerId: managerIdentity.id,
-    uploadManagerName: managerIdentity.name,
-    arrangementManagerId: managerIdentity.id,
-    arrangementManagerName: managerIdentity.name,
-    arrangementManagerIndex: managerIdentity.index,
-    sourceFileName,
+    managerId: manager?.id || `manager-${manager?.index ?? "0"}`,
+    arrangementManagerId: manager?.id || `manager-${manager?.index ?? "0"}`,
+    uploadManagerName: manager?.name || "",
+    arrangementManagerName: manager?.name || row.arrangementManager || "",
+    sourceFileName: dataFileName || "",
     issuer: row.manager || row.issuerOriginal || "",
     issuerOriginal: row.issuerOriginal || row.manager || "",
-    arrangementManager: row.arrangementManager || managerIdentity.name,
+    arrangementManager: row.arrangementManager || manager?.name || "",
 
     memberKey: row.employeeCode || row.idNumber || "",
     employeeCode: row.employeeCode || "",
@@ -216,12 +245,19 @@ function toUnifiedEducationFundRow(row, agreement, manager = {}, sourceFileName 
     linkedEmployerId: row.linkedEmployerId || "",
     isArrangementAgent: row.isArrangementAgent,
 
+    personalDetails: personalProfile || null,
+    personalDetailsMatched: Boolean(personalProfile),
+    birthDate: personalProfile?.birthDate || "",
+    dateOfBirth: personalProfile?.birthDate || "",
+    calculatedAge: personalProfile?.calculatedAge ?? null,
+    personalFullName: personalProfile?.fullName || "",
+
     rawProductRow: row,
     rawAgreementRow: agreement || null,
   };
 }
 
-function buildEducationFundSummary({ rowsRaw, agreements, unifiedRows, manager = {} }) {
+function buildEducationFundSummary({ rowsRaw, agreements, unifiedRows }) {
   const rows = asArray(unifiedRows);
   const raw = asArray(rowsRaw);
   const agreementsList = asArray(agreements);
@@ -241,16 +277,10 @@ function buildEducationFundSummary({ rowsRaw, agreements, unifiedRows, manager =
     ? Math.round((matchedAgreements / rows.length) * 100)
     : 0;
 
-  const managerIdentity = getManagerIdentity(manager);
-
   return {
     productType: PRODUCT_TYPE,
     productLabel: PRODUCT_LABEL,
     parserVersion: PARSER_VERSION,
-    managerId: managerIdentity.id,
-    managerName: managerIdentity.name,
-    arrangementManagerId: managerIdentity.id,
-    arrangementManagerName: managerIdentity.name,
     rawRowCount: raw.length,
     unifiedRowCount: rows.length,
     agreementCount: agreementsList.length,
@@ -295,6 +325,11 @@ function buildEducationFundWarnings({ dataFile, agreementsFile, rowsRaw, agreeme
     warnings.push(`נמצאו ${summary.missingFees} שורות ללא דמי ניהול מצבירה.`);
   }
 
+  const personalMatched = asArray(unifiedRows).filter((row) => row.personalDetailsMatched).length;
+  if (personalDetailsFile && asArray(unifiedRows).length && personalMatched < asArray(unifiedRows).length) {
+    warnings.push(`קובץ פרטים אישיים נטען, אך ${asArray(unifiedRows).length - personalMatched} שורות קרן השתלמות לא שויכו לעובד לפי מס עובד/תעודת זהות.`);
+  }
+
   return [...new Set(warnings)];
 }
 
@@ -308,21 +343,23 @@ export async function parseEducationFundManagerFiles({
 
   const dataWorkbook = dataFile ? await readWorkbook(dataFile) : null;
   const agreementsWorkbook = agreementsFile ? await readWorkbook(agreementsFile) : null;
+  const personalDetailsWorkbook = personalDetailsFile ? await readWorkbook(personalDetailsFile) : null;
 
   const rowsRaw = dataWorkbook ? parseEducationFund(dataWorkbook) : [];
   const agreements = agreementsWorkbook ? parseEducationFundAgreements(agreementsWorkbook) : [];
+  const personalDetails = personalDetailsWorkbook ? parsePersonalDetails(personalDetailsWorkbook) : parsePersonalDetails(null);
+  const personalIndex = buildPersonalDetailsIndex(personalDetails);
 
-  const sourceFileName = dataFile?.name || "";
   const unifiedRows = asArray(rowsRaw).map((row) => {
     const agreement = pickBestAgreement(row, agreements);
-    return toUnifiedEducationFundRow(row, agreement, manager, sourceFileName);
+    const personalProfile = findPersonalProfile(row, personalIndex);
+    return toUnifiedEducationFundRow(row, agreement, manager, personalProfile, dataFile?.name || "");
   });
 
   const summary = buildEducationFundSummary({
     rowsRaw,
     agreements,
     unifiedRows,
-    manager,
   });
 
   warnings.push(
@@ -361,20 +398,15 @@ export async function parseEducationFundManagerFiles({
     fileName: dataFile?.name || "",
   });
 
-  const managerIdentity = getManagerIdentity(manager);
-
   return {
     productType: PRODUCT_TYPE,
     productLabel: PRODUCT_LABEL,
     parserVersion: PARSER_VERSION,
-    managerId: getManagerIdentity(manager).id,
-    managerName: getManagerIdentity(manager).name,
-    arrangementManagerId: getManagerIdentity(manager).id,
-    arrangementManagerName: getManagerIdentity(manager).name,
 
     dataFileName: dataFile?.name || "",
     agreementsFileName: agreementsFile?.name || "",
     personalDetailsFileName: personalDetailsFile?.name || "",
+    personalDetails,
 
     rowsRaw,
     educationFundRowsRaw: rowsRaw,

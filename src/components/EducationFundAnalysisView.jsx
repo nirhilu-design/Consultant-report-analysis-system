@@ -1,5 +1,5 @@
 // Path: src/components/EducationFundAnalysisView.jsx
-// CORE HARDENING v36
+// CORE HARDENING v38
 // Education Fund Analysis View — קרן השתלמות
 //
 // Tabs:
@@ -636,39 +636,78 @@ function getAccumulationBucket(value) {
   return "500K+";
 }
 
+function classifyFeeSeverity(gap) {
+  if (gap === null || gap === undefined || !Number.isFinite(Number(gap))) return "unknown";
+  if (gap <= 0.0001) return "ok";
+  if (gap >= 0.25) return "critical";
+  if (gap >= 0.1) return "high";
+  return "warning";
+}
+
+function getFeeSeverityLabel(severity) {
+  if (severity === "critical") return "חריגה גבוהה מאוד";
+  if (severity === "high") return "חריגה גבוהה";
+  if (severity === "warning") return "חריגה נמוכה";
+  if (severity === "ok") return "תקין";
+  return "חסר מידע";
+}
+
+function estimateAnnualFeeGapCost(row, gap) {
+  const balance = safeNumber(row.currentBalance);
+  const numericGap = Number(gap);
+  if (!balance || !Number.isFinite(numericGap) || numericGap <= 0) return 0;
+  // Fee values are stored as percentage points, for example 0.6 means 0.6%.
+  return Math.round(balance * (numericGap / 100));
+}
+
 function buildFeeAnalysis(rows) {
   const enriched = rows.map((row) => {
     const actualFee = row.accumulationFee;
     const agreementFee = row.accumulationFeeAgreement;
+    const actualFeeExists = isPresentNumber(actualFee);
+    const agreementFeeExists = isPresentNumber(agreementFee);
     const gap =
-      actualFee === null || actualFee === undefined || agreementFee === null || agreementFee === undefined
+      !actualFeeExists || !agreementFeeExists
         ? null
         : Number((Number(actualFee) - Number(agreementFee)).toFixed(4));
 
     let status = "unknown";
     if (gap !== null) status = gap <= 0.0001 ? "ok" : "warning";
-    if (row.feeStatus === "ok") status = "ok";
+    if (row.feeStatus === "ok" && gap !== null && gap <= 0.0001) status = "ok";
     if (row.feeStatus === "warning") status = "warning";
+
+    const severity = status === "warning" ? classifyFeeSeverity(gap) : status;
+    const annualGapCost = estimateAnnualFeeGapCost(row, gap);
 
     return {
       ...row,
       calculatedFeeGap: gap,
       calculatedFeeStatus: status,
+      calculatedFeeSeverity: severity,
+      estimatedAnnualFeeGapCost: annualGapCost,
     };
   });
 
   const warningRows = enriched.filter((row) => row.calculatedFeeStatus === "warning");
   const okRows = enriched.filter((row) => row.calculatedFeeStatus === "ok");
   const unknownRows = enriched.filter((row) => row.calculatedFeeStatus === "unknown");
+  const totalAnnualGapCost = warningRows.reduce((sum, row) => sum + safeNumber(row.estimatedAnnualFeeGapCost), 0);
+  const criticalRows = warningRows.filter((row) => row.calculatedFeeSeverity === "critical");
+  const highRows = warningRows.filter((row) => row.calculatedFeeSeverity === "high");
 
   return {
     rows: enriched,
     warningRows,
     okRows,
     unknownRows,
+    criticalRows,
+    highRows,
     okCount: okRows.length,
     warningCount: warningRows.length,
     unknownCount: unknownRows.length,
+    criticalCount: criticalRows.length,
+    highCount: highRows.length,
+    totalAnnualGapCost,
     agreementCoverage: rows.length ? Math.round(((okRows.length + warningRows.length) / rows.length) * 100) : 0,
   };
 }
@@ -752,6 +791,33 @@ function buildFeeStatusMatrix(companyChart) {
   ];
 
   return { issuers, rows };
+}
+
+function buildFeeExceptionSummary(feeRows) {
+  return aggregateRows(feeRows, (row) => row.issuerOriginal || row.issuer || row.manager || "לא ידוע")
+    .map((manager) => {
+      const warningRows = manager.rows.filter((row) => row.calculatedFeeStatus === "warning");
+      const maxGap = warningRows.reduce((max, row) => Math.max(max, safeNumber(row.calculatedFeeGap)), 0);
+      const annualCost = warningRows.reduce((sum, row) => sum + safeNumber(row.estimatedAnnualFeeGapCost), 0);
+      const criticalCount = warningRows.filter((row) => row.calculatedFeeSeverity === "critical").length;
+      const highCount = warningRows.filter((row) => row.calculatedFeeSeverity === "high").length;
+      const checkedRows = manager.rows.filter((row) => row.calculatedFeeStatus !== "unknown").length;
+      const warningRate = checkedRows ? Math.round((warningRows.length / checkedRows) * 100) : 0;
+
+      return {
+        ...manager,
+        warningRows,
+        warningCount: warningRows.length,
+        checkedRows,
+        warningRate,
+        maxGap,
+        annualCost,
+        criticalCount,
+        highCount,
+      };
+    })
+    .filter((manager) => manager.warningCount > 0)
+    .sort((a, b) => b.annualCost - a.annualCost || b.maxGap - a.maxGap || b.warningCount - a.warningCount);
 }
 
 function buildEducationEmployeeErrors(rows) {
@@ -843,18 +909,25 @@ function EducationTabs({ activeTab, onChange }) {
   );
 }
 
-function FeesTab({ rows }) {
+function FeesTab({ rows, isAggregateScope = false }) {
   const analysis = useMemo(() => buildFeeAnalysis(rows), [rows]);
   const companyChart = useMemo(() => buildFeeCompanyChart(rows), [rows]);
+  const exceptionSummary = useMemo(() => buildFeeExceptionSummary(analysis.rows), [analysis.rows]);
   const maxCount = Math.max(1, ...companyChart.flatMap((item) => [item.okCount, item.warningCount]));
   const validEmployeeCount = companyChart.reduce((sum, item) => sum + item.okCount + item.warningCount, 0);
   const companiesWithWarnings = companyChart.filter((item) => item.warningCount > 0).length;
+  const topWarningRows = analysis.warningRows
+    .slice()
+    .sort((a, b) => safeNumber(b.estimatedAnnualFeeGapCost) - safeNumber(a.estimatedAnnualFeeGapCost) || safeNumber(b.calculatedFeeGap) - safeNumber(a.calculatedFeeGap))
+    .slice(0, 15);
 
   return (
     <section className="educationTabPanel">
       <div className="educationKpiGrid">
         <KpiCard label="עובדים תקינים" value={analysis.okCount} />
         <KpiCard label="עובדים לא תקינים" value={analysis.warningCount} />
+        <KpiCard label="חריגות גבוהות" value={analysis.criticalCount + analysis.highCount} />
+        <KpiCard label="עלות חריגה שנתית משוערת" value={formatCurrency(analysis.totalAnnualGapCost)} />
         <KpiCard label="שורות חסרות מידע" value={analysis.unknownCount} />
         <KpiCard label="חברות עם חריגה" value={companiesWithWarnings} />
       </div>
@@ -909,7 +982,7 @@ function FeesTab({ rows }) {
       <section className="workspaceCard">
         <h3>טבלה מסכמת — סטטוס בדיקה לפי חברת ביטוח</h3>
         <p className="hint">
-          מבנה הטבלה עודכן: החברות מוצגות בציר האופקי, וסטטוס הבדיקה מוצג בציר האנכי. כך קל לזהות באיזה גוף מנהל יש ריכוז חריגות.
+          החברות מוצגות בציר האופקי, וסטטוס הבדיקה מוצג בציר האנכי. נוסף גם אחוז חריגה ועלות שנתית משוערת כדי להבין איפה כדאי להתחיל טיפול.
         </p>
         <div className="tableScroll">
           <table className="miniTable productRowsTable">
@@ -948,6 +1021,16 @@ function FeesTab({ rows }) {
                 </td>
               </tr>
               <tr>
+                <td><strong>עלות חריגה שנתית</strong></td>
+                {companyChart.map((item) => {
+                  const issuerCost = analysis.warningRows
+                    .filter((row) => normalizeText(row.issuerOriginal || row.issuer || row.manager || "לא ידוע") === item.issuer)
+                    .reduce((sum, row) => sum + safeNumber(row.estimatedAnnualFeeGapCost), 0);
+                  return <td key={`annual-cost-${item.issuer}`}>{formatCurrency(issuerCost)}</td>;
+                })}
+                <td>{formatCurrency(analysis.totalAnnualGapCost)}</td>
+              </tr>
+              <tr>
                 <td><strong>סה״כ צבירה</strong></td>
                 {companyChart.map((item) => (
                   <td key={`accumulation-${item.issuer}`}>{formatCurrency(item.totalAccumulation)}</td>
@@ -959,6 +1042,98 @@ function FeesTab({ rows }) {
         </div>
       </section>
 
+      <section className="workspaceCard">
+        <h3>מוקדי חריגה לטיפול</h3>
+        <p className="hint">
+          הטבלה מרכזת רק גופים עם חריגות דמי ניהול, לפי אומדן עלות שנתית. האומדן מחושב כצבירה כפול הפער בין דמי הניהול בפועל לדמי הניהול בהסכם.
+        </p>
+        {exceptionSummary.length ? (
+          <div className="tableScroll">
+            <table className="miniTable productRowsTable">
+              <thead>
+                <tr>
+                  <th>גוף מנהל</th>
+                  <th>שורות שנבדקו</th>
+                  <th>חריגות</th>
+                  <th>אחוז חריגה</th>
+                  <th>פער מקסימלי</th>
+                  <th>חריגות גבוהות</th>
+                  <th>עלות שנתית משוערת</th>
+                  <th>צבירה בחריגה</th>
+                </tr>
+              </thead>
+              <tbody>
+                {exceptionSummary.map((manager) => (
+                  <tr key={manager.key}>
+                    <td>{manager.key}</td>
+                    <td>{manager.checkedRows}</td>
+                    <td>{manager.warningCount}</td>
+                    <td>{manager.warningRate}%</td>
+                    <td>{formatPercent(manager.maxGap, 4)}</td>
+                    <td>{manager.criticalCount + manager.highCount}</td>
+                    <td>{formatCurrency(manager.annualCost)}</td>
+                    <td>{formatCurrency(manager.warningRows.reduce((sum, row) => sum + safeNumber(row.currentBalance), 0))}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="hint">לא נמצאו חריגות דמי ניהול ביחס להסכם.</p>
+        )}
+      </section>
+
+      {!isAggregateScope && (
+      <section className="workspaceCard">
+        <h3>Top חריגות דמי ניהול לעבודה</h3>
+        <p className="hint">
+          מוצגות עד 15 החריגות המשמעותיות ביותר, כדי שהיועץ יוכל להתחיל מהשורות עם ההשפעה הכספית הגבוהה ביותר.
+        </p>
+        {topWarningRows.length ? (
+          <div className="tableScroll">
+            <table className="miniTable productRowsTable">
+              <thead>
+                <tr>
+                  <th>עובד</th>
+                  <th>חברת ביטוח</th>
+                  <th>שם קופה</th>
+                  <th>צבירה</th>
+                  <th>בפועל</th>
+                  <th>בהסכם</th>
+                  <th>פער</th>
+                  <th>חומרה</th>
+                  <th>עלות שנתית משוערת</th>
+                </tr>
+              </thead>
+              <tbody>
+                {topWarningRows.map((row, index) => (
+                  <tr key={`${row.policyNumber || row.fundName || "top-fee"}-${index}`}>
+                    <td>{row.clientName || row.employeeCode || row.idNumber || "-"}</td>
+                    <td>{row.issuerOriginal || row.issuer || "-"}</td>
+                    <td>{row.fundName || row.productName || "-"}</td>
+                    <td>{formatCurrency(row.currentBalance)}</td>
+                    <td>{formatPercent(row.accumulationFee)}</td>
+                    <td>{formatPercent(row.accumulationFeeAgreement)}</td>
+                    <td>{formatPercent(row.calculatedFeeGap, 4)}</td>
+                    <td>
+                      <span className={`educationStatusPill ${row.calculatedFeeSeverity}`}>
+                        {getFeeSeverityLabel(row.calculatedFeeSeverity)}
+                      </span>
+                    </td>
+                    <td>{formatCurrency(row.estimatedAnnualFeeGapCost)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="hint">אין חריגות להצגה.</p>
+        )}
+      </section>
+
+      )}
+
+      {!isAggregateScope && (
       <section className="workspaceCard">
         <h3>פירוט שורות דמי ניהול</h3>
         {analysis.rows.length ? (
@@ -973,6 +1148,8 @@ function FeesTab({ rows }) {
                   <th>בפועל</th>
                   <th>בהסכם</th>
                   <th>פער</th>
+                  <th>חומרה</th>
+                  <th>עלות שנתית משוערת</th>
                   <th>סטטוס</th>
                 </tr>
               </thead>
@@ -987,6 +1164,8 @@ function FeesTab({ rows }) {
                     <td>{formatPercent(row.accumulationFee)}</td>
                     <td>{formatPercent(row.accumulationFeeAgreement)}</td>
                     <td>{row.calculatedFeeGap === null ? "-" : formatPercent(row.calculatedFeeGap, 4)}</td>
+                    <td>{getFeeSeverityLabel(row.calculatedFeeSeverity)}</td>
+                    <td>{formatCurrency(row.estimatedAnnualFeeGapCost)}</td>
                     <td>
                       <span className={`educationStatusPill ${row.calculatedFeeStatus}`}>
                         {getFeeDisplayStatus(row.calculatedFeeStatus)}
@@ -1001,10 +1180,17 @@ function FeesTab({ rows }) {
           <p className="hint">אין נתונים לבדיקת דמי ניהול.</p>
         )}
       </section>
+      )}
+
+      {isAggregateScope && (
+        <section className="workspaceCard">
+          <h3>פירוט פרטני מוסתר במבט אגרגטיבי</h3>
+          <p className="hint">בבחירה של כל מנהלי ההסדר מוצגים רק נתונים מסכמים שניתן לאחד ברמת תיק: סטטוס לפי חברה, מוקדי חריגה, עלות חריגה וצבירה. רשימות עובדים, מזהים ושורות פרטניות מוצגות רק לאחר בחירת מנהל הסדר יחיד.</p>
+        </section>
+      )}
     </section>
   );
 }
-
 
 function AccumulationTab({ rows }) {
   const byBucket = useMemo(
@@ -1144,7 +1330,7 @@ function AccumulationTab({ rows }) {
   );
 }
 
-function TracksByAgeTab({ rows }) {
+function TracksByAgeTab({ rows, isAggregateScope = false }) {
   const enriched = useMemo(() => buildAgeTrackAnalysis(rows), [rows]);
   const byAge = useMemo(() => aggregateRows(enriched, (row) => row.ageBucket), [enriched]);
   const reviewRows = enriched.filter((row) => row.ageTrackStatus === "review");
@@ -1161,6 +1347,7 @@ function TracksByAgeTab({ rows }) {
         <KpiCard label="שורות עם פרטים אישיים" value={`${formatNumber(matchedPersonalRows.length)} / ${formatNumber(enriched.length)}`} />
       </div>
 
+      {!isAggregateScope && (
       <section className="workspaceCard">
         <h3>התאמת מסלול השקעה לפי גיל</h3>
         <p className="hint">
@@ -1211,6 +1398,18 @@ function TracksByAgeTab({ rows }) {
           </table>
         </div>
       </section>
+
+      )}
+
+      {isAggregateScope && (
+        <section className="workspaceCard">
+          <h3>התאמת מסלול השקעה לפי גיל — מבט אגרגטיבי</h3>
+          <p className="hint">בבחירת כל מנהלי ההסדר מוצג סיכום לפי קבוצות גיל וסטטוס התאמה בלבד. פירוט עובד/לקוח, מזהים ושורות פרטניות יוצגו רק לאחר בחירת מנהל הסדר יחיד.</p>
+          {!hasPersonalDetailsData && (
+            <p className="hint warningText">לא נמצאה התאמה לפרטים אישיים בשורות ההשתלמות. אם קובץ הפרטים האישיים כבר הועלה בפנסיה, יש לוודא שהניתוח הורץ יחד עם מוצר הפנסיה ושמספר עובד/תעודת זהות זהים בין הקבצים.</p>
+          )}
+        </section>
+      )}
 
       <section className="workspaceCard">
         <h3>צבירה לפי קבוצות גיל</h3>
@@ -1350,7 +1549,7 @@ function ManagersTab({ rows }) {
 }
 
 
-function ErrorsTab({ rows }) {
+function ErrorsTab({ rows, isAggregateScope = false }) {
   const errors = useMemo(() => buildEducationEmployeeErrors(rows), [rows]);
   const feeErrors = errors.filter((row) => row.errorReasons.some((reason) => reason.includes("דמי") || reason.includes("הסכם"))).length;
   const trackErrors = errors.filter((row) => row.errorReasons.some((reason) => reason.includes("גיל") || reason.includes("מסלול"))).length;
@@ -1365,6 +1564,47 @@ function ErrorsTab({ rows }) {
         <KpiCard label="חוסרי מידע" value={missingDataErrors} />
       </div>
 
+      {isAggregateScope && (
+        <section className="workspaceCard">
+          <h3>סיכום שגיאות אגרגטיבי</h3>
+          <p className="hint">במבט כללי לא מוצגים עובדים, מספרי לקוח או מזהים. הטבלה מציגה רק ספירה לפי מנהל הסדר, סוג שגיאה וחומרה.</p>
+          <div className="tableScroll">
+            <table className="miniTable productRowsTable">
+              <thead>
+                <tr>
+                  <th>מנהל הסדר</th>
+                  <th>סה״כ שורות עם שגיאה</th>
+                  <th>שגיאות דמי ניהול</th>
+                  <th>שגיאות מסלול / גיל</th>
+                  <th>חוסרי מידע</th>
+                  <th>לא תקין</th>
+                </tr>
+              </thead>
+              <tbody>
+                {aggregateRows(errors, (row) => getArrangementManagerName(row)).map((item) => {
+                  const managerErrors = item.rows;
+                  const managerFeeErrors = managerErrors.filter((row) => row.errorReasons.some((reason) => reason.includes("דמי") || reason.includes("הסכם"))).length;
+                  const managerTrackErrors = managerErrors.filter((row) => row.errorReasons.some((reason) => reason.includes("גיל") || reason.includes("מסלול"))).length;
+                  const managerMissingErrors = managerErrors.filter((row) => row.severity === "unknown").length;
+                  const managerWarningErrors = managerErrors.filter((row) => row.severity === "warning").length;
+                  return (
+                    <tr key={item.key}>
+                      <td>{item.key}</td>
+                      <td>{managerErrors.length}</td>
+                      <td>{managerFeeErrors}</td>
+                      <td>{managerTrackErrors}</td>
+                      <td>{managerMissingErrors}</td>
+                      <td>{managerWarningErrors}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      {!isAggregateScope && (
       <section className="workspaceCard">
         <h3>רשימת עובדים עם שגיאות לפי מס עובד</h3>
         <p className="hint">
@@ -1418,6 +1658,7 @@ function ErrorsTab({ rows }) {
           <p className="hint">לא נמצאו עובדים עם שגיאות לפי מס עובד בשכבת הניתוח הנוכחית.</p>
         )}
       </section>
+      )}
     </section>
   );
 }
@@ -1441,7 +1682,8 @@ export default function EducationFundAnalysisView({ analysisData }) {
   }, [managerOptions, selectedManagerKey]);
 
   const selectedManager = managerOptions.find((option) => option.key === selectedManagerKey) || null;
-  const scopeLabel = selectedManagerKey === "all" ? "כל מנהלי ההסדר" : selectedManager?.name || "מנהל הסדר";
+  const isAggregateScope = selectedManagerKey === "all";
+  const scopeLabel = isAggregateScope ? "כל מנהלי ההסדר" : selectedManager?.name || "מנהל הסדר";
   const totalAccumulation = selectedRows.reduce((sum, row) => sum + safeNumber(row.currentBalance), 0);
   const totalMonthlyDeposits = selectedRows.reduce((sum, row) => sum + safeNumber(row.monthlyDeposit), 0);
   const issuerCount = new Set(selectedRows.map((row) => row.issuerOriginal || row.issuer).filter(Boolean)).size;
@@ -1453,7 +1695,7 @@ export default function EducationFundAnalysisView({ analysisData }) {
           <p className="eyebrow">Education Fund</p>
           <h2>ניתוח קרן השתלמות</h2>
           <p>
-            ניתוח לפי דמי ניהול, צבירה, התאמת מסלול השקעה לגיל, צבירות לפי מנהלי השקעות ורשימת עובדים עם שגיאות לפי מס עובד — באגריגציה כוללת או לפי מנהל הסדר.
+            ניתוח לפי דמי ניהול, צבירה, התאמת מסלול השקעה לגיל, צבירות לפי מנהלי השקעות ורשימת עובדים עם שגיאות לפי מס עובד — רק כאשר נבחר מנהל הסדר יחיד. במבט כללי מוצגים נתונים אגרגטיביים בלבד.
           </p>
         </div>
       </div>
@@ -1495,11 +1737,11 @@ export default function EducationFundAnalysisView({ analysisData }) {
 
       <EducationTabs activeTab={activeTab} onChange={setActiveTab} />
 
-      {activeTab === "fees" && <FeesTab rows={selectedRows} />}
+      {activeTab === "fees" && <FeesTab rows={selectedRows} isAggregateScope={isAggregateScope} />}
       {activeTab === "accumulation" && <AccumulationTab rows={selectedRows} />}
-      {activeTab === "tracksByAge" && <TracksByAgeTab rows={selectedRows} />}
+      {activeTab === "tracksByAge" && <TracksByAgeTab rows={selectedRows} isAggregateScope={isAggregateScope} />}
       {activeTab === "managers" && <ManagersTab rows={selectedRows} />}
-      {activeTab === "errors" && <ErrorsTab rows={selectedRows} />}
+      {activeTab === "errors" && <ErrorsTab rows={selectedRows} isAggregateScope={isAggregateScope} />}
     </section>
   );
 }

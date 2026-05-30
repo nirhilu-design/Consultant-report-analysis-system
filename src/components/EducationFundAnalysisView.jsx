@@ -1,13 +1,13 @@
 // Path: src/components/EducationFundAnalysisView.jsx
-// CORE HARDENING v32
+// CORE HARDENING v33
 // Education Fund Analysis View — קרן השתלמות
 //
 // Tabs:
-// 1. בדיקת דמי ניהול לפי הסכם
+// 1. דמי ניהול מול קובץ הסכמים
 // 2. ניתוח לפי צבירה
 // 3. מסלולי השקעה לפי גיל לקוח
 // 4. צבירות לפי מנהלי השקעות
-// 5. עובדים עם שגיאות
+// 5. עובדים עם שגיאות לפי מס עובד
 //
 // Notes:
 // - This component is presentation/analysis only.
@@ -28,7 +28,7 @@ const EDUCATION_TABS = [
   },
   {
     key: "tracksByAge",
-    title: "טבלת מסלולים לפי גיל",
+    title: "מסלול השקעה מול פרטים אישיים",
   },
   {
     key: "managers",
@@ -36,7 +36,7 @@ const EDUCATION_TABS = [
   },
   {
     key: "errors",
-    title: "עובדים עם שגיאות",
+    title: "עובדים עם שגיאות לפי מס עובד",
   },
 ];
 
@@ -338,13 +338,12 @@ function ManagerScopeSelector({ options, selectedKey, onChange }) {
   );
 }
 
+function getEmployeeErrorKey(row) {
+  return normalizeText(row.employeeCode) || normalizeText(row.idNumber) || normalizeText(row.memberKey) || normalizeText(row.clientName);
+}
+
 function getMemberKey(row) {
-  return (
-    normalizeText(row.employeeCode) ||
-    normalizeText(row.idNumber) ||
-    normalizeText(row.memberKey) ||
-    normalizeText(row.clientName)
-  );
+  return getEmployeeErrorKey(row);
 }
 
 function parseDateValue(value) {
@@ -394,13 +393,14 @@ function calculateAge(value) {
 }
 
 function extractBirthDateFromRow(row) {
+  // For education fund, age analysis must be based on the personal-details file,
+  // not on the product file. Parser v33 enriches row.personalDetails by employeeCode/idNumber.
   return (
+    row.personalDetails?.birthDate ||
+    row.personalDetails?.birthYear ||
     row.birthDate ||
     row.dateOfBirth ||
     row.memberBirthDate ||
-    row.personalDetails?.birthDate ||
-    row.rawProductRow?.birthDate ||
-    row.rawProductRow?.dateOfBirth ||
     null
   );
 }
@@ -669,13 +669,14 @@ function buildEducationEmployeeErrors(rows) {
     const ageRow = ageByRowKey.get(row.rowKey) || row;
     const reasons = [];
 
-    if (!getMemberKey(row)) reasons.push("חסר מזהה עובד / תעודת זהות");
+    if (!getEmployeeErrorKey(row)) reasons.push("חסר מס עובד / תעודת זהות");
     if (!normalizeText(row.issuerOriginal || row.issuer || row.manager)) reasons.push("חסר שם גוף מנהל / חברת ביטוח");
     if (!safeNumber(row.currentBalance)) reasons.push("חסרה או מאופסת צבירה");
     if (!isPresentNumber(row.accumulationFee)) reasons.push("חסרים דמי ניהול בפועל");
     if (!isPresentNumber(row.accumulationFeeAgreement)) reasons.push("חסר הסכם דמי ניהול מתאים");
     if (row.calculatedFeeStatus === "warning") reasons.push("דמי הניהול בפועל גבוהים מההסכם");
-    if (ageRow.ageTrackStatus === "unknown") reasons.push("חסר גיל / מסלול השקעה");
+    if (!row.personalDetailsMatched) reasons.push("לא נמצא עובד תואם בקובץ פרטים אישיים לפי מס עובד/תעודת זהות");
+    if (ageRow.ageTrackStatus === "unknown") reasons.push("חסר גיל מקובץ פרטים אישיים / מסלול השקעה");
     if (ageRow.ageTrackStatus === "review") reasons.push("מסלול השקעה דורש בדיקת התאמה לגיל");
 
     if (!reasons.length) return;
@@ -712,6 +713,7 @@ function buildAgeTrackAnalysis(rows) {
       ageTrackStatus: fit.status,
       ageTrackLabel: fit.label,
       ageTrackExplanation: fit.explanation,
+      personalDetailsMatched: Boolean(row.personalDetailsMatched || row.personalDetails),
     };
   });
 }
@@ -1211,7 +1213,7 @@ function ErrorsTab({ rows }) {
       </div>
 
       <section className="workspaceCard">
-        <h3>רשימת עובדים עם שגיאות</h3>
+        <h3>רשימת עובדים עם שגיאות לפי מס עובד</h3>
         <p className="hint">
           החוצץ הזה מרכז רק עובדים/שורות שדורשים טיפול: חריגות דמי ניהול, חוסר התאמה להסכם, חסר גיל/מסלול או נתוני בסיס חסרים.
         </p>
@@ -1260,7 +1262,7 @@ function ErrorsTab({ rows }) {
             </table>
           </div>
         ) : (
-          <p className="hint">לא נמצאו עובדים עם שגיאות בשכבת הניתוח הנוכחית.</p>
+          <p className="hint">לא נמצאו עובדים עם שגיאות לפי מס עובד בשכבת הניתוח הנוכחית.</p>
         )}
       </section>
     </section>
@@ -1298,7 +1300,7 @@ export default function EducationFundAnalysisView({ analysisData }) {
           <p className="eyebrow">Education Fund</p>
           <h2>ניתוח קרן השתלמות</h2>
           <p>
-            ניתוח לפי דמי ניהול, צבירה, התאמת מסלול השקעה לגיל, צבירות לפי מנהלי השקעות ורשימת עובדים עם שגיאות — באגריגציה כוללת או לפי מנהל הסדר.
+            ניתוח לפי דמי ניהול, צבירה, התאמת מסלול השקעה לגיל, צבירות לפי מנהלי השקעות ורשימת עובדים עם שגיאות לפי מס עובד — באגריגציה כוללת או לפי מנהל הסדר.
           </p>
         </div>
       </div>

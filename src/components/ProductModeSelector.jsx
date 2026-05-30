@@ -1,12 +1,6 @@
 // Path: src/components/ProductModeSelector.jsx
-// CORE HARDENING v26C
-// Product Mode Selector
-//
-// Purpose:
-// Let the user choose which product flow is being uploaded/analyzed.
-// Current modes:
-// - pension
-// - hishtalmut
+// CORE HARDENING v27
+// Multi Product Mode Selector
 
 import React from "react";
 
@@ -32,17 +26,27 @@ export function getProductModeLabel(productMode) {
   return PRODUCT_MODE_OPTIONS.find((option) => option.key === productMode)?.title || "פנסיה";
 }
 
-export default function ProductModeSelector({ value = PRODUCT_MODES.PENSION, onChange, disabled = false }) {
+export default function ProductModeSelector({
+  value = PRODUCT_MODES.PENSION,
+  onChange,
+  disabled = false,
+  overview = [],
+}) {
+  function getOverview(optionKey) {
+    return overview.find((item) => item.productMode === optionKey) || null;
+  }
+
   return (
     <section className="productModeSelector" dir="rtl">
       <div className="productModeSelectorHeader">
-        <strong>בחר מוצר לניתוח</strong>
-        <span>הבחירה קובעת איזה Parser ירוץ על הקבצים שהועלו.</span>
+        <strong>בחר מוצר לטעינה / ניתוח</strong>
+        <span>מעבר בין מוצרים לא מוחק קבצים שכבר הועלו למוצר אחר.</span>
       </div>
 
       <div className="productModeOptions">
         {PRODUCT_MODE_OPTIONS.map((option) => {
           const active = value === option.key;
+          const item = getOverview(option.key);
 
           return (
             <button
@@ -54,6 +58,12 @@ export default function ProductModeSelector({ value = PRODUCT_MODES.PENSION, onC
             >
               <strong>{option.title}</strong>
               <span>{option.subtitle}</span>
+
+              {item?.hasFiles && (
+                <em className={item.ready ? "productModeMiniStatus ready" : "productModeMiniStatus partial"}>
+                  {item.readyManagers}/{item.activeManagers} מנהלים מוכנים
+                </em>
+              )}
             </button>
           );
         })}

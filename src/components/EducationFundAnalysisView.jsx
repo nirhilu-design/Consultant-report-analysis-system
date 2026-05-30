@@ -82,39 +82,152 @@ function safeNumber(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function getEducationFundData(analysisData) {
-  const productResult =
-    analysisData?.productResults?.hishtalmut ||
-    (analysisData?.productMode === "hishtalmut" ? analysisData : null) ||
-    {};
 
-  const rows =
-    productResult.unifiedRows ||
-    productResult.educationFundRows ||
-    analysisData?.educationFundRows ||
-    [];
+function firstDefined(...values) {
+  return values.find((value) => value !== null && value !== undefined && value !== "");
+}
 
-  const summary =
-    productResult.productSummary ||
-    productResult.educationFundSummary ||
-    productResult.summary ||
-    analysisData?.educationFundSummary ||
-    analysisData?.productSummary ||
-    {};
+function normalizeEducationRow(row, index = 0, source = "unknown") {
+  const raw = row?.rawProductRow || row?.raw || {};
 
-  const warnings =
-    productResult?.diagnostics?.warnings ||
-    productResult?.warnings ||
-    [];
+  const currentBalance = safeNumber(firstDefined(
+    row?.currentBalance,
+    row?.accumulation,
+    row?.balance,
+    row?.totalAccumulation,
+    raw?.currentBalance,
+    raw?.accumulation,
+    raw?.balance
+  ));
+
+  const monthlyDeposit = safeNumber(firstDefined(
+    row?.monthlyDeposit,
+    row?.lastPremium,
+    row?.premium,
+    row?.deposit,
+    raw?.monthlyDeposit,
+    raw?.lastPremium,
+    raw?.premium,
+    raw?.deposit
+  ));
 
   return {
-    productResult,
-    rows: asArray(rows),
-    summary,
-    warnings: asArray(warnings),
+    ...row,
+    sourceFallback: source,
+    rowKey: row?.rowKey || `${source}-${row?.policyNumber || row?.fundName || row?.employeeCode || index}`,
+    productType: row?.productType || raw?.productType || "hishtalmut",
+    productLabel: row?.productLabel || raw?.productLabel || "קרן השתלמות",
+
+    issuer: firstDefined(row?.issuer, row?.issuerOriginal, row?.manager, raw?.issuer, raw?.issuerOriginal, raw?.manager, ""),
+    issuerOriginal: firstDefined(row?.issuerOriginal, row?.issuer, row?.manager, raw?.issuerOriginal, raw?.issuer, raw?.manager, ""),
+    manager: firstDefined(row?.manager, row?.issuerOriginal, row?.issuer, raw?.manager, raw?.issuerOriginal, raw?.issuer, ""),
+
+    employeeCode: firstDefined(row?.employeeCode, raw?.employeeCode, ""),
+    idNumber: firstDefined(row?.idNumber, raw?.idNumber, ""),
+    memberKey: firstDefined(row?.memberKey, row?.employeeCode, row?.idNumber, raw?.employeeCode, raw?.idNumber, ""),
+    clientName: firstDefined(row?.clientName, raw?.clientName, ""),
+
+    policyNumber: firstDefined(row?.policyNumber, raw?.policyNumber, ""),
+    fundName: firstDefined(row?.fundName, row?.productName, raw?.fundName, raw?.productName, ""),
+    productName: firstDefined(row?.productName, row?.fundName, raw?.productName, raw?.fundName, "קרן השתלמות"),
+
+    investmentTrack: firstDefined(row?.investmentTrack, row?.investmentTrackRewards, row?.investmentTrackCompensation, raw?.investmentTrack, raw?.investmentTrackRewards, raw?.investmentTrackCompensation, ""),
+    investmentTrackRewards: firstDefined(row?.investmentTrackRewards, raw?.investmentTrackRewards, ""),
+    investmentTrackCompensation: firstDefined(row?.investmentTrackCompensation, raw?.investmentTrackCompensation, ""),
+
+    currentBalance,
+    accumulation: currentBalance,
+    monthlyDeposit,
+    lastPremium: monthlyDeposit,
+
+    accumulationFee: firstDefined(row?.accumulationFee, raw?.accumulationFee, null),
+    accumulationFeeAgreement: firstDefined(row?.accumulationFeeAgreement, raw?.accumulationFeeAgreement, null),
+    feeStatus: firstDefined(row?.feeStatus, row?.calculatedFeeStatus, raw?.feeStatus, "unknown"),
+    agreementMatched: Boolean(firstDefined(row?.agreementMatched, raw?.agreementMatched, false)),
+
+    birthDate: firstDefined(row?.birthDate, row?.dateOfBirth, row?.memberBirthDate, raw?.birthDate, raw?.dateOfBirth, raw?.memberBirthDate, null),
+    rawProductRow: raw && Object.keys(raw).length ? raw : row,
   };
 }
 
+function normalizeEducationRows(rows, source) {
+  return asArray(rows)
+    .filter(Boolean)
+    .map((row, index) => normalizeEducationRow(row, index, source));
+}
+
+function getEducationFundData(analysisData) {
+  const productResults = analysisData?.productResults || {};
+  const productResult =
+    productResults.hishtalmut ||
+    productResults.educationFund ||
+    productResults[analysisData?.activeProductMode] ||
+    (analysisData?.productMode === "hishtalmut" || analysisData?.productType === "hishtalmut" ? analysisData : null) ||
+    {};
+
+  const directRows = [
+    ...normalizeEducationRows(productResult.unifiedRows, "productResult.unifiedRows"),
+    ...normalizeEducationRows(productResult.educationFundRows, "productResult.educationFundRows"),
+    ...normalizeEducationRows(analysisData?.educationFundRows, "analysisData.educationFundRows"),
+  ];
+
+  const fallbackRows = directRows.length
+    ? []
+    : [
+        ...normalizeEducationRows(productResult.rawRows, "productResult.rawRows"),
+        ...normalizeEducationRows(productResult.rowsRaw, "productResult.rowsRaw"),
+        ...normalizeEducationRows(productResult.educationFundRowsRaw, "productResult.educationFundRowsRaw"),
+        ...normalizeEducationRows(analysisData?.rawRows, "analysisData.rawRows"),
+      ];
+
+  const managerRows = directRows.length || fallbackRows.length
+    ? []
+    : asArray(productResult.managerResults).flatMap((managerResult, managerIndex) => [
+        ...normalizeEducationRows(managerResult.unifiedRows, `managerResults.${managerIndex}.unifiedRows`),
+        ...normalizeEducationRows(managerResult.educationFundRows, `managerResults.${managerIndex}.educationFundRows`),
+        ...normalizeEducationRows(managerResult.rawRows, `managerResults.${managerIndex}.rawRows`),
+        ...normalizeEducationRows(managerResult.rowsRaw, `managerResults.${managerIndex}.rowsRaw`),
+        ...normalizeEducationRows(managerResult.educationFundRowsRaw, `managerResults.${managerIndex}.educationFundRowsRaw`),
+      ]);
+
+  const rows = directRows.length ? directRows : fallbackRows.length ? fallbackRows : managerRows;
+
+  const calculatedSummary = {
+    unifiedRowCount: rows.length,
+    totalAccumulation: rows.reduce((sum, row) => sum + safeNumber(row.currentBalance), 0),
+    totalMonthlyDeposits: rows.reduce((sum, row) => sum + safeNumber(row.monthlyDeposit), 0),
+    issuerCount: new Set(rows.map((row) => row.issuerOriginal || row.issuer).filter(Boolean)).size,
+  };
+
+  const summary = {
+    ...calculatedSummary,
+    ...(productResult.productSummary || {}),
+    ...(productResult.educationFundSummary || {}),
+    ...(productResult.summary || {}),
+    ...(analysisData?.educationFundSummary || {}),
+    ...(analysisData?.productSummary || {}),
+  };
+
+  const warnings = [
+    ...asArray(productResult?.diagnostics?.warnings),
+    ...asArray(productResult?.warnings),
+  ];
+
+  if (!directRows.length && fallbackRows.length) {
+    warnings.push("הניתוח משתמש בנתוני rawRows כגיבוי כי unifiedRows לא נמצאו בתוצאת קרן ההשתלמות.");
+  }
+
+  if (!rows.length) {
+    warnings.push("לא נמצאו שורות קרן השתלמות לניתוח. יש לבדוק שהועלה קובץ נתונים למוצר קרן השתלמות ולא רק קובץ הסכמים.");
+  }
+
+  return {
+    productResult,
+    rows,
+    summary,
+    warnings: [...new Set(warnings.filter(Boolean))],
+  };
+}
 function getMemberKey(row) {
   return (
     normalizeText(row.employeeCode) ||
@@ -782,6 +895,16 @@ export default function EducationFundAnalysisView({ analysisData }) {
               <li key={`${warning}-${index}`}>{warning}</li>
             ))}
           </ul>
+        </section>
+      )}
+
+      {!rows.length && (
+        <section className="workspaceCard">
+          <h3>אין עדיין נתונים לניתוח</h3>
+          <p className="hint">
+            החוצצים נטענו, אבל לא נמצאו שורות קרן השתלמות בפלט הניתוח. בדרך כלל זה קורה כאשר חסר קובץ נתונים,
+            כאשר הועלה רק קובץ הסכמים, או כאשר הפלט נשמר תחת שדה raw בלבד. גרסה זו כוללת גיבוי אוטומטי גם ל־rawRows.
+          </p>
         </section>
       )}
 

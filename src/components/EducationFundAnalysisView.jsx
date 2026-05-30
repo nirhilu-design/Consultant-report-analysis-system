@@ -551,6 +551,25 @@ function weightedAverage(rows, valueField, weightField) {
   return Number((weightedSum / weightSum).toFixed(4));
 }
 
+function average(values) {
+  const numericValues = values.map(safeNumber).filter((value) => Number.isFinite(value));
+  if (!numericValues.length) return 0;
+  return numericValues.reduce((sum, value) => sum + value, 0) / numericValues.length;
+}
+
+function median(values) {
+  const numericValues = values
+    .map(safeNumber)
+    .filter((value) => Number.isFinite(value))
+    .sort((a, b) => a - b);
+
+  if (!numericValues.length) return 0;
+
+  const middle = Math.floor(numericValues.length / 2);
+  if (numericValues.length % 2) return numericValues[middle];
+  return (numericValues[middle - 1] + numericValues[middle]) / 2;
+}
+
 function getAccumulationBucket(value) {
   const amount = safeNumber(value);
 
@@ -656,6 +675,27 @@ function buildFeeCompanyChart(rows) {
       totalAccumulation: item.totalAccumulation,
     }))
     .sort((a, b) => b.warningCount - a.warningCount || b.okCount - a.okCount || b.totalAccumulation - a.totalAccumulation);
+}
+
+function buildFeeStatusMatrix(companyChart) {
+  const issuers = companyChart.map((item) => item.issuer);
+  const totals = companyChart.reduce(
+    (acc, item) => {
+      acc.ok += item.okCount;
+      acc.warning += item.warningCount;
+      acc.unknown += item.unknownCount;
+      return acc;
+    },
+    { ok: 0, warning: 0, unknown: 0 }
+  );
+
+  const rows = [
+    { key: "ok", label: "תקין", className: "ok", total: totals.ok, getValue: (item) => item.okCount },
+    { key: "warning", label: "לא תקין", className: "warning", total: totals.warning, getValue: (item) => item.warningCount },
+    { key: "unknown", label: "חסר מידע", className: "unknown", total: totals.unknown, getValue: (item) => item.unknownCount },
+  ];
+
+  return { issuers, rows };
 }
 
 function buildEducationEmployeeErrors(rows) {
@@ -809,30 +849,53 @@ function FeesTab({ rows }) {
       </section>
 
       <section className="workspaceCard">
-        <h3>טבלה מסכמת — דמי ניהול לפי חברת ביטוח</h3>
+        <h3>טבלה מסכמת — סטטוס בדיקה לפי חברת ביטוח</h3>
+        <p className="hint">
+          מבנה הטבלה עודכן: החברות מוצגות בציר האופקי, וסטטוס הבדיקה מוצג בציר האנכי. כך קל לזהות באיזה גוף מנהל יש ריכוז חריגות.
+        </p>
         <div className="tableScroll">
           <table className="miniTable productRowsTable">
             <thead>
               <tr>
-                <th>חברת ביטוח / גוף מנהל</th>
-                <th>עובדים תקינים</th>
-                <th>עובדים לא תקינים</th>
-                <th>חסר מידע</th>
-                <th>שורות שנבדקו</th>
-                <th>סה״כ צבירה</th>
+                <th>סטטוס</th>
+                {buildFeeStatusMatrix(companyChart).issuers.map((issuer) => (
+                  <th key={issuer}>{issuer}</th>
+                ))}
+                <th>סה״כ</th>
               </tr>
             </thead>
             <tbody>
-              {companyChart.map((item) => (
-                <tr key={item.issuer}>
-                  <td>{item.issuer}</td>
-                  <td>{item.okCount}</td>
-                  <td>{item.warningCount}</td>
-                  <td>{item.unknownCount}</td>
-                  <td>{item.validFeeRows}</td>
-                  <td>{formatCurrency(item.totalAccumulation)}</td>
+              {buildFeeStatusMatrix(companyChart).rows.map((statusRow) => (
+                <tr key={statusRow.key}>
+                  <td>
+                    <span className={`educationStatusPill ${statusRow.className}`}>
+                      {statusRow.label}
+                    </span>
+                  </td>
+                  {companyChart.map((item) => (
+                    <td key={`${statusRow.key}-${item.issuer}`}>{statusRow.getValue(item)}</td>
+                  ))}
+                  <td><strong>{statusRow.total}</strong></td>
                 </tr>
               ))}
+              <tr>
+                <td><strong>אחוז חריגה</strong></td>
+                {companyChart.map((item) => {
+                  const checked = item.okCount + item.warningCount;
+                  const percent = checked ? Math.round((item.warningCount / checked) * 100) : 0;
+                  return <td key={`warning-rate-${item.issuer}`}>{percent}%</td>;
+                })}
+                <td>
+                  {validEmployeeCount ? Math.round((analysis.warningCount / validEmployeeCount) * 100) : 0}%
+                </td>
+              </tr>
+              <tr>
+                <td><strong>סה״כ צבירה</strong></td>
+                {companyChart.map((item) => (
+                  <td key={`accumulation-${item.issuer}`}>{formatCurrency(item.totalAccumulation)}</td>
+                ))}
+                <td>{formatCurrency(companyChart.reduce((sum, item) => sum + safeNumber(item.totalAccumulation), 0))}</td>
+              </tr>
             </tbody>
           </table>
         </div>
@@ -895,24 +958,31 @@ function AccumulationTab({ rows }) {
     [rows]
   );
 
+  const byManager = useMemo(
+    () => aggregateRows(rows, (row) => row.issuerOriginal || row.issuer || row.manager || "לא ידוע"),
+    [rows]
+  );
+
   const totalAccumulation = rows.reduce((sum, row) => sum + safeNumber(row.currentBalance), 0);
-  const averageBalance = rows.length ? totalAccumulation / rows.length : 0;
-  const largestRows = rows
-    .slice()
-    .sort((a, b) => safeNumber(b.currentBalance) - safeNumber(a.currentBalance))
-    .slice(0, 10);
+  const balances = rows.map((row) => row.currentBalance);
+  const averageBalance = average(balances);
+  const medianBalance = median(balances);
+  const activeRows = rows.filter((row) => safeNumber(row.currentBalance) > 0);
 
   return (
     <section className="educationTabPanel">
       <div className="educationKpiGrid">
         <KpiCard label="סה״כ צבירה" value={formatCurrency(totalAccumulation)} />
-        <KpiCard label="ממוצע לקופה" value={formatCurrency(averageBalance)} />
-        <KpiCard label="מספר קופות" value={formatNumber(rows.length)} />
-        <KpiCard label="קופות מעל 250K" value={rows.filter((row) => safeNumber(row.currentBalance) >= 250000).length} />
+        <KpiCard label="ממוצע לשורה" value={formatCurrency(averageBalance)} />
+        <KpiCard label="חציון לשורה" value={formatCurrency(medianBalance)} />
+        <KpiCard label="שורות עם צבירה" value={`${formatNumber(activeRows.length)} / ${formatNumber(rows.length)}`} />
       </div>
 
       <section className="workspaceCard">
         <h3>טבלה מסכמת — צבירה לפי מדרגות</h3>
+        <p className="hint">
+          הטבלה מסכמת את הפיזור לפי מדרגות צבירה. היא לא מציגה רשימת קופות בודדות ולכן לא אמורה להכפיל שורות בגלל ריבוי מסלולים או מוצרים לעובד.
+        </p>
 
         <div className="educationBucketGrid">
           {byBucket.map((bucket) => {
@@ -925,7 +995,7 @@ function AccumulationTab({ rows }) {
                 <strong>{bucket.key}</strong>
                 <span>{formatCurrency(bucket.totalAccumulation)}</span>
                 <small>
-                  {bucket.rowCount} קופות · {percent}% מהצבירה
+                  {bucket.rowCount} שורות · {percent}% מהצבירה
                 </small>
                 <div className="educationMiniBar">
                   <i style={{ width: `${percent}%` }} />
@@ -937,13 +1007,13 @@ function AccumulationTab({ rows }) {
       </section>
 
       <section className="workspaceCard">
-        <h3>טבלה מסכמת — צבירה לפי מדרגות</h3>
+        <h3>פירוט מדרגות צבירה</h3>
         <div className="tableScroll">
           <table className="miniTable productRowsTable">
             <thead>
               <tr>
                 <th>מדרגת צבירה</th>
-                <th>מספר קופות</th>
+                <th>מספר שורות</th>
                 <th>סה״כ צבירה</th>
                 <th>אחוז מהתיק</th>
                 <th>הפקדה / פרמיה אחרונה</th>
@@ -970,30 +1040,44 @@ function AccumulationTab({ rows }) {
       </section>
 
       <section className="workspaceCard">
-        <h3>הקופות הגדולות ביותר</h3>
+        <h3>סיכום צבירה לפי גוף מנהל</h3>
+        <p className="hint">
+          במקום טבלת “הקופות הגדולות ביותר” שהציגה שורות גולמיות ועלולה להיראות כמו כפילות, מוצג כאן ריכוז אגרגטיבי לפי גוף מנהל.
+        </p>
 
         <div className="tableScroll">
           <table className="miniTable productRowsTable">
             <thead>
               <tr>
                 <th>גוף מנהל</th>
-                <th>שם קופה</th>
-                <th>צבירה</th>
+                <th>מספר שורות</th>
+                <th>סה״כ צבירה</th>
+                <th>אחוז מהתיק</th>
+                <th>צבירה ממוצעת</th>
                 <th>הפקדה / פרמיה אחרונה</th>
-                <th>דמי ניהול</th>
+                <th>דמי ניהול ממוצעים</th>
               </tr>
             </thead>
 
             <tbody>
-              {largestRows.map((row, index) => (
-                <tr key={`${row.policyNumber || row.fundName || "acc"}-${index}`}>
-                  <td>{row.issuerOriginal || row.issuer || "-"}</td>
-                  <td>{row.fundName || row.productName || "-"}</td>
-                  <td>{formatCurrency(row.currentBalance)}</td>
-                  <td>{formatCurrency(row.monthlyDeposit)}</td>
-                  <td>{formatPercent(row.accumulationFee)}</td>
-                </tr>
-              ))}
+              {byManager.map((manager) => {
+                const percent = totalAccumulation
+                  ? Math.round((manager.totalAccumulation / totalAccumulation) * 100)
+                  : 0;
+                const managerAverage = manager.rowCount ? manager.totalAccumulation / manager.rowCount : 0;
+
+                return (
+                  <tr key={manager.key}>
+                    <td>{manager.key}</td>
+                    <td>{manager.rowCount}</td>
+                    <td>{formatCurrency(manager.totalAccumulation)}</td>
+                    <td>{percent}%</td>
+                    <td>{formatCurrency(managerAverage)}</td>
+                    <td>{formatCurrency(manager.totalMonthlyDeposits)}</td>
+                    <td>{formatPercent(manager.averageAccumulationFee)}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -1007,6 +1091,8 @@ function TracksByAgeTab({ rows }) {
   const byAge = useMemo(() => aggregateRows(enriched, (row) => row.ageBucket), [enriched]);
   const reviewRows = enriched.filter((row) => row.ageTrackStatus === "review");
   const unknownAgeRows = enriched.filter((row) => row.ageTrackStatus === "unknown");
+  const matchedPersonalRows = enriched.filter((row) => row.personalDetailsMatched);
+  const hasPersonalDetailsData = matchedPersonalRows.length > 0;
 
   return (
     <section className="educationTabPanel">
@@ -1014,15 +1100,20 @@ function TracksByAgeTab({ rows }) {
         <KpiCard label="דורשים בדיקה" value={reviewRows.length} />
         <KpiCard label="חסר גיל / מסלול" value={unknownAgeRows.length} />
         <KpiCard label="מסלולים שונים" value={new Set(enriched.map((row) => row.trackName).filter(Boolean)).size} />
-        <KpiCard label="לקוחות מזוהים" value={new Set(enriched.map(getMemberKey).filter(Boolean)).size} />
+        <KpiCard label="שורות עם פרטים אישיים" value={`${formatNumber(matchedPersonalRows.length)} / ${formatNumber(enriched.length)}`} />
       </div>
 
       <section className="workspaceCard">
         <h3>התאמת מסלול השקעה לפי גיל</h3>
         <p className="hint">
           הבדיקה כאן היא אינדיקציה בלבד: היא משווה בין גיל הלקוח, שם מסלול ההשקעה ורמת סיכון משוערת.
-          כשאין תאריך לידה מהפרטים האישיים, השורה מסומנת כחסר מידע.
+          מקור הגיל הוא קובץ הפרטים האישיים הרוחבי; אם הוא כבר הועלה תחת קרנות הפנסיה, המערכת משתמשת בו גם כאן ואין צורך להעלות אותו שוב תחת השתלמות.
         </p>
+        {!hasPersonalDetailsData && (
+          <p className="hint warningText">
+            לא נמצאה התאמה לפרטים אישיים בשורות ההשתלמות. אם קובץ הפרטים האישיים כבר הועלה בפנסיה, יש לוודא שהניתוח הורץ יחד עם מוצר הפנסיה ושמספר עובד/תעודת זהות זהים בין הקבצים.
+          </p>
+        )}
 
         <div className="tableScroll">
           <table className="miniTable productRowsTable">

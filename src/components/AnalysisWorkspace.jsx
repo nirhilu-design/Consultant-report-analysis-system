@@ -1,14 +1,12 @@
 // Path: src/components/AnalysisWorkspace.jsx
-// CORE HARDENING v27B
-// Central Analysis Workspace
+// CORE HARDENING v27C
+// Central Analysis Workspace — Multi Product Results
 //
 // Purpose:
-// One central post-analysis screen for all products.
-// The user selects which product analysis view to display.
-// Pension uses the existing Dashboard.
-// Education fund has a safe placeholder/preview until the dedicated view is built.
+// One central post-analysis screen for all analyzed products.
+// Product tabs are derived from analysisData.productResults.
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import Dashboard from "./Dashboard.jsx";
 import { PRODUCT_MODES, getProductModeLabel } from "./ProductModeSelector.jsx";
 
@@ -30,14 +28,15 @@ function formatPercent(value) {
 }
 
 function getAvailableProducts(analysisData) {
+  const productResults = analysisData?.productResults || {};
   const products = [];
 
-  if (analysisData?.productResults?.pension || analysisData?.pensionSummary || analysisData?.pensionRows) {
+  if (productResults[PRODUCT_MODES.PENSION] || analysisData?.pensionSummary || analysisData?.pensionRows) {
     products.push(PRODUCT_MODES.PENSION);
   }
 
   if (
-    analysisData?.productResults?.hishtalmut ||
+    productResults[PRODUCT_MODES.HISHTALMUT] ||
     analysisData?.educationFundSummary ||
     analysisData?.educationFundRows ||
     analysisData?.productSummary?.productType === PRODUCT_MODES.HISHTALMUT
@@ -50,18 +49,20 @@ function getAvailableProducts(analysisData) {
 
 function getEducationFundData(analysisData) {
   const productResult =
-    analysisData?.productResults?.hishtalmut ||
+    analysisData?.productResults?.[PRODUCT_MODES.HISHTALMUT] ||
     (analysisData?.productMode === PRODUCT_MODES.HISHTALMUT ? analysisData : null) ||
     {};
 
   const unifiedRows =
     productResult.unifiedRows ||
+    productResult.educationFundRows ||
     analysisData?.educationFundRows ||
     [];
 
   const summary =
     productResult.productSummary ||
     productResult.summary ||
+    productResult.educationFundSummary ||
     analysisData?.educationFundSummary ||
     analysisData?.productSummary ||
     {};
@@ -195,8 +196,18 @@ export default function AnalysisWorkspace({ files, analysisData, onBack }) {
       : availableProducts[0]
   );
 
+  useEffect(() => {
+    if (!availableProducts.includes(selectedProduct)) {
+      setSelectedProduct(
+        availableProducts.includes(analysisData?.activeProductMode)
+          ? analysisData.activeProductMode
+          : availableProducts[0]
+      );
+    }
+  }, [analysisData?.activeProductMode, availableProducts, selectedProduct]);
+
   const pensionAnalysisData =
-    analysisData?.productResults?.pension ||
+    analysisData?.productResults?.[PRODUCT_MODES.PENSION] ||
     (analysisData?.productMode === PRODUCT_MODES.PENSION ? analysisData : null) ||
     analysisData;
 

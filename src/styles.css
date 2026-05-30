@@ -1951,3 +1951,24 @@ body,
     flex-direction: column;
   }
 }
+
+/* CORE HARDENING v27 — Multi Product Upload */
+.productModeMiniStatus {
+  display: inline-flex;
+  margin-top: 8px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.productModeMiniStatus.ready {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.productModeMiniStatus.partial {
+  background: #fef3c7;
+  color: #92400e;
+}

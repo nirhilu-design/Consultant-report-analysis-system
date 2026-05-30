@@ -17,7 +17,7 @@ import {
 
 const PRODUCT_TYPE = "hishtalmut";
 const PRODUCT_LABEL = "קרן השתלמות";
-const PARSER_VERSION = "education_fund_integration_v1";
+const PARSER_VERSION = "education_fund_integration_v31_multi_manager";
 
 function normalizeText(value) {
   return String(value ?? "")
@@ -133,7 +133,16 @@ function getFeeStatus(actualFee, agreementFee, sourceStatus) {
   return "warning";
 }
 
-function toUnifiedEducationFundRow(row, agreement, manager = {}) {
+function getManagerIdentity(manager = {}) {
+  const index = Number.isFinite(Number(manager.index)) ? Number(manager.index) : 0;
+  return {
+    id: manager?.id || `manager_${index + 1}`,
+    name: manager?.name || `מנהל הסדר ${index + 1}`,
+    index,
+  };
+}
+
+function toUnifiedEducationFundRow(row, agreement, manager = {}, sourceFileName = "") {
   const actualAccumulationFee = row.accumulationFee ?? null;
   const agreementAccumulationFee =
     row.accumulationFeeAgreement ??
@@ -141,6 +150,8 @@ function toUnifiedEducationFundRow(row, agreement, manager = {}) {
     null;
 
   const feeGap = calculateFeeGap(actualAccumulationFee, agreementAccumulationFee);
+
+  const managerIdentity = getManagerIdentity(manager);
 
   return {
     sourceProduct: PRODUCT_TYPE,
@@ -152,11 +163,15 @@ function toUnifiedEducationFundRow(row, agreement, manager = {}) {
     sourceRowIndex: row.sourceRowIndex,
     sourceSheetName: row.sheetName,
 
-    managerId: manager?.id || "",
-    uploadManagerName: manager?.name || "",
+    managerId: managerIdentity.id,
+    uploadManagerName: managerIdentity.name,
+    arrangementManagerId: managerIdentity.id,
+    arrangementManagerName: managerIdentity.name,
+    arrangementManagerIndex: managerIdentity.index,
+    sourceFileName,
     issuer: row.manager || row.issuerOriginal || "",
     issuerOriginal: row.issuerOriginal || row.manager || "",
-    arrangementManager: row.arrangementManager || manager?.name || "",
+    arrangementManager: row.arrangementManager || managerIdentity.name,
 
     memberKey: row.employeeCode || row.idNumber || "",
     employeeCode: row.employeeCode || "",
@@ -206,7 +221,7 @@ function toUnifiedEducationFundRow(row, agreement, manager = {}) {
   };
 }
 
-function buildEducationFundSummary({ rowsRaw, agreements, unifiedRows }) {
+function buildEducationFundSummary({ rowsRaw, agreements, unifiedRows, manager = {} }) {
   const rows = asArray(unifiedRows);
   const raw = asArray(rowsRaw);
   const agreementsList = asArray(agreements);
@@ -226,10 +241,16 @@ function buildEducationFundSummary({ rowsRaw, agreements, unifiedRows }) {
     ? Math.round((matchedAgreements / rows.length) * 100)
     : 0;
 
+  const managerIdentity = getManagerIdentity(manager);
+
   return {
     productType: PRODUCT_TYPE,
     productLabel: PRODUCT_LABEL,
     parserVersion: PARSER_VERSION,
+    managerId: managerIdentity.id,
+    managerName: managerIdentity.name,
+    arrangementManagerId: managerIdentity.id,
+    arrangementManagerName: managerIdentity.name,
     rawRowCount: raw.length,
     unifiedRowCount: rows.length,
     agreementCount: agreementsList.length,
@@ -291,15 +312,17 @@ export async function parseEducationFundManagerFiles({
   const rowsRaw = dataWorkbook ? parseEducationFund(dataWorkbook) : [];
   const agreements = agreementsWorkbook ? parseEducationFundAgreements(agreementsWorkbook) : [];
 
+  const sourceFileName = dataFile?.name || "";
   const unifiedRows = asArray(rowsRaw).map((row) => {
     const agreement = pickBestAgreement(row, agreements);
-    return toUnifiedEducationFundRow(row, agreement, manager);
+    return toUnifiedEducationFundRow(row, agreement, manager, sourceFileName);
   });
 
   const summary = buildEducationFundSummary({
     rowsRaw,
     agreements,
     unifiedRows,
+    manager,
   });
 
   warnings.push(
@@ -338,10 +361,16 @@ export async function parseEducationFundManagerFiles({
     fileName: dataFile?.name || "",
   });
 
+  const managerIdentity = getManagerIdentity(manager);
+
   return {
     productType: PRODUCT_TYPE,
     productLabel: PRODUCT_LABEL,
     parserVersion: PARSER_VERSION,
+    managerId: getManagerIdentity(manager).id,
+    managerName: getManagerIdentity(manager).name,
+    arrangementManagerId: getManagerIdentity(manager).id,
+    arrangementManagerName: getManagerIdentity(manager).name,
 
     dataFileName: dataFile?.name || "",
     agreementsFileName: agreementsFile?.name || "",

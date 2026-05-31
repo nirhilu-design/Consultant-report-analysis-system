@@ -856,41 +856,48 @@ function buildFeeExceptionSummary(feeRows) {
 }
 
 function buildEducationEmployeeErrors(rows) {
-  const feeAnalysis = buildFeeAnalysis(rows);
-  const ageAnalysis = buildAgeTrackAnalysis(rows);
+  const dataset = buildEducationAnalysisDataset(rows);
+  const feeAnalysis = buildFeeAnalysis(dataset.validRows);
+  const ageAnalysis = buildAgeTrackAnalysis(dataset.validRows);
+  const feeByRowKey = new Map(feeAnalysis.rows.map((row) => [row.rowKey, row]));
   const ageByRowKey = new Map(ageAnalysis.map((row) => [row.rowKey, row]));
 
   const errors = [];
 
-  feeAnalysis.rows.forEach((row, index) => {
+  dataset.rows.forEach((row, index) => {
+    const feeRow = feeByRowKey.get(row.rowKey) || row;
     const ageRow = ageByRowKey.get(row.rowKey) || row;
-    const reasons = [];
+    const reasons = [...asArray(row.validationErrors)];
 
-    if (!getEmployeeErrorKey(row)) reasons.push("חסר מס עובד / תעודת זהות");
-    if (!normalizeText(row.issuerOriginal || row.issuer || row.manager)) reasons.push("חסר שם גוף מנהל / חברת ביטוח");
-    if (!safeNumber(row.currentBalance)) reasons.push("חסרה או מאופסת צבירה");
-    if (!isPresentNumber(row.accumulationFee)) reasons.push("חסרים דמי ניהול בפועל");
-    if (!isPresentNumber(row.accumulationFeeAgreement)) reasons.push("חסר הסכם דמי ניהול מתאים");
-    if (row.calculatedFeeStatus === "warning") reasons.push("דמי הניהול בפועל גבוהים מההסכם");
-    if (!row.personalDetailsMatched) reasons.push("לא נמצא עובד תואם בקובץ פרטים אישיים לפי מס עובד/תעודת זהות");
-    if (ageRow.ageTrackStatus === "unknown") reasons.push("חסר גיל מקובץ פרטים אישיים / מסלול השקעה");
-    if (ageRow.ageTrackStatus === "review") reasons.push("מסלול השקעה דורש בדיקת התאמה לגיל");
+    if (row.isValidForAnalysis) {
+      if (feeRow.calculatedFeeStatus === "warning") reasons.push("דמי הניהול בפועל גבוהים מההסכם");
+      if (!row.personalDetailsMatched) reasons.push("לא נמצא עובד תואם בקובץ פרטים אישיים לפי מס עובד/תעודת זהות");
+      if (ageRow.ageTrackStatus === "unknown") reasons.push("חסר גיל מקובץ פרטים אישיים / מסלול השקעה");
+      if (ageRow.ageTrackStatus === "review") reasons.push("מסלול השקעה דורש בדיקת התאמה לגיל");
+    }
 
     if (!reasons.length) return;
 
+    const isHardInvalid = !row.isValidForAnalysis;
     errors.push({
-      ...row,
+      ...feeRow,
+      ...ageRow,
+      validationErrors: row.validationErrors,
+      isValidForAnalysis: row.isValidForAnalysis,
       calculatedAge: ageRow.calculatedAge,
-      trackName: ageRow.trackName,
+      trackName: ageRow.trackName || row.investmentTrack || row.investmentTrackRewards || row.investmentTrackCompensation || "",
       ageTrackLabel: ageRow.ageTrackLabel,
       errorReasons: [...new Set(reasons)],
-      severity: row.calculatedFeeStatus === "warning" || ageRow.ageTrackStatus === "review" ? "warning" : "unknown",
+      severity: isHardInvalid ? "unknown" : feeRow.calculatedFeeStatus === "warning" || ageRow.ageTrackStatus === "review" ? "warning" : "unknown",
       sortValue: safeNumber(row.currentBalance),
       key: `${row.rowKey || row.policyNumber || row.fundName || "err"}-${index}`,
     });
   });
 
-  return errors.sort((a, b) => b.sortValue - a.sortValue);
+  return errors.sort((a, b) => {
+    if (a.isValidForAnalysis !== b.isValidForAnalysis) return a.isValidForAnalysis ? 1 : -1;
+    return b.sortValue - a.sortValue;
+  });
 }
 
 function buildAgeTrackAnalysis(rows) {
@@ -915,6 +922,89 @@ function buildAgeTrackAnalysis(rows) {
       personalDetailsMatched: Boolean(row.personalDetailsMatched || row.personalDetails),
     };
   });
+}
+
+
+function getEducationHardValidationReasons(row) {
+  const reasons = [];
+  const trackName = row.investmentTrack || row.investmentTrackRewards || row.investmentTrackCompensation || "";
+
+  if (!getEmployeeErrorKey(row)) reasons.push("חסר מס עובד / תעודת זהות");
+  if (!normalizeText(row.issuerOriginal || row.issuer || row.manager)) reasons.push("חסר שם גוף מנהל / חברת ביטוח");
+  if (!safeNumber(row.currentBalance)) reasons.push("חסרה או מאופסת צבירה");
+  if (!normalizeText(trackName)) reasons.push("חסר מסלול השקעה");
+  if (!isPresentNumber(row.accumulationFee)) reasons.push("חסרים דמי ניהול בפועל");
+  if (!isPresentNumber(row.accumulationFeeAgreement)) reasons.push("חסר הסכם דמי ניהול מתאים");
+
+  return [...new Set(reasons)];
+}
+
+function buildEducationAnalysisDataset(rows) {
+  const normalizedRows = rows.map((row, index) => {
+    const validationErrors = getEducationHardValidationReasons(row);
+    return {
+      ...row,
+      educationAnalysisRowId: row.rowKey || `${row.policyNumber || row.fundName || row.employeeCode || "education"}-${index}`,
+      validationErrors,
+      isValidForAnalysis: validationErrors.length === 0,
+    };
+  });
+
+  const validRows = normalizedRows.filter((row) => row.isValidForAnalysis);
+  const invalidRows = normalizedRows.filter((row) => !row.isValidForAnalysis);
+  const invalidByReason = invalidRows.reduce((map, row) => {
+    row.validationErrors.forEach((reason) => {
+      map.set(reason, (map.get(reason) || 0) + 1);
+    });
+    return map;
+  }, new Map());
+
+  return {
+    rows: normalizedRows,
+    validRows,
+    invalidRows,
+    validCount: validRows.length,
+    invalidCount: invalidRows.length,
+    validationRate: normalizedRows.length ? Math.round((validRows.length / normalizedRows.length) * 100) : 0,
+    invalidByReason: Array.from(invalidByReason.entries())
+      .map(([reason, count]) => ({ reason, count }))
+      .sort((a, b) => b.count - a.count || a.reason.localeCompare(b.reason, "he")),
+  };
+}
+
+function EducationDataQualityCard({ dataset }) {
+  if (!dataset.rows.length) return null;
+
+  return (
+    <section className="workspaceCard educationDataQualityCard">
+      <div className="sectionHeaderRow">
+        <div>
+          <h3>איכות נתונים לפני ניתוח</h3>
+          <p className="hint">
+            v46 מפריד בין שורות תקינות שנכנסות לסטטיסטיקות לבין שורות חסרות מידע שמועברות לחוצץ השגיאות. כך הגרפים לא מתעוותים בגלל עובדים בלי מזהה, צבירה, מסלול או דמי ניהול.
+          </p>
+        </div>
+        <span className="educationStatusPill ok">{dataset.validationRate}% תקינות</span>
+      </div>
+
+      <div className="educationKpiGrid compact">
+        <KpiCard label="שורות בטווח הנבחר" value={dataset.rows.length} />
+        <KpiCard label="נכנסות לניתוחים" value={dataset.validCount} />
+        <KpiCard label="הועברו לשגיאות" value={dataset.invalidCount} />
+      </div>
+
+      {dataset.invalidByReason.length > 0 && (
+        <div className="educationValidationReasonGrid">
+          {dataset.invalidByReason.slice(0, 6).map((item) => (
+            <article key={item.reason}>
+              <strong>{item.count}</strong>
+              <span>{item.reason}</span>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  );
 }
 
 function KpiCard({ label, value, hint }) {
@@ -1821,9 +1911,11 @@ export default function EducationFundAnalysisView({ analysisData }) {
   const selectedManager = managerOptions.find((option) => option.key === selectedManagerKey) || null;
   const isAggregateScope = selectedManagerKey === "all";
   const scopeLabel = isAggregateScope ? "כל מנהלי ההסדר" : selectedManager?.name || "מנהל הסדר";
+  const educationDataset = useMemo(() => buildEducationAnalysisDataset(selectedRows), [selectedRows]);
+  const analysisRows = educationDataset.validRows;
   const totalAccumulation = selectedRows.reduce((sum, row) => sum + safeNumber(row.currentBalance), 0);
   const totalMonthlyDeposits = selectedRows.reduce((sum, row) => sum + safeNumber(row.monthlyDeposit), 0);
-  const issuerCount = new Set(selectedRows.map((row) => row.issuerOriginal || row.issuer).filter(Boolean)).size;
+  const issuerCount = new Set(analysisRows.map((row) => row.issuerOriginal || row.issuer).filter(Boolean)).size;
 
   return (
     <section className="educationFundAnalysisView" dir="rtl">
@@ -1849,10 +1941,14 @@ export default function EducationFundAnalysisView({ analysisData }) {
         <KpiCard label="סה״כ צבירה" value={formatCurrency(totalAccumulation || summary.totalAccumulation)} />
         <KpiCard label="הפקדה / פרמיה אחרונה" value={formatCurrency(totalMonthlyDeposits || summary.totalMonthlyDeposits)} />
         <KpiCard label="גופים מנהלים" value={issuerCount || summary.issuerCount || 0} />
+        <KpiCard label="שורות תקינות לניתוח" value={educationDataset.validCount} />
+        <KpiCard label="שורות לשגיאות" value={educationDataset.invalidCount} />
       </div>
 
+      <EducationDataQualityCard dataset={educationDataset} />
+
       <EducationFundNextActionPanel
-        rows={selectedRows}
+        rows={analysisRows}
         managerLabel={scopeLabel}
         isAggregateScope={isAggregateScope}
         onOpenTab={setActiveTab}
@@ -1881,10 +1977,10 @@ export default function EducationFundAnalysisView({ analysisData }) {
 
       <EducationTabs activeTab={activeTab} onChange={setActiveTab} />
 
-      {activeTab === "fees" && <FeesTab rows={selectedRows} isAggregateScope={isAggregateScope} />}
-      {activeTab === "accumulation" && <AccumulationTab rows={selectedRows} />}
-      {activeTab === "tracksByAge" && <TracksByAgeTab rows={selectedRows} isAggregateScope={isAggregateScope} />}
-      {activeTab === "managers" && <ManagersTab rows={selectedRows} />}
+      {activeTab === "fees" && <FeesTab rows={analysisRows} isAggregateScope={isAggregateScope} />}
+      {activeTab === "accumulation" && <AccumulationTab rows={analysisRows} />}
+      {activeTab === "tracksByAge" && <TracksByAgeTab rows={analysisRows} isAggregateScope={isAggregateScope} />}
+      {activeTab === "managers" && <ManagersTab rows={analysisRows} />}
       {activeTab === "errors" && <ErrorsTab rows={selectedRows} isAggregateScope={isAggregateScope} />}
     </section>
   );

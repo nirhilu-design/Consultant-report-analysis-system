@@ -23,6 +23,132 @@ import {
   filterRowsByManager,
 } from "../unified/dashboardSelectors.js";
 
+
+function sumNumbers(items, getter) {
+  return items.reduce((sum, item) => sum + Number(getter(item) || 0), 0);
+}
+
+function groupItems(items = [], keyGetter) {
+  const map = new Map();
+  items.forEach((item) => {
+    const key = keyGetter(item);
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(item);
+  });
+  return [...map.entries()].map(([key, group]) => ({ key, group }));
+}
+
+function buildAggregateActionItems(items = []) {
+  return groupItems(items, (item) => [
+    safeText(item.issuer),
+    safeText(item.auditStatus),
+    safeText(item.priority),
+    safeText(item.issueCategory),
+    safeText(item.requiredAction),
+  ].join("|"))
+    .map(({ key, group }) => {
+      const first = group[0] || {};
+      return {
+        key,
+        issuer: first.issuer || "לא ידוע",
+        auditStatus: first.auditStatus || "unknown",
+        priority: first.priority || "LOW",
+        issueCategory: first.issueCategory || "-",
+        requiredAction: first.requiredAction || "-",
+        count: group.length,
+        accumulation: sumNumbers(group, (item) => item.accumulation),
+        maxDepositFeeGap: Math.max(
+          0,
+          ...group.map((item) => Number(item.depositFee || 0) - Number(item.approvedDepositFee || item.depositFee || 0))
+        ),
+        maxAccumulationFeeGap: Math.max(
+          0,
+          ...group.map((item) => Number(item.accumulationFee || 0) - Number(item.approvedAccumulationFee || item.accumulationFee || 0))
+        ),
+      };
+    })
+    .sort((a, b) => b.count - a.count || b.accumulation - a.accumulation);
+}
+
+function buildAggregateUnifiedRows(rows = []) {
+  return groupItems(rows, (row) => [
+    safeText(row.issuerCanonical || row.issuerOriginal),
+    safeText(row.auditStatus),
+    safeText(row.auditMatchRuleType),
+    safeText(row.investmentTrackRewards),
+    safeText(row.investmentTrackCompensation),
+  ].join("|"))
+    .map(({ key, group }) => {
+      const first = group[0] || {};
+      const count = group.length;
+      return {
+        key,
+        issuer: first.issuerCanonical || first.issuerOriginal || "לא ידוע",
+        auditStatus: first.auditStatus || "unknown",
+        auditMatchRuleType: first.auditMatchRuleType || "-",
+        rewardsTrack: first.investmentTrackRewards || "-",
+        compensationTrack: first.investmentTrackCompensation || "-",
+        count,
+        accumulation: sumNumbers(group, (row) => row.accumulation),
+        avgDepositFee: count ? sumNumbers(group, (row) => row.depositFee) / count : 0,
+        avgAccumulationFee: count ? sumNumbers(group, (row) => row.accumulationFee) / count : 0,
+        tierPotentialCount: group.filter((row) => row.tierPotentialNotUsed).length,
+      };
+    })
+    .sort((a, b) => b.count - a.count || b.accumulation - a.accumulation);
+}
+
+function buildAggregateQaRows(rows = []) {
+  return groupItems(rows, (row) => [
+    safeText(row.issuerCanonical || row.issuerOriginal),
+    safeText(row.auditStatus),
+    safeText(row.auditMatchRuleType),
+    safeText(row.auditMatchResult),
+    safeText(row.auditReason),
+  ].join("|"))
+    .map(({ key, group }) => {
+      const first = group[0] || {};
+      return {
+        key,
+        issuer: first.issuerCanonical || first.issuerOriginal || "לא ידוע",
+        auditStatus: first.auditStatus || "unknown",
+        auditMatchRuleType: first.auditMatchRuleType || "-",
+        auditMatchResult: first.auditMatchResult || "-",
+        auditReason: first.auditReason || "-",
+        count: group.length,
+        accumulation: sumNumbers(group, (row) => row.accumulation),
+        noAgreementCount: group.filter((row) => !row.agreementIssuerFound).length,
+        tierPotentialCount: group.filter((row) => row.tierPotentialNotUsed).length,
+      };
+    })
+    .sort((a, b) => b.count - a.count || b.accumulation - a.accumulation);
+}
+
+function buildAggregateQualityIssues(issues = []) {
+  return groupItems(issues, (issue) => [
+    safeText(issue.severity),
+    safeText(issue.category),
+    safeText(issue.issueCode),
+    safeText(issue.issueLabel),
+    safeText(issue.issuer),
+  ].join("|"))
+    .map(({ key, group }) => {
+      const first = group[0] || {};
+      return {
+        key,
+        severity: first.severity || "LOW",
+        category: first.category || "-",
+        issueCode: first.issueCode || "-",
+        issueLabel: first.issueLabel || "-",
+        issuer: first.issuer || "כללי",
+        recommendation: first.recommendation || "-",
+        count: group.length,
+        accumulation: sumNumbers(group, (issue) => issue.accumulation),
+      };
+    })
+    .sort((a, b) => b.count - a.count || b.accumulation - a.accumulation);
+}
+
 // ─── KPI ──────────────────────────────────────────────────────────────────────
 
 
@@ -297,6 +423,7 @@ function InvestmentTrackTab({
   rewardsMatrix,
   compensationMatrix,
   comparison,
+  isAggregateView = false,
 }) {
   const [subTab, setSubTab] = useState("תגמולים");
   const [showDetails, setShowDetails] = useState(false);
@@ -361,7 +488,7 @@ function InvestmentTrackTab({
           </button>
         ))}
 
-        {comparison?.details?.length > 0 && (
+        {!isAggregateView && comparison?.details?.length > 0 && (
           <button
             className={`sub-tab-btn ${showDetails ? "active" : ""}`}
             onClick={() => setShowDetails(!showDetails)}
@@ -504,11 +631,56 @@ function AccumulationTierTab({ data }) {
 
 // ─── Action Center ────────────────────────────────────────────────────────────
 
-function ActionCenterTab({ items }) {
+function ActionCenterTab({ items, isAggregateView = false }) {
   const [selected, setSelected] = useState(null);
 
   if (!items?.length) {
     return <EmptyState text="אין פריטים לטיפול — הכל תקין 🎉" />;
+  }
+
+  if (isAggregateView) {
+    const aggregateItems = buildAggregateActionItems(items);
+
+    return (
+      <div>
+        <p className="section-note">
+          מבט כל מנהלי ההסדר מציג מוקדי טיפול מקובצים בלבד, ללא שמות עובדים או מספרי לקוח.
+        </p>
+
+        <div className="table-wrap">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>יצרן</th>
+                <th>קטגוריה</th>
+                <th>סטטוס</th>
+                <th>עדיפות</th>
+                <th>כמות מופעים</th>
+                <th>צבירה מושפעת</th>
+                <th>פער ד.נ הפקדה מקס׳</th>
+                <th>פער ד.נ צבירה מקס׳</th>
+                <th>פעולה נדרשת</th>
+              </tr>
+            </thead>
+            <tbody>
+              {aggregateItems.map((item) => (
+                <tr key={item.key}>
+                  <td>{item.issuer}</td>
+                  <td>{item.issueCategory}</td>
+                  <td><StatusBadge status={item.auditStatus} /></td>
+                  <td><PriorityBadge priority={item.priority} /></td>
+                  <td>{fmtNumber(item.count)}</td>
+                  <td>{fmtMoney(item.accumulation)}</td>
+                  <td>{fmtFee(item.maxDepositFeeGap)}</td>
+                  <td>{fmtFee(item.maxAccumulationFeeGap)}</td>
+                  <td className="action-text">{item.requiredAction}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -614,7 +786,7 @@ function ActionCenterRow({ item, index, selected, setSelected }) {
 
 // ─── Unified Preview ──────────────────────────────────────────────────────────
 
-function UnifiedPreviewTab({ rows }) {
+function UnifiedPreviewTab({ rows, isAggregateView = false }) {
   const [search, setSearch] = useState("");
   const [filterStatus, setFilter] = useState("הכל");
 
@@ -640,6 +812,75 @@ function UnifiedPreviewTab({ rows }) {
       return matchSearch && matchStatus;
     });
   }, [rows, search, filterStatus]);
+
+  if (isAggregateView) {
+    const aggregateRows = buildAggregateUnifiedRows(filtered);
+
+    return (
+      <div>
+        <p className="section-note">
+          במבט כללי מוצגת תצוגה מקובצת לפי יצרן, סטטוס ומסלול — ללא עובד, שם או מזהה.
+        </p>
+
+        <div className="filter-bar">
+          <input
+            className="search-input"
+            placeholder="חפש יצרן / סטטוס / מסלול…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            dir="rtl"
+          />
+
+          {["הכל", "תקין", "לא תקין", "תפעול", "פוטנציאל מודל"].map((s) => (
+            <button
+              key={s}
+              className={`filter-btn ${filterStatus === s ? "active" : ""}`}
+              onClick={() => setFilter(s)}
+            >
+              {s}
+            </button>
+          ))}
+
+          <span className="filter-count">{aggregateRows.length} קבוצות</span>
+        </div>
+
+        <div className="table-wrap">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>יצרן</th>
+                <th>סטטוס</th>
+                <th>מסלול החלטה</th>
+                <th>מסלול תגמולים</th>
+                <th>מסלול פיצויים</th>
+                <th>כמות שורות</th>
+                <th>צבירה</th>
+                <th>ד.נ הפקדה ממוצע</th>
+                <th>ד.נ צבירה ממוצע</th>
+                <th>פוטנציאל מודל</th>
+              </tr>
+            </thead>
+            <tbody>
+              {aggregateRows.map((row) => (
+                <tr key={row.key}>
+                  <td>{row.issuer}</td>
+                  <td><StatusBadge status={row.auditStatus} /></td>
+                  <td>{row.auditMatchRuleType}</td>
+                  <td className="col-track">{row.rewardsTrack}</td>
+                  <td className="col-track">{row.compensationTrack}</td>
+                  <td>{fmtNumber(row.count)}</td>
+                  <td>{fmtMoney(row.accumulation)}</td>
+                  <td>{fmtFee(row.avgDepositFee)}</td>
+                  <td>{fmtFee(row.avgAccumulationFee)}</td>
+                  <td>{fmtNumber(row.tierPotentialCount)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -734,7 +975,7 @@ function UnifiedPreviewTab({ rows }) {
 
 // ─── QA / Trace Tab ───────────────────────────────────────────────────────────
 
-function QaTraceTab({ rows }) {
+function QaTraceTab({ rows, isAggregateView = false }) {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("הכל");
 
@@ -794,6 +1035,73 @@ function QaTraceTab({ rows }) {
     "הסכם פנימי",
     "הסכם חיצוני",
   ];
+
+  if (isAggregateView) {
+    const aggregateRows = buildAggregateQaRows(filtered);
+
+    return (
+      <div>
+        <p className="section-note">
+          במבט כללי QA מוצג לפי קבוצות החלטה וסיבה בלבד. פירוט עובד/לקוח מופיע רק לאחר בחירת מנהל הסדר יחיד.
+        </p>
+
+        <div className="filter-bar">
+          <input
+            className="search-input"
+            placeholder="חפש יצרן / סטטוס / סיבה…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            dir="rtl"
+          />
+
+          {filters.map((f) => (
+            <button
+              key={f}
+              className={`filter-btn ${filter === f ? "active" : ""}`}
+              onClick={() => setFilter(f)}
+            >
+              {f}
+            </button>
+          ))}
+
+          <span className="filter-count">{aggregateRows.length} קבוצות מתוך {rows.length} שורות</span>
+        </div>
+
+        <div className="table-wrap">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>יצרן</th>
+                <th>סטטוס</th>
+                <th>מסלול החלטה</th>
+                <th>תוצאה</th>
+                <th>כמות שורות</th>
+                <th>צבירה</th>
+                <th>ללא הסכם</th>
+                <th>פוטנציאל מודל</th>
+                <th>סיבה</th>
+              </tr>
+            </thead>
+            <tbody>
+              {aggregateRows.map((row) => (
+                <tr key={row.key}>
+                  <td>{row.issuer}</td>
+                  <td><StatusBadge status={row.auditStatus} /></td>
+                  <td>{row.auditMatchRuleType}</td>
+                  <td>{row.auditMatchResult}</td>
+                  <td>{fmtNumber(row.count)}</td>
+                  <td>{fmtMoney(row.accumulation)}</td>
+                  <td>{fmtNumber(row.noAgreementCount)}</td>
+                  <td>{fmtNumber(row.tierPotentialCount)}</td>
+                  <td className="action-text">{row.auditReason}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -906,7 +1214,7 @@ function QaTraceTab({ rows }) {
 
 // ─── Data Quality Tab ─────────────────────────────────────────────────────────
 
-function DataQualityTab({ dataQuality }) {
+function DataQualityTab({ dataQuality, isAggregateView = false }) {
   const [severityFilter, setSeverityFilter] = useState("הכל");
   const [categoryFilter, setCategoryFilter] = useState("הכל");
   const [search, setSearch] = useState("");
@@ -942,6 +1250,98 @@ function DataQualityTab({ dataQuality }) {
 
     return matchSeverity && matchCategory && matchSearch;
   });
+
+  if (isAggregateView) {
+    const aggregateIssues = buildAggregateQualityIssues(filteredIssues);
+
+    return (
+      <div>
+        <div className="kpi-grid" style={{ marginBottom: 20 }}>
+          <div className="kpi-card card-blue">
+            <span className="kpi-label">סה״כ בעיות</span>
+            <strong className="kpi-value">{fmtNumber(summary.issueCount)}</strong>
+          </div>
+          <div className="kpi-card card-red">
+            <span className="kpi-label">בעיות קריטיות</span>
+            <strong className="kpi-value">{fmtNumber(summary.highIssues)}</strong>
+          </div>
+          <div className="kpi-card card-warning">
+            <span className="kpi-label">בעיות בינוניות</span>
+            <strong className="kpi-value">{fmtNumber(summary.mediumIssues)}</strong>
+          </div>
+          <div className="kpi-card card-neutral">
+            <span className="kpi-label">בעיות קלות</span>
+            <strong className="kpi-value">{fmtNumber(summary.lowIssues)}</strong>
+          </div>
+        </div>
+
+        <p className="section-note">
+          במבט כללי מוצגות בעיות איכות נתונים מקובצות בלבד, ללא שם עובד או קוד עובד.
+        </p>
+
+        <div className="filter-bar">
+          <input
+            className="search-input"
+            placeholder="חפש בעיה / יצרן…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            dir="rtl"
+          />
+
+          {["הכל", "HIGH", "MEDIUM", "LOW"].map((f) => (
+            <button
+              key={f}
+              className={`filter-btn ${severityFilter === f ? "active" : ""}`}
+              onClick={() => setSeverityFilter(f)}
+            >
+              {f === "HIGH" ? "קריטי" : f === "MEDIUM" ? "בינוני" : f === "LOW" ? "נמוך" : "הכל"}
+            </button>
+          ))}
+
+          <select className="search-input" value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} dir="rtl">
+            {categories.map((category) => (
+              <option key={category} value={category}>
+                {category === "הכל" ? "כל הקטגוריות" : `${category} (${byCategory[category] || 0})`}
+              </option>
+            ))}
+          </select>
+
+          <span className="filter-count">{aggregateIssues.length} קבוצות</span>
+        </div>
+
+        <div className="table-wrap">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>חומרה</th>
+                <th>קטגוריה</th>
+                <th>קוד בעיה</th>
+                <th>בעיה</th>
+                <th>יצרן</th>
+                <th>כמות מופעים</th>
+                <th>צבירה מושפעת</th>
+                <th>המלצה</th>
+              </tr>
+            </thead>
+            <tbody>
+              {aggregateIssues.map((issue) => (
+                <tr key={issue.key}>
+                  <td><PriorityBadge priority={issue.severity} /></td>
+                  <td>{issue.category}</td>
+                  <td>{issue.issueCode}</td>
+                  <td className="action-text">{issue.issueLabel}</td>
+                  <td>{issue.issuer}</td>
+                  <td>{fmtNumber(issue.count)}</td>
+                  <td>{issue.accumulation ? fmtMoney(issue.accumulation) : "—"}</td>
+                  <td className="action-text">{issue.recommendation}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -1170,6 +1570,7 @@ export default function Dashboard({ analysisData }) {
             rewardsMatrix={displayInvestmentTrackRewardsMarital}
             compensationMatrix={displayInvestmentTrackCompensationMarital}
             comparison={displayInvestmentTrackComparison}
+            isAggregateView={isAllManagers}
           />
         );
 
@@ -1177,16 +1578,16 @@ export default function Dashboard({ analysisData }) {
         return <AccumulationTierTab data={displayAccumulationTierAnalysis} />;
 
       case "action":
-        return <ActionCenterTab items={actions} />;
+        return <ActionCenterTab items={actions} isAggregateView={isAllManagers} />;
 
       case "preview":
-        return <UnifiedPreviewTab rows={previewRows} />;
+        return <UnifiedPreviewTab rows={previewRows} isAggregateView={isAllManagers} />;
 
       case "qa":
-        return <QaTraceTab rows={previewRows} />;
+        return <QaTraceTab rows={previewRows} isAggregateView={isAllManagers} />;
 
       case "quality":
-        return <DataQualityTab dataQuality={scopedDataQuality} />;
+        return <DataQualityTab dataQuality={scopedDataQuality} isAggregateView={isAllManagers} />;
 
       default:
         return null;

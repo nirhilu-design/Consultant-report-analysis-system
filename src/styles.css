@@ -2528,3 +2528,187 @@ body,
     min-width: 112px;
   }
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   v40 Executive Analytics Layer
+   ───────────────────────────────────────────────────────────────────────────── */
+.executiveAnalyticsLayer {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.98));
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 24px;
+  box-shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
+  padding: 22px;
+  margin: 0 0 22px;
+}
+
+.executiveLayerHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.executiveLayerHeader h2 {
+  margin: 0 0 6px;
+  color: #0f2544;
+  font-size: 1.45rem;
+}
+
+.executiveLayerHeader p {
+  margin: 0;
+  color: #64748b;
+  line-height: 1.7;
+  max-width: 980px;
+}
+
+.executiveKpiGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.executiveKpiCard {
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 18px;
+  background: #ffffff;
+  padding: 16px;
+  min-height: 118px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.05);
+}
+
+.executiveKpiCard span {
+  color: #64748b;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.executiveKpiCard strong {
+  color: #102a43;
+  font-size: 1.55rem;
+  line-height: 1.2;
+  margin: 8px 0 6px;
+}
+
+.executiveKpiCard small {
+  color: #7c8aa5;
+  line-height: 1.4;
+}
+
+.executiveKpiCard.blue {
+  border-color: rgba(37, 99, 235, 0.18);
+  background: linear-gradient(180deg, #ffffff, #eff6ff);
+}
+
+.executiveKpiCard.gold {
+  border-color: rgba(180, 131, 35, 0.2);
+  background: linear-gradient(180deg, #ffffff, #fff7ed);
+}
+
+.executiveKpiCard.green {
+  border-color: rgba(22, 163, 74, 0.18);
+  background: linear-gradient(180deg, #ffffff, #f0fdf4);
+}
+
+.executiveKpiCard.warning {
+  border-color: rgba(245, 158, 11, 0.22);
+  background: linear-gradient(180deg, #ffffff, #fffbeb);
+}
+
+.executivePanelsGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.executivePanel {
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 20px;
+  padding: 16px;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.05);
+  min-width: 0;
+}
+
+.executivePanelTitle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.executivePanelTitle h3 {
+  margin: 0;
+  color: #0f2544;
+  font-size: 1.05rem;
+}
+
+.executivePanelTitle span {
+  color: #64748b;
+  font-size: 0.85rem;
+  background: #f8fafc;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 999px;
+  padding: 6px 10px;
+  white-space: nowrap;
+}
+
+.executiveRiskTableWrap {
+  overflow-x: auto;
+}
+
+.executiveTable {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 520px;
+}
+
+.executiveTable th,
+.executiveTable td {
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  padding: 10px 8px;
+  text-align: right;
+  vertical-align: top;
+}
+
+.executiveTable th {
+  color: #334155;
+  background: #f8fafc;
+  font-weight: 800;
+  font-size: 0.9rem;
+}
+
+.executiveTable td {
+  color: #1e293b;
+  font-size: 0.92rem;
+}
+
+.executiveTable tbody tr:last-child td {
+  border-bottom: none;
+}
+
+@media (max-width: 1100px) {
+  .executiveKpiGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .executivePanelsGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .executiveAnalyticsLayer {
+    padding: 16px;
+    border-radius: 18px;
+  }
+
+  .executiveKpiGrid {
+    grid-template-columns: 1fr;
+  }
+}

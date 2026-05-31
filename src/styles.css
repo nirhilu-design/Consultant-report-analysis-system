@@ -3370,3 +3370,26 @@ body,
     white-space: normal;
   }
 }
+
+/* v50 - Education fund fee analysis engine: three-state fee status */
+.educationStatusPill.exception {
+  background: #fef2f2;
+  color: #b91c1c;
+  border-color: #fecaca;
+}
+
+.educationStatusPill.warning {
+  background: #fef3c7;
+  color: #92400e;
+  border-color: #fde68a;
+}
+
+.educationFeeChartLegend i.warning,
+.educationFeeBarColumn i.warning {
+  background: #f59e0b;
+}
+
+.educationFeeChartLegend i.exception,
+.educationFeeBarColumn i.exception {
+  background: #dc2626;
+}

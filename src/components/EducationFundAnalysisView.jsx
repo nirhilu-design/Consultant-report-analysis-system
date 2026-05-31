@@ -867,6 +867,26 @@ function buildFeeStatusMatrix(companyChart) {
   return { issuers, rows };
 }
 
+function buildFeeDistributionBuckets(feeRows) {
+  const buckets = [
+    { key: "0-0.25", label: "0%–0.25%", min: 0, max: 0.25, count: 0, totalAccumulation: 0 },
+    { key: "0.25-0.5", label: "0.25%–0.50%", min: 0.25, max: 0.5, count: 0, totalAccumulation: 0 },
+    { key: "0.5-0.75", label: "0.50%–0.75%", min: 0.5, max: 0.75, count: 0, totalAccumulation: 0 },
+    { key: "0.75-1", label: "0.75%–1.00%", min: 0.75, max: 1, count: 0, totalAccumulation: 0 },
+    { key: "1+", label: "1.00%+", min: 1, max: Infinity, count: 0, totalAccumulation: 0 },
+  ];
+
+  feeRows.forEach((row) => {
+    if (!isPresentNumber(row.accumulationFee)) return;
+    const fee = Number(row.accumulationFee);
+    const bucket = buckets.find((item) => fee >= item.min && fee < item.max) || buckets[buckets.length - 1];
+    bucket.count += 1;
+    bucket.totalAccumulation += safeNumber(row.currentBalance);
+  });
+
+  return buckets;
+}
+
 function buildFeeExceptionSummary(feeRows) {
   return aggregateRows(feeRows, (row) => row.issuerOriginal || row.issuer || row.manager || "לא ידוע")
     .map((manager) => {
@@ -1079,8 +1099,13 @@ function FeesTab({ rows, isAggregateScope = false }) {
   const analysis = useMemo(() => buildFeeAnalysis(rows), [rows]);
   const companyChart = useMemo(() => buildFeeCompanyChart(rows), [rows]);
   const exceptionSummary = useMemo(() => buildFeeExceptionSummary(analysis.rows), [analysis.rows]);
+  const feeDistribution = useMemo(() => buildFeeDistributionBuckets(analysis.rows), [analysis.rows]);
   const maxCount = Math.max(1, ...companyChart.flatMap((item) => [item.okCount, item.warningCount, item.exceptionCount || 0]));
+  const maxDistributionCount = Math.max(1, ...feeDistribution.map((item) => item.count));
   const validEmployeeCount = companyChart.reduce((sum, item) => sum + item.okCount + item.warningCount + (item.exceptionCount || 0), 0);
+  const nonCompliantCount = analysis.warningCount + analysis.exceptionCount;
+  const complianceRate = validEmployeeCount ? Math.round((analysis.okCount / validEmployeeCount) * 1000) / 10 : 0;
+  const averagePositiveGap = analysis.exceptionAndWarningRows.length ? average(analysis.exceptionAndWarningRows.map((row) => row.calculatedFeeGap)) : 0;
   const companiesWithWarnings = companyChart.filter((item) => (item.nonCompliantCount || 0) > 0).length;
   const topWarningRows = analysis.exceptionAndWarningRows
     .slice()
@@ -1090,11 +1115,12 @@ function FeesTab({ rows, isAggregateScope = false }) {
   return (
     <section className="educationTabPanel">
       <div className="educationKpiGrid">
-        <KpiCard label="עובדים תקינים" value={analysis.okCount} />
-        <KpiCard label="חריגה קלה" value={analysis.warningCount} />
-        <KpiCard label="חריגה" value={analysis.exceptionCount} />
+        <KpiCard label="עובדים תקינים" value={analysis.okCount} hint="בפועל נמוך או שווה להסכם" />
+        <KpiCard label="עובדים לא תקינים" value={nonCompliantCount} hint="חריגה קלה + חריגה" />
+        <KpiCard label="אחוז עמידה" value={`${complianceRate}%`} hint="מתוך שורות שניתן לבדוק" />
+        <KpiCard label="פער ממוצע בחריגה" value={formatPercent(averagePositiveGap, 4)} hint="מעל ההסכם בלבד" />
         <KpiCard label="עלות חריגה שנתית משוערת" value={formatCurrency(analysis.totalAnnualGapCost)} />
-        <KpiCard label="שורות חסרות מידע" value={analysis.unknownCount} />
+        <KpiCard label="שורות חסרות מידע" value={analysis.unknownCount} hint="מועברות לחוצץ שגיאות" />
         <KpiCard label="חברות עם חריגה" value={companiesWithWarnings} />
       </div>
 
@@ -1149,6 +1175,32 @@ function FeesTab({ rows, isAggregateScope = false }) {
         ) : (
           <p className="hint">אין מספיק נתונים לבניית גרף דמי ניהול לפי חברות.</p>
         )}
+      </section>
+
+      <section className="workspaceCard">
+        <div className="sectionHeaderRow">
+          <div>
+            <h3>התפלגות דמי ניהול בפועל</h3>
+            <p className="hint">
+              Bucket analysis לפי דמי הניהול שנמצאו בקובץ קרנות ההשתלמות. זה עוזר לראות אם רוב העובדים יושבים בטווח נמוך או שיש ריכוז חריג סביב מדרגות גבוהות.
+            </p>
+          </div>
+          <span className="educationStatusPill ok">{analysis.rows.length - analysis.unknownCount} שורות עם דמי ניהול</span>
+        </div>
+
+        <div className="educationFeeDistribution" dir="rtl">
+          {feeDistribution.map((bucket) => {
+            const height = Math.max(8, Math.round((bucket.count / maxDistributionCount) * 170));
+            return (
+              <article key={bucket.key} className="educationFeeDistributionBucket">
+                <strong>{bucket.count}</strong>
+                <i style={{ height: `${height}px` }} />
+                <span>{bucket.label}</span>
+                <small>{formatCurrency(bucket.totalAccumulation)}</small>
+              </article>
+            );
+          })}
+        </div>
       </section>
 
       <section className="workspaceCard">

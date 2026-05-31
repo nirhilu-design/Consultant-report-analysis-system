@@ -1,5 +1,5 @@
 // Path: src/components/AnalysisWorkspace.jsx
-// v43 — Executive Guidance Panel / Portal clarity
+// v42 — Portal Architecture manager counting fix
 // Executive Dashboard becomes the home screen after analysis.
 // Product Center opens each product only on explicit user selection.
 //
@@ -564,56 +564,6 @@ function ProductCenter({ productSummaries, selectedProduct, onOpenProduct }) {
   );
 }
 
-
-function getTopRiskItem(riskItems) {
-  return asArray(riskItems).find((item) => toNumber(item.count) > 0) || null;
-}
-
-function ExecutiveGuidancePanel({ totals, productSummaries, riskItems, onOpenProduct }) {
-  const topRisk = getTopRiskItem(riskItems);
-  const productWithMostExceptions = [...asArray(productSummaries)]
-    .sort((a, b) => toNumber(b.exceptionRows) - toNumber(a.exceptionRows))[0];
-  const recommendedProduct = productWithMostExceptions?.exceptionRows ? productWithMostExceptions : productSummaries[0];
-
-  const healthStatus = totals.exceptionRows
-    ? `זוהו ${fmtNumber(totals.exceptionRows)} מוקדי טיפול. כדאי להתחיל מהמוצר עם הכי הרבה חריגות.`
-    : "לא זוהו מוקדי טיפול מהותיים. אפשר לעבור לבדיקת עומק לפי מוצר.";
-
-  return (
-    <section className="executiveGuidancePanel v43" dir="rtl">
-      <div className="guidanceMain">
-        <p className="eyebrow">Next Best Action</p>
-        <h3>מה כדאי לעשות עכשיו?</h3>
-        <p>{healthStatus}</p>
-      </div>
-
-      <div className="guidanceSteps">
-        <div className="guidanceStep">
-          <span>1</span>
-          <strong>בדיקת חריגות</strong>
-          <small>{topRisk ? `${topRisk.title}: ${fmtNumber(topRisk.count)}` : "אין חריגות מרכזיות כרגע"}</small>
-        </div>
-        <div className="guidanceStep">
-          <span>2</span>
-          <strong>כניסה למוצר</strong>
-          <small>{recommendedProduct ? `מומלץ להתחיל מ${recommendedProduct.label}` : "אין מוצר פעיל"}</small>
-        </div>
-        <div className="guidanceStep">
-          <span>3</span>
-          <strong>טיפול ברמת עובד</strong>
-          <small>רשימות עובדים מוצגות רק בתוך מסך המוצר</small>
-        </div>
-      </div>
-
-      {recommendedProduct ? (
-        <button type="button" className="primaryActionButton" onClick={() => onOpenProduct(recommendedProduct.productMode)}>
-          פתח ניתוח {recommendedProduct.label}
-        </button>
-      ) : null}
-    </section>
-  );
-}
-
 function ExecutivePortalHome({ analysisData, selectedProduct, onOpenProduct }) {
   const analytics = useMemo(() => buildExecutiveAnalytics(analysisData), [analysisData]);
   const { totals, productSummaries, riskItems, complianceRate, productDistribution, managerDistribution } = analytics;
@@ -663,13 +613,6 @@ function ExecutivePortalHome({ analysisData, selectedProduct, onOpenProduct }) {
             </div>
           </div>
         </div>
-
-        <ExecutiveGuidancePanel
-          totals={totals}
-          productSummaries={productSummaries}
-          riskItems={riskItems}
-          onOpenProduct={onOpenProduct}
-        />
 
         <div className="executivePanelsGrid v41 portal">
           <DonutBreakdown

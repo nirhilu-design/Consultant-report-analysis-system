@@ -332,43 +332,65 @@ function ManagerScopeSelector({ options, selectedKey, onChange }) {
     return null;
   }
 
-  const hasMultipleManagers = options.length > 1;
   const totalAccumulation = options.reduce((sum, option) => sum + safeNumber(option.totalAccumulation), 0);
   const totalRows = options.reduce((sum, option) => sum + Number(option.rowCount || 0), 0);
+  const selectedOption = options.find((option) => option.key === selectedKey) || options[0];
+  const isSpecificMode = selectedKey !== "all";
+
+  const handleSpecificMode = () => {
+    onChange(selectedOption?.key || options[0]?.key || "all");
+  };
 
   return (
     <section className="workspaceCard educationManagerScopeCard">
-      <div>
-        <h3>בחירת מנהל הסדר</h3>
-        <p className="hint">
-          בדומה למסך הפנסיה, הניתוח של קרנות ההשתלמות עובד לפי מנהל הסדר נבחר. אפשר לעבור בין מנהלי הסדר, ובמקרה הצורך לפתוח גם מבט כללי אגרגטיבי.
-        </p>
+      <div className="educationScopeHeaderRow">
+        <div>
+          <h3>בחירת מנהל הסדר</h3>
+          <p className="hint">
+            בדומה למסך הפנסיה, קודם בוחרים אם מנתחים את כל מנהלי ההסדר יחד או מנהל הסדר ספציפי, ורק לאחר מכן החוצצים והגרפים מסתננים בהתאם.
+          </p>
+        </div>
+        <div className="educationScopeCurrentBadge">
+          {isSpecificMode ? selectedOption?.name || "מנהל הסדר" : "כל מנהלי ההסדר"}
+        </div>
       </div>
 
-      <div className="educationManagerScopeTabs" dir="rtl">
-        {hasMultipleManagers && (
-          <button
-            type="button"
-            className={selectedKey === "all" ? "active" : ""}
-            onClick={() => onChange("all")}
-          >
-            <strong>כל מנהלי ההסדר</strong>
-            <span>{formatCurrency(totalAccumulation)} · {totalRows} שורות</span>
-          </button>
-        )}
+      <div className="educationScopeModeBar" dir="rtl" aria-label="מצב תצוגת מנהל הסדר">
+        <button
+          type="button"
+          className={selectedKey === "all" ? "active" : ""}
+          onClick={() => onChange("all")}
+        >
+          <strong>כל מנהלי ההסדר</strong>
+          <span>{formatCurrency(totalAccumulation)} · {totalRows} שורות</span>
+        </button>
 
-        {options.map((option) => (
-          <button
-            key={option.key}
-            type="button"
-            className={selectedKey === option.key ? "active" : ""}
-            onClick={() => onChange(option.key)}
-          >
-            <strong>{option.name}</strong>
-            <span>{formatCurrency(option.totalAccumulation)} · {option.rowCount} שורות</span>
-          </button>
-        ))}
+        <button
+          type="button"
+          className={isSpecificMode ? "active" : ""}
+          onClick={handleSpecificMode}
+        >
+          <strong>מנהל הסדר ספציפי</strong>
+          <span>{selectedOption?.name || "בחר מנהל הסדר"}</span>
+        </button>
       </div>
+
+      {isSpecificMode && (
+        <div className="educationManagerSpecificSelector">
+          <label htmlFor="education-manager-scope-select">מנהל הסדר לניתוח</label>
+          <select
+            id="education-manager-scope-select"
+            value={selectedOption?.key || ""}
+            onChange={(event) => onChange(event.target.value)}
+          >
+            {options.map((option) => (
+              <option key={option.key} value={option.key}>
+                {option.name} — {formatCurrency(option.totalAccumulation)} · {option.rowCount} שורות
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
     </section>
   );
 }
@@ -1792,7 +1814,7 @@ function ErrorsTab({ rows, isAggregateScope = false }) {
 export default function EducationFundAnalysisView({ analysisData }) {
   const { rows, summary, warnings } = getEducationFundData(analysisData);
   const [activeTab, setActiveTab] = useState("fees");
-  const [selectedManagerKey, setSelectedManagerKey] = useState("");
+  const [selectedManagerKey, setSelectedManagerKey] = useState("all");
 
   const managerOptions = useMemo(() => buildArrangementManagerOptions(rows), [rows]);
   const selectedRows = useMemo(() => {
@@ -1802,13 +1824,13 @@ export default function EducationFundAnalysisView({ analysisData }) {
 
   useEffect(() => {
     if (!managerOptions.length) {
-      if (selectedManagerKey) setSelectedManagerKey("");
+      if (selectedManagerKey !== "all") setSelectedManagerKey("all");
       return;
     }
 
     if (selectedManagerKey === "all") return;
 
-    if (!selectedManagerKey || !managerOptions.some((option) => option.key === selectedManagerKey)) {
+    if (!managerOptions.some((option) => option.key === selectedManagerKey)) {
       setSelectedManagerKey(managerOptions[0].key);
     }
   }, [managerOptions, selectedManagerKey]);

@@ -170,13 +170,55 @@ function getEducationFundData(analysisData) {
     (analysisData?.productMode === "hishtalmut" || analysisData?.productType === "hishtalmut" ? analysisData : null) ||
     {};
 
-  const directRows = [
-    ...normalizeEducationRows(productResult.unifiedRows, "productResult.unifiedRows"),
-    ...normalizeEducationRows(productResult.educationFundRows, "productResult.educationFundRows"),
-    ...normalizeEducationRows(analysisData?.educationFundRows, "analysisData.educationFundRows"),
-  ];
+  const managerRows = asArray(productResult.managerResults).flatMap((managerResult, managerIndex) => {
+    const managerMeta =
+      managerResult?.manager ||
+      managerResult?.uploadManager ||
+      asArray(productResult?.diagnostics?.managers)[managerIndex] ||
+      asArray(analysisData?.productDiagnostics?.hishtalmut?.managers)[managerIndex] ||
+      {};
 
-  const fallbackRows = directRows.length
+    const managerId =
+      managerResult?.managerId ||
+      managerResult?.arrangementManagerId ||
+      managerMeta?.id ||
+      `education-manager-${managerIndex + 1}`;
+
+    const managerName =
+      managerResult?.managerName ||
+      managerResult?.arrangementManagerName ||
+      managerMeta?.name ||
+      `מנהל הסדר ${managerIndex + 1}`;
+
+    const managerSource = `managerResults.${managerIndex}`;
+    const scopedRows = [
+      ...normalizeEducationRows(managerResult.unifiedRows, `${managerSource}.unifiedRows`),
+      ...normalizeEducationRows(managerResult.educationFundRows, `${managerSource}.educationFundRows`),
+      ...normalizeEducationRows(managerResult.rawRows, `${managerSource}.rawRows`),
+      ...normalizeEducationRows(managerResult.rowsRaw, `${managerSource}.rowsRaw`),
+      ...normalizeEducationRows(managerResult.educationFundRowsRaw, `${managerSource}.educationFundRowsRaw`),
+    ];
+
+    return scopedRows.map((row) => ({
+      ...row,
+      managerId: row.managerId || managerId,
+      arrangementManagerId: row.arrangementManagerId || managerId,
+      uploadManagerName: row.uploadManagerName || managerName,
+      arrangementManagerName: row.arrangementManagerName || managerName,
+      arrangementManager: row.arrangementManager || managerName,
+      sourceFileName: row.sourceFileName || managerMeta?.files?.dataFile || managerResult?.sourceFileName || "",
+    }));
+  });
+
+  const directRows = managerRows.length
+    ? []
+    : [
+        ...normalizeEducationRows(productResult.unifiedRows, "productResult.unifiedRows"),
+        ...normalizeEducationRows(productResult.educationFundRows, "productResult.educationFundRows"),
+        ...normalizeEducationRows(analysisData?.educationFundRows, "analysisData.educationFundRows"),
+      ];
+
+  const fallbackRows = managerRows.length || directRows.length
     ? []
     : [
         ...normalizeEducationRows(productResult.rawRows, "productResult.rawRows"),
@@ -185,17 +227,7 @@ function getEducationFundData(analysisData) {
         ...normalizeEducationRows(analysisData?.rawRows, "analysisData.rawRows"),
       ];
 
-  const managerRows = directRows.length || fallbackRows.length
-    ? []
-    : asArray(productResult.managerResults).flatMap((managerResult, managerIndex) => [
-        ...normalizeEducationRows(managerResult.unifiedRows, `managerResults.${managerIndex}.unifiedRows`),
-        ...normalizeEducationRows(managerResult.educationFundRows, `managerResults.${managerIndex}.educationFundRows`),
-        ...normalizeEducationRows(managerResult.rawRows, `managerResults.${managerIndex}.rawRows`),
-        ...normalizeEducationRows(managerResult.rowsRaw, `managerResults.${managerIndex}.rowsRaw`),
-        ...normalizeEducationRows(managerResult.educationFundRowsRaw, `managerResults.${managerIndex}.educationFundRowsRaw`),
-      ]);
-
-  const rows = directRows.length ? directRows : fallbackRows.length ? fallbackRows : managerRows;
+  const rows = managerRows.length ? managerRows : directRows.length ? directRows : fallbackRows;
 
   const calculatedSummary = {
     unifiedRowCount: rows.length,
@@ -296,31 +328,34 @@ function buildArrangementManagerOptions(rows) {
 }
 
 function ManagerScopeSelector({ options, selectedKey, onChange }) {
-  if (options.length <= 1) {
+  if (!options.length) {
     return null;
   }
 
+  const hasMultipleManagers = options.length > 1;
   const totalAccumulation = options.reduce((sum, option) => sum + safeNumber(option.totalAccumulation), 0);
   const totalRows = options.reduce((sum, option) => sum + Number(option.rowCount || 0), 0);
 
   return (
     <section className="workspaceCard educationManagerScopeCard">
       <div>
-        <h3>בחירת שכבת ניתוח</h3>
+        <h3>בחירת מנהל הסדר</h3>
         <p className="hint">
-          כברירת מחדל מוצגת אגריגציה של כל מנהלי ההסדר. ניתן לעבור למנהל הסדר בודד בלי לשנות את הטאבים או את מבנה הניתוח.
+          בדומה למסך הפנסיה, הניתוח של קרנות ההשתלמות עובד לפי מנהל הסדר נבחר. אפשר לעבור בין מנהלי הסדר, ובמקרה הצורך לפתוח גם מבט כללי אגרגטיבי.
         </p>
       </div>
 
       <div className="educationManagerScopeTabs" dir="rtl">
-        <button
-          type="button"
-          className={selectedKey === "all" ? "active" : ""}
-          onClick={() => onChange("all")}
-        >
-          <strong>כל מנהלי ההסדר</strong>
-          <span>{formatCurrency(totalAccumulation)} · {totalRows} שורות</span>
-        </button>
+        {hasMultipleManagers && (
+          <button
+            type="button"
+            className={selectedKey === "all" ? "active" : ""}
+            onClick={() => onChange("all")}
+          >
+            <strong>כל מנהלי ההסדר</strong>
+            <span>{formatCurrency(totalAccumulation)} · {totalRows} שורות</span>
+          </button>
+        )}
 
         {options.map((option) => (
           <button
@@ -1666,7 +1701,7 @@ function ErrorsTab({ rows, isAggregateScope = false }) {
 export default function EducationFundAnalysisView({ analysisData }) {
   const { rows, summary, warnings } = getEducationFundData(analysisData);
   const [activeTab, setActiveTab] = useState("fees");
-  const [selectedManagerKey, setSelectedManagerKey] = useState("all");
+  const [selectedManagerKey, setSelectedManagerKey] = useState("");
 
   const managerOptions = useMemo(() => buildArrangementManagerOptions(rows), [rows]);
   const selectedRows = useMemo(() => {
@@ -1675,9 +1710,15 @@ export default function EducationFundAnalysisView({ analysisData }) {
   }, [rows, selectedManagerKey]);
 
   useEffect(() => {
+    if (!managerOptions.length) {
+      if (selectedManagerKey) setSelectedManagerKey("");
+      return;
+    }
+
     if (selectedManagerKey === "all") return;
-    if (!managerOptions.some((option) => option.key === selectedManagerKey)) {
-      setSelectedManagerKey("all");
+
+    if (!selectedManagerKey || !managerOptions.some((option) => option.key === selectedManagerKey)) {
+      setSelectedManagerKey(managerOptions[0].key);
     }
   }, [managerOptions, selectedManagerKey]);
 
@@ -1695,7 +1736,7 @@ export default function EducationFundAnalysisView({ analysisData }) {
           <p className="eyebrow">Education Fund</p>
           <h2>ניתוח קרן השתלמות</h2>
           <p>
-            ניתוח לפי דמי ניהול, צבירה, התאמת מסלול השקעה לגיל, צבירות לפי מנהלי השקעות ורשימת עובדים עם שגיאות לפי מס עובד — רק כאשר נבחר מנהל הסדר יחיד. במבט כללי מוצגים נתונים אגרגטיביים בלבד.
+            ניתוח לפי דמי ניהול, צבירה, התאמת מסלול השקעה לגיל, צבירות לפי מנהלי השקעות ורשימת עובדים עם שגיאות לפי מס עובד — לפי מנהל הסדר נבחר, עם אפשרות מבט כללי אגרגטיבי במקרה שיש כמה מנהלי הסדר.
           </p>
         </div>
       </div>

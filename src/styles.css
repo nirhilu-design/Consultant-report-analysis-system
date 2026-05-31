@@ -2380,6 +2380,95 @@ body,
   color: #66728a;
 }
 
+
+/* v45 — Education fund next best action panel */
+.educationNextActionPanel {
+  display: grid;
+  gap: 16px;
+  border-color: #dbeafe;
+  background: linear-gradient(135deg, #ffffff 0%, #f8fbff 100%);
+}
+
+.educationNextActionHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.educationNextActionHeader h3 {
+  margin: 0 0 6px;
+  color: #14213d;
+  font-size: 21px;
+}
+
+.educationNextActionGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.educationNextActionCard {
+  display: grid;
+  gap: 5px;
+  text-align: right;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  border-radius: 18px;
+  padding: 14px;
+  cursor: pointer;
+  font-family: Calibri, Arial, sans-serif;
+  color: #17233f;
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.04);
+}
+
+.educationNextActionCard.lead {
+  border-color: #1d4ed8;
+  background: #eff6ff;
+}
+
+.educationNextActionCard span {
+  color: #475569;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.educationNextActionCard strong {
+  color: #14213d;
+  font-size: 25px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.educationNextActionCard small {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.educationNextActionCard p {
+  margin: 4px 0 0;
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+@media (max-width: 1100px) {
+  .educationNextActionGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 700px) {
+  .educationNextActionHeader {
+    flex-direction: column;
+  }
+
+  .educationNextActionGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* CORE HARDENING v32 — Education fund consistent analysis tabs */
 .sectionHeaderRow {
   display: flex;

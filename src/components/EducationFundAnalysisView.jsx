@@ -927,6 +927,102 @@ function KpiCard({ label, value, hint }) {
   );
 }
 
+
+function EducationFundNextActionPanel({ rows, managerLabel, isAggregateScope, onOpenTab }) {
+  const feeAnalysis = useMemo(() => buildFeeAnalysis(rows), [rows]);
+  const ageAnalysis = useMemo(() => buildAgeTrackAnalysis(rows), [rows]);
+  const employeeErrors = useMemo(() => buildEducationEmployeeErrors(rows), [rows]);
+
+  const activeRows = rows.filter((row) => safeNumber(row.currentBalance) > 0 || safeNumber(row.monthlyDeposit) > 0);
+  const feeWarnings = feeAnalysis.rows.filter((row) => row.calculatedFeeStatus === "warning").length;
+  const trackReviewCount = ageAnalysis.filter((row) => row.ageTrackStatus === "review").length;
+  const unknownTrackCount = ageAnalysis.filter((row) => row.ageTrackStatus === "unknown").length;
+  const missingAgreementCount = feeAnalysis.rows.filter((row) => !row.agreementMatched && safeNumber(row.accumulationFeeAgreement) <= 0).length;
+
+  const actions = [
+    {
+      key: "fees",
+      title: "דמי ניהול מול הסכם",
+      value: feeWarnings,
+      unit: "חריגות",
+      text: feeWarnings
+        ? "להתחיל מבדיקת חריגות דמי הניהול מול קובץ ההסכמים."
+        : missingAgreementCount
+          ? "אין חריגה מובהקת, אבל חסרות התאמות הסכם בחלק מהשורות."
+          : "לא זוהו חריגות דמי ניהול בשכבה הנוכחית.",
+      priority: feeWarnings * 4 + missingAgreementCount,
+    },
+    {
+      key: "tracksByAge",
+      title: "מסלול השקעה לפי גיל",
+      value: trackReviewCount + unknownTrackCount,
+      unit: "דורשים בדיקה",
+      text: trackReviewCount
+        ? "יש עובדים במסלול שדורש בדיקת התאמה לגיל ולאופק ההשקעה."
+        : unknownTrackCount
+          ? "חסר גיל או שם מסלול בחלק מהשורות, ולכן כדאי להשלים נתונים."
+          : "התאמת מסלול לגיל נראית תקינה לפי הנתונים שנקלטו.",
+      priority: trackReviewCount * 3 + unknownTrackCount,
+    },
+    {
+      key: "accumulation",
+      title: "צבירה וריכוזיות",
+      value: activeRows.length,
+      unit: "שורות פעילות",
+      text: "לבדוק היכן נמצאת הצבירה הגדולה ומהם הגופים המרכזיים בתיק.",
+      priority: activeRows.length ? 1 : 0,
+    },
+    {
+      key: "errors",
+      title: "עובדים עם שגיאות",
+      value: employeeErrors.length,
+      unit: "שורות לטיפול",
+      text: employeeErrors.length
+        ? "ריכוז העובדים והשורות שדורשים טיפול פרטני בתוך מנהל ההסדר הנבחר."
+        : "לא נמצאו שורות עובד שמחייבות טיפול פרטני בשכבה הנוכחית.",
+      priority: employeeErrors.length * 2,
+    },
+  ].sort((a, b) => b.priority - a.priority);
+
+  const leadAction = actions[0];
+  const statusText = employeeErrors.length
+    ? `נמצאו ${employeeErrors.length} שורות שמומלץ לבדוק אצל ${managerLabel}.`
+    : `לא נמצאו מוקדי טיפול חריגים אצל ${managerLabel}.`;
+
+  return (
+    <section className="workspaceCard educationNextActionPanel">
+      <div className="educationNextActionHeader">
+        <div>
+          <p className="eyebrow">Next Best Action</p>
+          <h3>מה כדאי לבדוק עכשיו?</h3>
+          <p className="hint">
+            {statusText} {isAggregateScope ? "במבט כללי מוצגים רק נתונים מסכמים; לטיפול בעובדים ספציפיים יש לבחור מנהל הסדר יחיד." : "הפירוט מוצג לפי מנהל ההסדר שנבחר בלבד."}
+          </p>
+        </div>
+        <button type="button" className="primaryButton" onClick={() => onOpenTab(leadAction.key)}>
+          פתח {leadAction.title}
+        </button>
+      </div>
+
+      <div className="educationNextActionGrid">
+        {actions.map((action) => (
+          <button
+            key={action.key}
+            type="button"
+            className={action.key === leadAction.key ? "educationNextActionCard lead" : "educationNextActionCard"}
+            onClick={() => onOpenTab(action.key)}
+          >
+            <span>{action.title}</span>
+            <strong>{formatNumber(action.value)}</strong>
+            <small>{action.unit}</small>
+            <p>{action.text}</p>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function EducationTabs({ activeTab, onChange }) {
   return (
     <div className="educationAnalysisTabs" dir="rtl">
@@ -1754,6 +1850,13 @@ export default function EducationFundAnalysisView({ analysisData }) {
         <KpiCard label="הפקדה / פרמיה אחרונה" value={formatCurrency(totalMonthlyDeposits || summary.totalMonthlyDeposits)} />
         <KpiCard label="גופים מנהלים" value={issuerCount || summary.issuerCount || 0} />
       </div>
+
+      <EducationFundNextActionPanel
+        rows={selectedRows}
+        managerLabel={scopeLabel}
+        isAggregateScope={isAggregateScope}
+        onOpenTab={setActiveTab}
+      />
 
       {warnings.length > 0 && (
         <section className="workspaceCard">

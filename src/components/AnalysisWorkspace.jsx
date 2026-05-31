@@ -1,5 +1,5 @@
 // Path: src/components/AnalysisWorkspace.jsx
-// v41 — Portal Architecture
+// v42 — Portal Architecture manager counting fix
 // Executive Dashboard becomes the home screen after analysis.
 // Product Center opens each product only on explicit user selection.
 //
@@ -287,9 +287,16 @@ function buildExecutiveAnalytics(analysisData) {
 
   const allRows = productSummaries.flatMap((item) => item.rows.map((row) => ({ ...row, __productLabel: item.label })));
 
+  const distinctArrangementManagerCount = uniqueCount(
+    allRows.map(getArrangementManagerName)
+  ) || uniqueCount(
+    asArray(analysisData?.managerSlots || analysisData?.arrangementManagers || analysisData?.managers).map((manager) =>
+      firstDefined(manager?.name, manager?.managerName, manager?.label, manager?.id)
+    )
+  ) || Math.max(...productSummaries.map((item) => item.managerCount), 0);
+
   const totals = productSummaries.reduce(
     (acc, item) => {
-      acc.managerCount += item.managerCount;
       acc.rowCount += item.rowCount;
       acc.employeeCount += item.employeeCount;
       acc.activeRows += item.activeRows;
@@ -316,6 +323,8 @@ function buildExecutiveAnalytics(analysisData) {
       missingDataRows: 0,
     }
   );
+
+  totals.managerCount = distinctArrangementManagerCount;
 
   const complianceBase = totals.rowCount || 0;
   const complianceRate = complianceBase ? Math.max(0, ((complianceBase - totals.exceptionRows) / complianceBase) * 100) : 0;
@@ -579,7 +588,7 @@ function ExecutivePortalHome({ analysisData, selectedProduct, onOpenProduct }) {
           <div className="kpiSectionBlock">
             <h3>נתונים תפעוליים</h3>
             <div className="executiveKpiGrid v41 compact">
-              <ExecutiveKpiCard label="מנהלי הסדר" value={fmtNumber(totals.managerCount)} subtext="לפי כל המוצרים" tone="blue" icon="₪" />
+              <ExecutiveKpiCard label="מנהלי הסדר בטעינה" value={fmtNumber(totals.managerCount)} subtext="כמות מנהלי הסדר שהועלו בפועל" tone="blue" icon="👥" />
               <ExecutiveKpiCard label="מוצרים פעילים" value={fmtNumber(productSummaries.length)} subtext="פנסיה / השתלמות / עתידי" tone="blue" icon="◫" />
               <ExecutiveKpiCard label="רשומות שנקלטו" value={fmtNumber(totals.rowCount)} subtext="שורות ניתוח" tone="neutral" icon="≡" />
               <ExecutiveKpiCard label="מוקדי טיפול" value={fmtNumber(totals.exceptionRows)} subtext="דמי ניהול, גיל, נתונים" tone={totals.exceptionRows ? "warning" : "green"} icon="!" />
@@ -613,7 +622,7 @@ function ExecutivePortalHome({ analysisData, selectedProduct, onOpenProduct }) {
             items={productDistribution}
           />
           <DonutBreakdown
-            title="פילוח לפי מנהלי הסדר"
+            title="פילוח לפי מנהלי הסדר בטעינה"
             centerLabel={'סה"כ צבירה'}
             centerValue={fmtMoney(totals.totalAccumulation)}
             items={managerDistribution}

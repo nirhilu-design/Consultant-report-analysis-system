@@ -1,16 +1,12 @@
 // Path: src/components/AnalysisWorkspace.jsx
-// v40 — Executive Analytics Layer
-// Central Analysis Workspace — Multi Product Results
+// v41 — Portal Architecture
+// Executive Dashboard becomes the home screen after analysis.
+// Product Center opens each product only on explicit user selection.
 //
-// Adds a global executive layer above the product tabs:
-// - Executive KPI Strip
-// - Unified Risk Center without severity
-// - Product Contribution
-//
-// Privacy rule:
-// In aggregate mode the executive layer shows only aggregated data.
-// Product-level detailed rows remain inside the product screens and should be
-// exposed only by the product components when a single arrangement manager is selected.
+// Core UX rule:
+// - Home / aggregate mode: KPI, risks, product split, manager split, product cards only.
+// - Product detail mode: the selected product analysis screen.
+// - No employee/customer lists are shown on the executive home screen.
 
 import React, { useEffect, useMemo, useState } from "react";
 import Dashboard from "./Dashboard.jsx";
@@ -22,6 +18,13 @@ const PRODUCT_LABELS = {
   [PRODUCT_MODES.HISHTALMUT]: "קרן השתלמות",
 };
 
+const FUTURE_PRODUCTS = [
+  { key: "aca", label: "אכ\"ע", description: "ניתוח כיסוי אובדן כושר עבודה", status: "בקרוב" },
+  { key: "meetings", label: "פגישות", description: "מעקב פגישות ולקוחות באיחור", status: "בקרוב" },
+  { key: "gemel", label: "קופות גמל", description: "ניתוח קופות גמל", status: "עתידי" },
+  { key: "managers", label: "ביטוחי מנהלים", description: "ניתוח פוליסות מנהלים", status: "עתידי" },
+];
+
 function asArray(value) {
   return Array.isArray(value) ? value : [];
 }
@@ -29,7 +32,7 @@ function asArray(value) {
 function toNumber(value) {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string") {
-    const normalized = value.replace(/,/g, "").replace(/%/g, "").trim();
+    const normalized = value.replace(/,/g, "").replace(/%/g, "").replace(/₪/g, "").trim();
     const parsed = Number(normalized);
     return Number.isFinite(parsed) ? parsed : 0;
   }
@@ -213,6 +216,18 @@ function getProductDiagnosticsWarnings(result) {
   return [...diagnosticsWarnings, ...managerWarnings].filter(Boolean);
 }
 
+function groupSum(items, getKey, getValue) {
+  const map = new Map();
+  items.forEach((item) => {
+    const key = normalizeText(getKey(item)) || "לא מסווג";
+    const current = map.get(key) || { label: key, value: 0, rows: 0 };
+    current.value += toNumber(getValue(item));
+    current.rows += 1;
+    map.set(key, current);
+  });
+  return [...map.values()].sort((a, b) => b.value - a.value);
+}
+
 function buildProductExecutiveSummary(productMode, productResult) {
   const label = PRODUCT_LABELS[productMode] || getProductModeLabel(productMode);
   const rows = productMode === PRODUCT_MODES.HISHTALMUT ? getEducationRows(productResult) : getPensionRows(productResult);
@@ -240,12 +255,16 @@ function buildProductExecutiveSummary(productMode, productResult) {
     return isPensionFeeWarning(row) || isAgeTrackWarning(row) || isMissingDataRow(row);
   }).length;
 
+  const activeRows = Math.max(0, rows.length - exceptionRows);
+  const complianceRate = rows.length ? Math.max(0, (activeRows / rows.length) * 100) : 0;
+
   return {
     productMode,
     label,
     managerCount,
     rowCount: rows.length,
     employeeCount,
+    activeRows,
     totalAccumulation,
     totalMonthlyDeposits,
     averageAccumulation: employeeCount ? totalAccumulation / employeeCount : 0,
@@ -255,6 +274,8 @@ function buildProductExecutiveSummary(productMode, productResult) {
     dataWarnings,
     missingDataRows,
     issuerCount: uniqueCount(rows.map(getIssuerName)),
+    complianceRate,
+    rows,
   };
 }
 
@@ -264,11 +285,14 @@ function buildExecutiveAnalytics(analysisData) {
     .map(([productMode, productResult]) => buildProductExecutiveSummary(productMode, productResult))
     .filter((item) => item.rowCount || item.managerCount || item.totalAccumulation || item.totalMonthlyDeposits);
 
+  const allRows = productSummaries.flatMap((item) => item.rows.map((row) => ({ ...row, __productLabel: item.label })));
+
   const totals = productSummaries.reduce(
     (acc, item) => {
       acc.managerCount += item.managerCount;
       acc.rowCount += item.rowCount;
       acc.employeeCount += item.employeeCount;
+      acc.activeRows += item.activeRows;
       acc.totalAccumulation += item.totalAccumulation;
       acc.totalMonthlyDeposits += item.totalMonthlyDeposits;
       acc.exceptionRows += item.exceptionRows;
@@ -282,6 +306,7 @@ function buildExecutiveAnalytics(analysisData) {
       managerCount: 0,
       rowCount: 0,
       employeeCount: 0,
+      activeRows: 0,
       totalAccumulation: 0,
       totalMonthlyDeposits: 0,
       exceptionRows: 0,
@@ -322,131 +347,314 @@ function buildExecutiveAnalytics(analysisData) {
     },
   ];
 
+  const productDistribution = productSummaries.map((item) => ({
+    key: item.productMode,
+    label: item.label,
+    value: item.totalAccumulation,
+    rows: item.rowCount,
+    monthly: item.totalMonthlyDeposits,
+  }));
+
+  const managerDistribution = groupSum(allRows, getArrangementManagerName, getAccumulation).slice(0, 6);
+
   return {
     productSummaries,
     totals,
     complianceRate,
     riskItems,
+    productDistribution,
+    managerDistribution,
   };
 }
 
-function ExecutiveKpiCard({ label, value, subtext, tone = "neutral" }) {
+function ExecutiveKpiCard({ label, value, subtext, tone = "neutral", icon }) {
   return (
-    <article className={`executiveKpiCard ${tone}`}>
-      <span>{label}</span>
-      <strong>{value}</strong>
-      {subtext ? <small>{subtext}</small> : null}
+    <article className={`executiveKpiCard v41 ${tone}`}>
+      <div className="executiveKpiIcon" aria-hidden="true">{icon || "•"}</div>
+      <div>
+        <span>{label}</span>
+        <strong>{value}</strong>
+        {subtext ? <small>{subtext}</small> : null}
+      </div>
     </article>
   );
 }
 
-function ExecutiveAnalyticsLayer({ analysisData }) {
-  const analytics = useMemo(() => buildExecutiveAnalytics(analysisData), [analysisData]);
-  const { totals, productSummaries, riskItems, complianceRate } = analytics;
-
-  if (!productSummaries.length) return null;
+function DonutBreakdown({ title, centerLabel, centerValue, items, emptyText }) {
+  const total = items.reduce((sum, item) => sum + toNumber(item.value), 0);
+  let cursor = 0;
+  const palette = ["#2563eb", "#16a34a", "#7c3aed", "#f59e0b", "#0f766e", "#64748b"];
+  const stops = items.map((item, index) => {
+    const percent = total ? (toNumber(item.value) / total) * 100 : 0;
+    const start = cursor;
+    cursor += percent;
+    return `${palette[index % palette.length]} ${start}% ${cursor}%`;
+  });
+  const background = total ? `conic-gradient(${stops.join(", ")})` : "#e5e7eb";
 
   return (
-    <section className="executiveAnalyticsLayer" dir="rtl">
-      <div className="executiveLayerHeader">
-        <div>
-          <p className="eyebrow">Executive Analytics</p>
-          <h2>תמונת הנהלה מאוחדת</h2>
-          <p>
-            סיכום אגרגטיבי לכל המוצרים ומנהלי ההסדר. אין כאן רשימות עובדים או פרטים מזהים;
-            פירוט פרטני נשאר בתוך מוצר לאחר בחירת מנהל הסדר יחיד.
-          </p>
+    <section className="executivePanel v41 donutPanel">
+      <div className="executivePanelTitle">
+        <h3>{title}</h3>
+      </div>
+      {total ? (
+        <div className="donutContent">
+          <div className="donutChart" style={{ background }}>
+            <div className="donutCenter">
+              <span>{centerLabel}</span>
+              <strong>{centerValue}</strong>
+            </div>
+          </div>
+          <div className="donutLegend">
+            {items.map((item, index) => {
+              const pct = total ? (toNumber(item.value) / total) * 100 : 0;
+              return (
+                <div className="donutLegendRow" key={`${item.label}-${index}`}>
+                  <span className="donutColor" style={{ background: palette[index % palette.length] }} />
+                  <div>
+                    <strong>{item.label}</strong>
+                    <small>{fmtMoney(item.value)} · {fmtPct(pct)}</small>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
+      ) : (
+        <p className="emptyStateText">{emptyText || "אין מספיק נתונים להצגה"}</p>
+      )}
+    </section>
+  );
+}
+
+function RiskCenterPanel({ riskItems }) {
+  return (
+    <section className="executivePanel v41 riskCenterPanel">
+      <div className="executivePanelTitle">
+        <h3>Unified Risk Center</h3>
+        <span>כמות בלבד, ללא חומרה</span>
       </div>
-
-      <div className="executiveKpiGrid">
-        <ExecutiveKpiCard label="מנהלי הסדר" value={fmtNumber(totals.managerCount)} subtext="לפי כל המוצרים שהועלו" tone="blue" />
-        <ExecutiveKpiCard label="רשומות שנקלטו" value={fmtNumber(totals.rowCount)} subtext="פוליסות / קופות / שורות ניתוח" tone="blue" />
-        <ExecutiveKpiCard label="עובדים / לקוחות" value={fmtNumber(totals.employeeCount)} subtext="ספירה אגרגטיבית ללא פירוט" tone="neutral" />
-        <ExecutiveKpiCard label="צבירה כוללת" value={fmtMoney(totals.totalAccumulation)} subtext="על בסיס המוצרים שנקלטו" tone="gold" />
-        <ExecutiveKpiCard label="הפקדות חודשיות" value={fmtMoney(totals.totalMonthlyDeposits)} subtext="סך הפקדות מזוהות" tone="gold" />
-        <ExecutiveKpiCard label="צבירה ממוצעת" value={fmtMoney(totals.employeeCount ? totals.totalAccumulation / totals.employeeCount : 0)} subtext="לעובד / לקוח מזוהה" tone="neutral" />
-        <ExecutiveKpiCard label="מוקדי טיפול" value={fmtNumber(totals.exceptionRows)} subtext="דמי ניהול, גיל, נתונים" tone={totals.exceptionRows ? "warning" : "green"} />
-        <ExecutiveKpiCard label="אחוז תקינות" value={fmtPct(complianceRate)} subtext="חישוב אגרגטיבי ראשוני" tone={complianceRate >= 90 ? "green" : "warning"} />
-      </div>
-
-      <div className="executivePanelsGrid">
-        <section className="executivePanel">
-          <div className="executivePanelTitle">
-            <h3>Unified Risk Center</h3>
-            <span>ללא חומרה בשלב זה</span>
-          </div>
-          <div className="executiveRiskTableWrap">
-            <table className="executiveTable">
-              <thead>
-                <tr>
-                  <th>סוג חריגה</th>
-                  <th>כמות</th>
-                  <th>מוצרים רלוונטיים</th>
-                </tr>
-              </thead>
-              <tbody>
-                {riskItems.map((item) => (
-                  <tr key={item.key}>
-                    <td>{item.label}</td>
-                    <td>{fmtNumber(item.count)}</td>
-                    <td>{item.products.length ? item.products.join(" · ") : "אין חריגות"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-
-        <section className="executivePanel">
-          <div className="executivePanelTitle">
-            <h3>תרומת מוצרים</h3>
-            <span>סיכום לפי מוצר</span>
-          </div>
-          <div className="executiveRiskTableWrap">
-            <table className="executiveTable">
-              <thead>
-                <tr>
-                  <th>מוצר</th>
-                  <th>מנהלי הסדר</th>
-                  <th>רשומות</th>
-                  <th>צבירה</th>
-                  <th>מוקדי טיפול</th>
-                </tr>
-              </thead>
-              <tbody>
-                {productSummaries.map((item) => (
-                  <tr key={item.productMode}>
-                    <td>{item.label}</td>
-                    <td>{fmtNumber(item.managerCount)}</td>
-                    <td>{fmtNumber(item.rowCount)}</td>
-                    <td>{fmtMoney(item.totalAccumulation)}</td>
-                    <td>{fmtNumber(item.exceptionRows)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
+      <div className="executiveRiskTableWrap">
+        <table className="executiveTable v41">
+          <thead>
+            <tr>
+              <th>סוג חריגה</th>
+              <th>כמות</th>
+              <th>מוצרים רלוונטיים</th>
+            </tr>
+          </thead>
+          <tbody>
+            {riskItems.map((item) => (
+              <tr key={item.key}>
+                <td>{item.label}</td>
+                <td>{fmtNumber(item.count)}</td>
+                <td>{item.products.length ? item.products.join(" · ") : "אין חריגות"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </section>
   );
 }
 
-function ProductTabs({ products, selectedProduct, onSelect }) {
+function ProductSummaryTable({ productSummaries }) {
   return (
-    <div className="analysisProductTabs" dir="rtl">
-      {products.map((productMode) => (
-        <button
-          key={productMode}
-          type="button"
-          className={selectedProduct === productMode ? "active" : ""}
-          onClick={() => onSelect(productMode)}
-        >
-          {getProductModeLabel(productMode)}
-        </button>
-      ))}
+    <section className="executivePanel v41 productSummaryPanel">
+      <div className="executivePanelTitle">
+        <h3>סיכום לפי מוצרים</h3>
+        <span>נתונים אגרגטיביים בלבד</span>
+      </div>
+      <div className="executiveRiskTableWrap">
+        <table className="executiveTable v41">
+          <thead>
+            <tr>
+              <th>מוצר</th>
+              <th>מנהלי הסדר</th>
+              <th>עובדים / רשומות</th>
+              <th>צבירה</th>
+              <th>הפקדות</th>
+              <th>מוקדי טיפול</th>
+              <th>איכות</th>
+            </tr>
+          </thead>
+          <tbody>
+            {productSummaries.map((item) => (
+              <tr key={item.productMode}>
+                <td><strong>{item.label}</strong></td>
+                <td>{fmtNumber(item.managerCount)}</td>
+                <td>{fmtNumber(item.rowCount)}</td>
+                <td>{fmtMoney(item.totalAccumulation)}</td>
+                <td>{fmtMoney(item.totalMonthlyDeposits)}</td>
+                <td>{fmtNumber(item.exceptionRows)}</td>
+                <td>{fmtPct(item.complianceRate)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function ProductCenter({ productSummaries, selectedProduct, onOpenProduct }) {
+  const activeCards = productSummaries.map((item) => ({
+    key: item.productMode,
+    label: item.label,
+    description: "כניסה למסך ניתוח המוצר",
+    status: "פעיל",
+    enabled: true,
+    metrics: [
+      { label: "רשומות", value: fmtNumber(item.rowCount) },
+      { label: "צבירה", value: fmtMoney(item.totalAccumulation) },
+      { label: "מוקדי טיפול", value: fmtNumber(item.exceptionRows) },
+    ],
+  }));
+
+  const cards = [
+    ...activeCards,
+    ...FUTURE_PRODUCTS.map((item) => ({ ...item, enabled: false, metrics: [] })),
+  ];
+
+  return (
+    <section className="productCenterPanel" dir="rtl">
+      <div className="productCenterHeader">
+        <div>
+          <p className="eyebrow">Product Center</p>
+          <h2>כניסה למוצרי הניתוח</h2>
+          <p>מסך הבית נשאר אגרגטיבי. פירוט עובדים ולקוחות נפתח רק בתוך מוצר פעיל.</p>
+        </div>
+      </div>
+
+      <div className="productCenterGrid">
+        {cards.map((card) => (
+          <button
+            type="button"
+            key={card.key}
+            className={`productPortalCard ${card.enabled ? "enabled" : "disabled"} ${selectedProduct === card.key ? "active" : ""}`}
+            onClick={() => card.enabled && onOpenProduct(card.key)}
+            disabled={!card.enabled}
+          >
+            <span className="productPortalStatus">{card.status}</span>
+            <strong>{card.label}</strong>
+            <small>{card.description}</small>
+            {card.metrics.length ? (
+              <div className="productPortalMetrics">
+                {card.metrics.map((metric) => (
+                  <span key={metric.label}>
+                    <b>{metric.value}</b>
+                    <em>{metric.label}</em>
+                  </span>
+                ))}
+              </div>
+            ) : null}
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ExecutivePortalHome({ analysisData, selectedProduct, onOpenProduct }) {
+  const analytics = useMemo(() => buildExecutiveAnalytics(analysisData), [analysisData]);
+  const { totals, productSummaries, riskItems, complianceRate, productDistribution, managerDistribution } = analytics;
+
+  if (!productSummaries.length) return null;
+
+  return (
+    <div className="executivePortalHome" dir="rtl">
+      <section className="executiveAnalyticsLayer v41" dir="rtl">
+        <div className="executiveLayerHeader v41">
+          <div>
+            <p className="eyebrow">Executive Analytics</p>
+            <h2>תמונת הנהלה מאוחדת</h2>
+            <p>
+              מסך בית אגרגטיבי לכל המוצרים ומנהלי ההסדר. אין כאן רשימות עובדים או פרטים מזהים.
+              כניסה לפרטים מתבצעת דרך Product Center בלבד.
+            </p>
+          </div>
+        </div>
+
+        <div className="executiveKpiSections">
+          <div className="kpiSectionBlock">
+            <h3>נתונים תפעוליים</h3>
+            <div className="executiveKpiGrid v41 compact">
+              <ExecutiveKpiCard label="מנהלי הסדר" value={fmtNumber(totals.managerCount)} subtext="לפי כל המוצרים" tone="blue" icon="₪" />
+              <ExecutiveKpiCard label="מוצרים פעילים" value={fmtNumber(productSummaries.length)} subtext="פנסיה / השתלמות / עתידי" tone="blue" icon="◫" />
+              <ExecutiveKpiCard label="רשומות שנקלטו" value={fmtNumber(totals.rowCount)} subtext="שורות ניתוח" tone="neutral" icon="≡" />
+              <ExecutiveKpiCard label="מוקדי טיפול" value={fmtNumber(totals.exceptionRows)} subtext="דמי ניהול, גיל, נתונים" tone={totals.exceptionRows ? "warning" : "green"} icon="!" />
+            </div>
+          </div>
+
+          <div className="kpiSectionBlock">
+            <h3>נתונים כספיים</h3>
+            <div className="executiveKpiGrid v41 compact">
+              <ExecutiveKpiCard label="צבירה כוללת" value={fmtMoney(totals.totalAccumulation)} subtext="על בסיס Snapshot נוכחי" tone="gold" icon="₪" />
+              <ExecutiveKpiCard label="הפקדות חודשיות" value={fmtMoney(totals.totalMonthlyDeposits)} subtext="סך הפקדות מזוהות" tone="gold" icon="↻" />
+              <ExecutiveKpiCard label="צבירה ממוצעת" value={fmtMoney(totals.employeeCount ? totals.totalAccumulation / totals.employeeCount : 0)} subtext="לעובד / לקוח מזוהה" tone="neutral" icon="○" />
+            </div>
+          </div>
+
+          <div className="kpiSectionBlock">
+            <h3>איכות נתונים</h3>
+            <div className="executiveKpiGrid v41 compact">
+              <ExecutiveKpiCard label="אחוז עובדים תקינים" value={fmtPct(complianceRate)} subtext="לפי רשומות ללא מוקדי טיפול" tone={complianceRate >= 90 ? "green" : "warning"} icon="✓" />
+              <ExecutiveKpiCard label="שגיאות נתונים" value={fmtNumber(totals.dataWarnings)} subtext="אזהרות מערכת" tone={totals.dataWarnings ? "warning" : "green"} icon="△" />
+              <ExecutiveKpiCard label="נתונים חסרים" value={fmtNumber(totals.missingDataRows)} subtext="רשומות עם חוסר מהותי" tone={totals.missingDataRows ? "warning" : "green"} icon="□" />
+            </div>
+          </div>
+        </div>
+
+        <div className="executivePanelsGrid v41 portal">
+          <DonutBreakdown
+            title="פילוח לפי מוצרים"
+            centerLabel={'סה"כ צבירה'}
+            centerValue={fmtMoney(totals.totalAccumulation)}
+            items={productDistribution}
+          />
+          <DonutBreakdown
+            title="פילוח לפי מנהלי הסדר"
+            centerLabel={'סה"כ צבירה'}
+            centerValue={fmtMoney(totals.totalAccumulation)}
+            items={managerDistribution}
+          />
+          <RiskCenterPanel riskItems={riskItems} />
+        </div>
+
+        <ProductSummaryTable productSummaries={productSummaries} />
+      </section>
+
+      <ProductCenter productSummaries={productSummaries} selectedProduct={selectedProduct} onOpenProduct={onOpenProduct} />
     </div>
+  );
+}
+
+function ProductDetailHeader({ selectedProduct, onBackHome, availableProducts, onSelectProduct }) {
+  return (
+    <header className="productDetailHeader" dir="rtl">
+      <div>
+        <p className="eyebrow">Product Analysis</p>
+        <h2>{getProductModeLabel(selectedProduct)}</h2>
+        <p>מצב פירוט מוצר. במוצר עצמו ניתן להיכנס לנתונים פרטניים בהתאם לבחירת מנהל הסדר.</p>
+      </div>
+      <div className="productDetailActions">
+        <div className="analysisProductTabs compact" dir="rtl">
+          {availableProducts.map((productMode) => (
+            <button
+              key={productMode}
+              type="button"
+              className={selectedProduct === productMode ? "active" : ""}
+              onClick={() => onSelectProduct(productMode)}
+            >
+              {getProductModeLabel(productMode)}
+            </button>
+          ))}
+        </div>
+        <button type="button" className="secondaryButton" onClick={onBackHome}>
+          חזרה למסך הנהלה
+        </button>
+      </div>
+    </header>
   );
 }
 
@@ -458,6 +666,7 @@ export default function AnalysisWorkspace({ files, analysisData, onBack }) {
       ? analysisData.activeProductMode
       : availableProducts[0]
   );
+  const [viewMode, setViewMode] = useState("portal");
 
   useEffect(() => {
     if (!availableProducts.includes(selectedProduct)) {
@@ -466,8 +675,14 @@ export default function AnalysisWorkspace({ files, analysisData, onBack }) {
           ? analysisData.activeProductMode
           : availableProducts[0]
       );
+      setViewMode("portal");
     }
   }, [analysisData?.activeProductMode, availableProducts, selectedProduct]);
+
+  function openProduct(productMode) {
+    setSelectedProduct(productMode);
+    setViewMode("product");
+  }
 
   const pensionAnalysisData =
     analysisData?.productResults?.[PRODUCT_MODES.PENSION] ||
@@ -475,14 +690,13 @@ export default function AnalysisWorkspace({ files, analysisData, onBack }) {
     analysisData;
 
   return (
-    <section className="analysisWorkspace" dir="rtl">
-      <header className="analysisWorkspaceHeader">
+    <section className="analysisWorkspace v41" dir="rtl">
+      <header className="analysisWorkspaceHeader v41">
         <div>
-          <p className="eyebrow">Analysis Workspace</p>
-          <h1>מרכז ניתוח מוצרים</h1>
+          <p className="eyebrow">Analysis Portal</p>
+          <h1>מרכז ניתוח יועץ</h1>
           <p>
-            כאן בוחרים איזה מוצר לנתח ולהציג. מעל המוצרים מוצגת תמונת הנהלה מאוחדת
-            ואגרגטיבית בלבד, ללא עובדים או מספרי לקוח.
+            מסך הבית מציג תמונת הנהלה מאוחדת. דרך Product Center נכנסים לניתוחי המוצרים.
           </p>
         </div>
 
@@ -491,21 +705,27 @@ export default function AnalysisWorkspace({ files, analysisData, onBack }) {
         </button>
       </header>
 
-      <ExecutiveAnalyticsLayer analysisData={analysisData} />
-
-      <ProductTabs
-        products={availableProducts}
-        selectedProduct={selectedProduct}
-        onSelect={setSelectedProduct}
-      />
-
-      <div className="analysisWorkspaceBody">
-        {selectedProduct === PRODUCT_MODES.PENSION ? (
-          <Dashboard files={files} analysisData={pensionAnalysisData} />
-        ) : (
-          <EducationFundAnalysisView analysisData={analysisData} />
-        )}
-      </div>
+      {viewMode === "portal" ? (
+        <ExecutivePortalHome
+          analysisData={analysisData}
+          selectedProduct={selectedProduct}
+          onOpenProduct={openProduct}
+        />
+      ) : (
+        <div className="analysisWorkspaceBody productModeBody">
+          <ProductDetailHeader
+            selectedProduct={selectedProduct}
+            availableProducts={availableProducts}
+            onSelectProduct={setSelectedProduct}
+            onBackHome={() => setViewMode("portal")}
+          />
+          {selectedProduct === PRODUCT_MODES.PENSION ? (
+            <Dashboard files={files} analysisData={pensionAnalysisData} />
+          ) : (
+            <EducationFundAnalysisView analysisData={analysisData} />
+          )}
+        </div>
+      )}
     </section>
   );
 }

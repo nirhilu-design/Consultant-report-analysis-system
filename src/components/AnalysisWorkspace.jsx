@@ -19,10 +19,10 @@ const PRODUCT_LABELS = {
 };
 
 const FUTURE_PRODUCTS = [
-  { key: "aca", label: "אכ\"ע", description: "ניתוח כיסוי אובדן כושר עבודה", status: "בקרוב" },
-  { key: "meetings", label: "פגישות", description: "מעקב פגישות ולקוחות באיחור", status: "בקרוב" },
+  { key: "executiveInsurance", label: "ביטוח מנהלים", description: "המוצר הבא בתור: שלד טעינה וניתוח ייבנה לאחר אישור מבנה הקבצים", status: "הבא בתור" },
   { key: "gemel", label: "קופות גמל", description: "ניתוח קופות גמל", status: "עתידי" },
-  { key: "managers", label: "ביטוחי מנהלים", description: "ניתוח פוליסות מנהלים", status: "עתידי" },
+  { key: "aca", label: "אכ\"ע", description: "ניתוח כיסוי אובדן כושר עבודה", status: "עתידי" },
+  { key: "meetings", label: "פגישות", description: "מעקב פגישות ולקוחות באיחור", status: "עתידי" },
 ];
 
 function asArray(value) {

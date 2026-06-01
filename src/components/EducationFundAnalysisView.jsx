@@ -16,7 +16,6 @@
 // - Personal details are optional. If birth date is unavailable, age analysis falls back gracefully.
 
 import React, { useEffect, useMemo, useState } from "react";
-import ProductHome from "./ProductHome.jsx";
 
 const EDUCATION_TABS = [
   { key: "kpi", title: "KPI", icon: "▣" },
@@ -733,15 +732,6 @@ function buildAccumulationInsights(rows) {
   };
 }
 
-
-function buildAccumulationAnalysis(rows) {
-  const insights = buildAccumulationInsights(rows);
-  return {
-    ...insights,
-    totalAccumulation: insights.totalAccumulation || 0,
-  };
-}
-
 function classifyFeeSeverity(gap) {
   if (gap === null || gap === undefined || !Number.isFinite(Number(gap))) return "unknown";
   if (gap <= 0.0001) return "ok";
@@ -1145,7 +1135,7 @@ function EducationTabs({ activeTab, onChange }) {
   );
 }
 
-function EducationKpiHome({ rows, selectedRows, dataset, scopeLabel, summary, totalAccumulation, totalMonthlyDeposits, issuerCount, onNavigate, onBackHome }) {
+function EducationKpiHome({ rows, selectedRows, dataset, scopeLabel, summary, totalAccumulation, totalMonthlyDeposits, issuerCount, onNavigate }) {
   const feeAnalysis = useMemo(() => buildFeeAnalysis(rows), [rows]);
   const accumulation = useMemo(() => buildAccumulationAnalysis(rows), [rows]);
   const companyChart = useMemo(() => buildFeeCompanyChart(rows), [rows]);
@@ -1170,37 +1160,46 @@ function EducationKpiHome({ rows, selectedRows, dataset, scopeLabel, summary, to
     { id: "managers", title: "גופים מנהלים", icon: "▦", text: "פיזור צבירה ועובדים לפי גופים מנהלים מתוך קרנות ההשתלמות.", metric: `${formatNumber(issuerCount)} גופים`, tone: "orange" },
   ];
 
-  const productKpiCards = kpiCards.map((card) => ({
-    label: card.label,
-    value: card.value,
-    target: card.target,
-    icon: card.icon,
-    tone: card.tone === "warning" ? "orange" : card.tone,
-  }));
-
-  const managerBars = buildIssuerSummary(rows).slice(0, 6).map((item) => ({
-    label: item.issuer,
-    value: item.accumulation || item.count || 0,
-    displayValue: formatCurrency(item.accumulation || 0),
-    description: `${formatNumber(item.count)} שורות`,
-  }));
-
   return (
-    <ProductHome
-      eyebrow="Education Fund Product Home"
-      title="קרנות השתלמות"
-      subtitle="מסך מוצר אחיד — תמונת מצב מלאה לפני כניסה לניתוח הספציפי."
-      icon="▣"
-      scopeLabel={scopeLabel}
-      kpiCards={productKpiCards}
-      analysisCards={hubCards}
-      managerBars={managerBars}
-      actionTitle="שגיאות ובדיקות"
-      actionValue={formatNumber(dataset.invalidCount)}
-      actionText="עובדים ושורות שדורשים בדיקה לפי דמי ניהול, מסלולים, צבירה או איכות נתונים."
-      actionTarget="errors"
-      onNavigate={onNavigate}
-    />
+    <section className="education-kpi-home">
+      <div className="kpi-toolbar product-home-toolbar">
+        <div>
+          <h2>מבט KPI כללי</h2>
+          <p>סיכום קרנות השתלמות לכל הדוחות, עם בחירה לפי מנהל הסדר.</p>
+        </div>
+        <strong>{scopeLabel}</strong>
+      </div>
+
+      <div className="educationTopKpiGrid unified-product-kpi-grid">
+        {kpiCards.map((card) => (
+          <button key={card.label} type="button" className={`educationKpiCard product-kpi-card card-${card.tone}`} onClick={() => onNavigate(card.target)}>
+            <span className="product-kpi-icon">{card.icon}</span>
+            <span>{card.label}</span>
+            <strong>{card.value}</strong>
+            <small>לעיון בפרטים ←</small>
+          </button>
+        ))}
+      </div>
+
+      <div className="product-home-title">
+        <div>
+          <h2>ניתוחים מרכזיים</h2>
+          <p>עמוד בית אחיד למוצר. מכאן עוברים לכל ניתוח מפורט.</p>
+        </div>
+      </div>
+
+      <div className="product-analysis-card-grid">
+        {hubCards.map((card) => (
+          <article key={card.id} className={`product-analysis-card tone-${card.tone}`}>
+            <div className="analysis-card-icon">{card.icon}</div>
+            <h3>{card.title}</h3>
+            <p>{card.text}</p>
+            <strong>{card.metric}</strong>
+            <button type="button" onClick={() => onNavigate(card.id)}>לצפייה בניתוח</button>
+          </article>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -1523,6 +1522,15 @@ function FeesTab({ rows, isAggregateScope = false }) {
       )}
     </section>
   );
+}
+
+function buildAccumulationAnalysis(rows) {
+  const insights = buildAccumulationInsights(rows);
+  return {
+    ...insights,
+    rowCount: rows.length,
+    totalMonthlyDeposits: rows.reduce((sum, row) => sum + safeNumber(row.monthlyDeposit), 0),
+  };
 }
 
 function AccumulationTab({ rows, isAggregateScope = false }) {
@@ -2070,7 +2078,7 @@ function ErrorsTab({ rows, isAggregateScope = false }) {
   );
 }
 
-export default function EducationFundAnalysisView({ analysisData, onBackHome }) {
+export default function EducationFundAnalysisView({ analysisData }) {
   const { rows, summary, warnings } = getEducationFundData(analysisData);
   const [activeTab, setActiveTab] = useState("kpi");
   const [selectedManagerKey, setSelectedManagerKey] = useState("all");
@@ -2104,31 +2112,34 @@ export default function EducationFundAnalysisView({ analysisData, onBackHome }) 
   const issuerCount = new Set(analysisRows.map((row) => row.issuerOriginal || row.issuer).filter(Boolean)).size;
 
   return (
-    <section className="educationFundAnalysisView dashboard-single-product-shell" dir="rtl">
-      {activeTab !== "kpi" && (
-        <header className="product-single-bar education-single-bar">
-          <div className="product-single-title">
-            <span className="product-single-icon">▣</span>
-            <div>
-              <p className="eyebrow">EDUCATION FUND ANALYSIS</p>
-              <h1>קרנות השתלמות</h1>
-              <p>ניתוח מפורט לפי מנהל הסדר, דמי ניהול, צבירות, מסלולי השקעה וגופים מנהלים.</p>
-            </div>
+    <section className="educationFundAnalysisView" dir="rtl">
+      <div className="productAnalysisHeader product-shell-hero education-hero">
+        <div className="product-hero-title">
+          <span className="product-hero-icon">▣</span>
+          <div>
+            <p className="eyebrow">Education Fund</p>
+            <h2>קרנות השתלמות</h2>
+            <p>מערכת ניהול ובקרה — KPI מרכזי ומעבר אחיד לכל ניתוחי המוצר.</p>
           </div>
+        </div>
+      </div>
 
-          <div className="product-single-actions">
-            <ManagerScopeSelector
-              options={managerOptions}
-              selectedKey={selectedManagerKey}
-              onChange={setSelectedManagerKey}
-            />
-            <button type="button" className="product-return-btn" onClick={() => setActiveTab("kpi")}>
-              <span>‹</span>
-              חזרה למסך KPI ראשי
-            </button>
-          </div>
-        </header>
+      <ManagerScopeSelector
+        options={managerOptions}
+        selectedKey={selectedManagerKey}
+        onChange={setSelectedManagerKey}
+      />
+
+      {activeTab !== "kpi" && (
+        <div className="educationTopKpiGrid compact-product-kpis">
+          <KpiCard label="שכבת ניתוח" value={scopeLabel} />
+          <KpiCard label="שורות שנקלטו" value={selectedRows.length || summary.unifiedRowCount || 0} />
+          <KpiCard label="סה״כ צבירה" value={formatCurrency(totalAccumulation || summary.totalAccumulation)} />
+          <KpiCard label="גופים מנהלים" value={issuerCount || summary.issuerCount || 0} />
+        </div>
       )}
+
+      {activeTab !== "kpi" && <EducationDataQualityCard dataset={educationDataset} />}
 
       {activeTab !== "kpi" && warnings.length > 0 && (
         <section className="workspaceCard">
@@ -2151,6 +2162,8 @@ export default function EducationFundAnalysisView({ analysisData, onBackHome }) 
         </section>
       )}
 
+      <EducationTabs activeTab={activeTab} onChange={setActiveTab} />
+
       {activeTab === "kpi" && (
         <EducationKpiHome
           rows={analysisRows}
@@ -2162,7 +2175,6 @@ export default function EducationFundAnalysisView({ analysisData, onBackHome }) 
           totalMonthlyDeposits={totalMonthlyDeposits}
           issuerCount={issuerCount}
           onNavigate={setActiveTab}
-          onBackHome={onBackHome}
         />
       )}
       {activeTab === "fees" && <FeesTab rows={analysisRows} isAggregateScope={isAggregateScope} />}

@@ -1,6 +1,5 @@
 // Path: src/components/Dashboard.jsx
 import { useState, useMemo } from "react";
-import ProductHome from "./ProductHome.jsx";
 import {
   boolText,
   DonutChart,
@@ -153,7 +152,7 @@ function buildAggregateQualityIssues(issues = []) {
 // ─── KPI ──────────────────────────────────────────────────────────────────────
 
 
-function KpiTab({ kpi, rows = [], actions = [], managerFilter, onManagerFilterChange, onNavigate, onBackHome }) {
+function KpiTab({ kpi, rows = [], actions = [], managerFilter, onManagerFilterChange, onNavigate }) {
   const managerBreakdown = buildManagerBreakdown(rows);
   const managerOptions = managerBreakdown.map((item) => item.manager);
 
@@ -195,49 +194,114 @@ function KpiTab({ kpi, rows = [], actions = [], managerFilter, onManagerFilterCh
     ...managerBreakdown.map((item) => item.total || 0)
   );
 
-  const productKpiCards = cards.map((card, index) => ({
-    label: card.label,
-    value: card.value,
-    target: card.target || "kpi",
-    icon: ["▧", "₪", "⌕", "✓", "×", "⚙", "%", "!"][index] || "•",
-    tone: card.color?.includes("green")
-      ? "green"
-      : card.color?.includes("red")
-        ? "red"
-        : card.color?.includes("warning")
-          ? "orange"
-          : "blue",
-  }));
-
-  const analysisCards = [
-    { id: "fees", title: "דמי ניהול", navLabel: "דמי ניהול", icon: "₪", text: "בדיקת עמידה בדמי ניהול מול ההסכם והשוואה בין גופים מנהלים.", metric: `${fmtPct(displayKpi.complianceRate || 0)} עמידה`, tone: "green" },
-    { id: "investment", title: "מסלולי השקעה", navLabel: "מסלולים", icon: "◈", text: "התאמת מסלולי תגמולים ופיצויים, איתור פיצולים וחריגות ברמת עובד.", metric: "מסלולים", tone: "blue" },
-    { id: "tier", title: "צבירות ומדרגות", navLabel: "צבירות", icon: "▤", text: "איתור עובדים שייתכן ויכולים ליהנות ממדרגת צבירה טובה יותר.", metric: fmtMoney(displayKpi.totalAccumulation), tone: "purple" },
-    { id: "action", title: "חריגים ופעולות", navLabel: "שגיאות", icon: "!", text: "ריכוז פעולות פתוחות לטיפול לפי חומרה, גוף מנהל ועובד.", metric: `${fmtNumber(displayKpi.actionItems)} פעולות`, tone: "orange" },
-  ];
-
-  const managerBars = managerBreakdown.map((item) => ({
-    label: item.manager,
-    value: item.total || 0,
-    displayValue: fmtNumber(item.total || 0),
-    description: `${fmtMoney(item.accumulation)} צבירה`,
-  }));
-
   return (
-    <ProductHome
-      eyebrow="Pension Product Home"
-      title="פנסיה"
-      subtitle="מסך מוצר אחיד — תמונת מצב מלאה לפני כניסה לניתוח הספציפי."
-      icon="☂"
-      scopeLabel={managerFilter === "all" ? "כל מנהלי ההסדר" : managerFilter}
-      kpiCards={productKpiCards}
-      analysisCards={analysisCards}
-      managerBars={managerBars}
-      actionValue={fmtNumber(displayKpi.actionItems)}
-      actionText="חריגים, פערי דמי ניהול, בעיות איכות נתונים ופעולות המשך."
-      onNavigate={onNavigate || (() => {})}
-      onBackHome={onBackHome}
-    />
+    <div className="kpi-overview">
+      <div className="kpi-toolbar">
+        <div>
+          <h2>מבט KPI כולל</h2>
+          <p>סיכום מנהלים לכל הדוחות, עם הכנה לבחירה לפי מנהל הסדר.</p>
+        </div>
+
+        <label className="manager-filter">
+          <span>מנהל הסדר</span>
+          <select
+            value={managerFilter}
+            onChange={(event) => onManagerFilterChange(event.target.value)}
+          >
+            <option value="all">כל מנהלי ההסדר</option>
+            {managerOptions.map((manager) => (
+              <option key={manager} value={manager}>
+                {manager}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      <div className="kpi-grid kpi-grid-executive unified-product-kpi-grid">
+        {cards.map(({ label, value, color, target }, index) => (
+          <button
+            type="button"
+            key={label}
+            className={`kpi-card product-kpi-card ${color}`}
+            onClick={() => onNavigate?.(target || "kpi")}
+          >
+            <span className="product-kpi-icon">{["▧", "₪", "⌕", "✓", "×", "⚙", "%", "!"][index] || "•"}</span>
+            <span className="kpi-label">{label}</span>
+            <strong className="kpi-value">{value}</strong>
+            <small>לעיון בפרטים ←</small>
+          </button>
+        ))}
+      </div>
+
+      <div className="kpi-visual-grid">
+        <section className="kpi-panel">
+          <div className="kpi-panel-header">
+            <h3>סטטוס בקרה</h3>
+            <span>{fmtNumber(displayKpi.totalRows)} פוליסות</span>
+          </div>
+
+          <div className="kpi-status-layout">
+            <DonutChart segments={statusSegments} />
+
+            <div className="kpi-legend">
+              {statusSegments.map((segment) => {
+                const pct = displayKpi.totalRows
+                  ? (Number(segment.value || 0) / displayKpi.totalRows) * 100
+                  : 0;
+
+                return (
+                  <div key={segment.label} className="kpi-legend-row">
+                    <span className={`legend-dot ${segment.className}`} />
+                    <strong>{segment.label}</strong>
+                    <span>{fmtNumber(segment.value)}</span>
+                    <em>{pct.toFixed(1)}%</em>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </section>
+
+        <section className="kpi-panel">
+          <div className="kpi-panel-header">
+            <h3>פיזור לפי מנהל הסדר</h3>
+            <span>{managerBreakdown.length} מנהלים</span>
+          </div>
+
+          {managerBreakdown.length ? (
+            <div className="manager-bars">
+              {managerBreakdown.map((item) => (
+                <div key={item.manager} className="manager-bar-row">
+                  <div className="manager-bar-label">
+                    <strong>{item.manager}</strong>
+                    <span>
+                      {fmtNumber(item.total)} פוליסות · {fmtMoney(item.accumulation)}
+                    </span>
+                  </div>
+
+                  <div className="manager-bar-track">
+                    <div
+                      className="manager-bar-fill"
+                      style={{ width: `${(item.total / maxManagerTotal) * 100}%` }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <EmptyState text="אין נתוני מנהלי הסדר" />
+          )}
+        </section>
+      </div>
+
+      <PensionAnalysisHub
+        kpi={displayKpi}
+        managerBreakdown={managerBreakdown}
+        activeTab="kpi"
+        onNavigate={onNavigate || (() => {})}
+      />
+    </div>
   );
 }
 
@@ -1454,7 +1518,7 @@ const TABS = [
 
 // ─── Main Dashboard ───────────────────────────────────────────────────────────
 
-export default function Dashboard({ analysisData, onBackHome }) {
+export default function Dashboard({ analysisData }) {
   const [activeTab, setActiveTab] = useState("kpi");
   const [managerFilter, setManagerFilter] = useState("all");
 
@@ -1522,7 +1586,6 @@ export default function Dashboard({ analysisData, onBackHome }) {
             managerFilter={managerFilter}
             onManagerFilterChange={setManagerFilter}
             onNavigate={setActiveTab}
-            onBackHome={onBackHome}
           />
         );
 
@@ -1568,33 +1631,77 @@ export default function Dashboard({ analysisData, onBackHome }) {
   }
 
   return (
-    <div className="dashboard dashboard-single-product-shell" dir="rtl">
-      {activeTab !== "kpi" && (
-        <header className="product-single-bar pension-single-bar">
-          <div className="product-single-title">
-            <span className="product-single-icon">☂</span>
-            <div>
-              <p className="eyebrow">PENSION ANALYSIS</p>
-              <h1>פנסיה</h1>
-              <p>ניתוח מפורט לפי מנהל הסדר, דמי ניהול, מסלולים, צבירות, QA ופעולות.</p>
-            </div>
+    <div className="dashboard" dir="rtl">
+      <header className="dashboard-header product-shell-hero pension-hero">
+        <div className="product-hero-title">
+          <span className="product-hero-icon">☂</span>
+          <div>
+            <h1 className="dashboard-title">פנסיה</h1>
+            <p className="dashboard-subtitle">
+              מערכת ניהול ובקרה · {pensionRows?.length || 0} פוליסות
+            </p>
           </div>
+        </div>
 
-          <div className="product-single-actions">
-            <GlobalManagerScope
-              managerFilter={managerFilter}
-              onManagerFilterChange={setManagerFilter}
-              managerOptions={managerOptions}
-              scopedCount={previewRows.length}
-              totalCount={baseRows.length}
-            />
-            <button type="button" className="product-return-btn" onClick={() => setActiveTab("kpi")}>
-              <span>‹</span>
-              חזרה למסך KPI ראשי
-            </button>
+        {summary && (
+          <div className="summary-pills">
+            <span className="pill pill-green">✓ {summary.valid} תקין</span>
+            <span className="pill pill-red">✗ {summary.invalid} לא תקין</span>
+            <span className="pill pill-neutral">
+              — {summary.excluded} תפעול
+            </span>
+
+            {summary.noAgreement > 0 && (
+              <span className="pill pill-warning">
+                ? {summary.noAgreement} ללא הסכם
+              </span>
+            )}
+
+            {summary.tierPotential > 0 && (
+              <span className="pill pill-warning">
+                ⚠ {summary.tierPotential} מודל צבירה
+              </span>
+            )}
+
+            {summary.dataQualityIssues > 0 && (
+              <span className="pill pill-warning">
+                QA {summary.dataQualityIssues} בעיות
+              </span>
+            )}
           </div>
-        </header>
-      )}
+        )}
+      </header>
+
+      <GlobalManagerScope
+        managerFilter={managerFilter}
+        onManagerFilterChange={setManagerFilter}
+        managerOptions={managerOptions}
+        scopedCount={previewRows.length}
+        totalCount={baseRows.length}
+      />
+
+      <nav className="tab-bar">
+        {TABS.map((tab) => (
+          <button
+            key={tab.id}
+            className={`tab-btn ${activeTab === tab.id ? "active" : ""}`}
+            onClick={() => setActiveTab(tab.id)}
+          >
+            <span className="tab-icon">{tab.icon}</span>
+            <span>{tab.label}</span>
+
+            {tab.id === "action" && actions.length > 0 && (
+              <span className="tab-badge">{actions.length}</span>
+            )}
+
+            {tab.id === "quality" && scopedDataQuality?.summary?.issueCount > 0 && (
+              <span className="tab-badge">
+                {scopedDataQuality.summary.issueCount}
+              </span>
+            )}
+          </button>
+        ))}
+      </nav>
 
       <main className="dashboard-content">{renderTab()}</main>
     </div>

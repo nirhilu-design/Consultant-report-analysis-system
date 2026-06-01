@@ -1169,7 +1169,7 @@ function EducationKpiHome({ rows, selectedRows, dataset, scopeLabel, summary, to
     tone: card.tone === "warning" ? "orange" : card.tone,
   }));
 
-  const managerBars = buildIssuerSummary(analysisRows).slice(0, 6).map((item) => ({
+  const managerBars = buildIssuerSummary(rows).slice(0, 6).map((item) => ({
     label: item.issuer,
     value: item.accumulation || item.count || 0,
     displayValue: formatCurrency(item.accumulation || 0),
@@ -2112,6 +2112,16 @@ export default function EducationFundAnalysisView({ analysisData }) {
         selectedKey={selectedManagerKey}
         onChange={setSelectedManagerKey}
       />
+
+
+      {activeTab !== "kpi" && (
+        <div className="product-return-row">
+          <button type="button" className="product-return-btn" onClick={() => setActiveTab("kpi")}>
+            <span>‹</span>
+            חזרה למסך KPI ראשי
+          </button>
+        </div>
+      )}
 
       {activeTab !== "kpi" && (
         <div className="educationTopKpiGrid compact-product-kpis">

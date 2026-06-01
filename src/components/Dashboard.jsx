@@ -1615,6 +1615,16 @@ export default function Dashboard({ analysisData }) {
         totalCount={baseRows.length}
       />
 
+
+      {activeTab !== "kpi" && (
+        <div className="product-return-row">
+          <button type="button" className="product-return-btn" onClick={() => setActiveTab("kpi")}>
+            <span>‹</span>
+            חזרה למסך KPI ראשי
+          </button>
+        </div>
+      )}
+
       <nav className="tab-bar">
         {TABS.map((tab) => (
           <button

@@ -18,26 +18,12 @@
 import React, { useEffect, useMemo, useState } from "react";
 
 const EDUCATION_TABS = [
-  {
-    key: "fees",
-    title: "ניתוח דמי ניהול",
-  },
-  {
-    key: "accumulation",
-    title: "טבלת צבירה מסכמת",
-  },
-  {
-    key: "tracksByAge",
-    title: "מסלול השקעה מול פרטים אישיים",
-  },
-  {
-    key: "managers",
-    title: "טבלת מנהלי השקעות",
-  },
-  {
-    key: "errors",
-    title: "עובדים עם שגיאות לפי מס עובד",
-  },
+  { key: "kpi", title: "KPI", icon: "▣" },
+  { key: "fees", title: "דמי ניהול", icon: "₪" },
+  { key: "accumulation", title: "צבירות", icon: "▤" },
+  { key: "tracksByAge", title: "מסלול השקעה מול גיל", icon: "◈" },
+  { key: "managers", title: "גופים מנהלים", icon: "▦" },
+  { key: "errors", title: "שגיאות", icon: "◎" },
 ];
 
 function asArray(value) {
@@ -1141,10 +1127,79 @@ function EducationTabs({ activeTab, onChange }) {
           className={activeTab === tab.key ? "active" : ""}
           onClick={() => onChange(tab.key)}
         >
-          {tab.title}
+          <span className="tab-icon">{tab.icon}</span>
+          <span>{tab.title}</span>
         </button>
       ))}
     </div>
+  );
+}
+
+function EducationKpiHome({ rows, selectedRows, dataset, scopeLabel, summary, totalAccumulation, totalMonthlyDeposits, issuerCount, onNavigate }) {
+  const feeAnalysis = useMemo(() => buildFeeAnalysis(rows), [rows]);
+  const accumulation = useMemo(() => buildAccumulationAnalysis(rows), [rows]);
+  const companyChart = useMemo(() => buildFeeCompanyChart(rows), [rows]);
+  const validEmployeeCount = companyChart.reduce((sum, item) => sum + item.okCount + item.warningCount + (item.exceptionCount || 0), 0);
+  const nonCompliantCount = feeAnalysis.warningCount + feeAnalysis.exceptionCount;
+  const complianceRate = validEmployeeCount ? Math.round((feeAnalysis.okCount / validEmployeeCount) * 1000) / 10 : 0;
+
+  const kpiCards = [
+    { label: "סה״כ שורות", value: formatNumber(selectedRows.length || summary.unifiedRowCount || 0), tone: "blue", icon: "▧", target: "errors" },
+    { label: "סך צבירה מנוהלת", value: formatCurrency(totalAccumulation || summary.totalAccumulation), tone: "blue", icon: "₪", target: "accumulation" },
+    { label: "שורות תקינות", value: formatNumber(dataset.validCount), tone: "green", icon: "✓", target: "fees" },
+    { label: "שורות לשגיאות", value: formatNumber(dataset.invalidCount), tone: "red", icon: "×", target: "errors" },
+    { label: "% עמידה כללית", value: `${complianceRate}%`, tone: complianceRate >= 90 ? "green" : "red", icon: "%", target: "fees" },
+    { label: "גופים מנהלים", value: formatNumber(issuerCount || summary.issuerCount || 0), tone: "neutral", icon: "▦", target: "managers" },
+    { label: "הפקדה אחרונה", value: formatCurrency(totalMonthlyDeposits || summary.totalMonthlyDeposits), tone: "warning", icon: "↻", target: "accumulation" },
+  ];
+
+  const hubCards = [
+    { id: "fees", title: "דמי ניהול", icon: "₪", text: "בדיקת דמי ניהול בפועל מול קובץ הסכמים, כולל תקין / חריגה קלה / חריגה.", metric: `${complianceRate}% עמידה`, tone: "green" },
+    { id: "accumulation", title: "צבירות", icon: "▤", text: "ניתוח צבירה, עובדים ללא צבירה, ריכוזיות TOP 5 וטבלת קופות מובילות.", metric: formatCurrency(accumulation.totalAccumulation), tone: "blue" },
+    { id: "tracksByAge", title: "מסלול השקעה מול גיל", icon: "◈", text: "בדיקת התאמת מסלול השקעה לגיל העובד מול קובץ פרטים אישיים.", metric: "התאמת גיל", tone: "purple" },
+    { id: "managers", title: "גופים מנהלים", icon: "▦", text: "פיזור צבירה ועובדים לפי גופים מנהלים מתוך קרנות ההשתלמות.", metric: `${formatNumber(issuerCount)} גופים`, tone: "orange" },
+  ];
+
+  return (
+    <section className="education-kpi-home">
+      <div className="kpi-toolbar product-home-toolbar">
+        <div>
+          <h2>מבט KPI כללי</h2>
+          <p>סיכום קרנות השתלמות לכל הדוחות, עם בחירה לפי מנהל הסדר.</p>
+        </div>
+        <strong>{scopeLabel}</strong>
+      </div>
+
+      <div className="educationTopKpiGrid unified-product-kpi-grid">
+        {kpiCards.map((card) => (
+          <button key={card.label} type="button" className={`educationKpiCard product-kpi-card card-${card.tone}`} onClick={() => onNavigate(card.target)}>
+            <span className="product-kpi-icon">{card.icon}</span>
+            <span>{card.label}</span>
+            <strong>{card.value}</strong>
+            <small>לעיון בפרטים ←</small>
+          </button>
+        ))}
+      </div>
+
+      <div className="product-home-title">
+        <div>
+          <h2>ניתוחים מרכזיים</h2>
+          <p>עמוד בית אחיד למוצר. מכאן עוברים לכל ניתוח מפורט.</p>
+        </div>
+      </div>
+
+      <div className="product-analysis-card-grid">
+        {hubCards.map((card) => (
+          <article key={card.id} className={`product-analysis-card tone-${card.tone}`}>
+            <div className="analysis-card-icon">{card.icon}</div>
+            <h3>{card.title}</h3>
+            <p>{card.text}</p>
+            <strong>{card.metric}</strong>
+            <button type="button" onClick={() => onNavigate(card.id)}>לצפייה בניתוח</button>
+          </article>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -2016,7 +2071,7 @@ function ErrorsTab({ rows, isAggregateScope = false }) {
 
 export default function EducationFundAnalysisView({ analysisData }) {
   const { rows, summary, warnings } = getEducationFundData(analysisData);
-  const [activeTab, setActiveTab] = useState("fees");
+  const [activeTab, setActiveTab] = useState("kpi");
   const [selectedManagerKey, setSelectedManagerKey] = useState("all");
 
   const managerOptions = useMemo(() => buildArrangementManagerOptions(rows), [rows]);
@@ -2049,13 +2104,14 @@ export default function EducationFundAnalysisView({ analysisData }) {
 
   return (
     <section className="educationFundAnalysisView" dir="rtl">
-      <div className="productAnalysisHeader">
-        <div>
-          <p className="eyebrow">Education Fund</p>
-          <h2>ניתוח קרן השתלמות</h2>
-          <p>
-            ניתוח לפי דמי ניהול, צבירה, התאמת מסלול השקעה לגיל, צבירות לפי מנהלי השקעות ורשימת עובדים עם שגיאות לפי מס עובד — לפי מנהל הסדר נבחר, עם אפשרות מבט כללי אגרגטיבי במקרה שיש כמה מנהלי הסדר.
-          </p>
+      <div className="productAnalysisHeader product-shell-hero education-hero">
+        <div className="product-hero-title">
+          <span className="product-hero-icon">▣</span>
+          <div>
+            <p className="eyebrow">Education Fund</p>
+            <h2>קרנות השתלמות</h2>
+            <p>מערכת ניהול ובקרה — KPI מרכזי ומעבר אחיד לכל ניתוחי המוצר.</p>
+          </div>
         </div>
       </div>
 
@@ -2065,15 +2121,14 @@ export default function EducationFundAnalysisView({ analysisData }) {
         onChange={setSelectedManagerKey}
       />
 
-      <div className="educationTopKpiGrid">
-        <KpiCard label="שכבת ניתוח" value={scopeLabel} />
-        <KpiCard label="שורות שנקלטו" value={selectedRows.length || summary.unifiedRowCount || 0} />
-        <KpiCard label="סה״כ צבירה" value={formatCurrency(totalAccumulation || summary.totalAccumulation)} />
-        <KpiCard label="הפקדה / פרמיה אחרונה" value={formatCurrency(totalMonthlyDeposits || summary.totalMonthlyDeposits)} />
-        <KpiCard label="גופים מנהלים" value={issuerCount || summary.issuerCount || 0} />
-        <KpiCard label="שורות תקינות לניתוח" value={educationDataset.validCount} />
-        <KpiCard label="שורות לשגיאות" value={educationDataset.invalidCount} />
-      </div>
+      {activeTab !== "kpi" && (
+        <div className="educationTopKpiGrid compact-product-kpis">
+          <KpiCard label="שכבת ניתוח" value={scopeLabel} />
+          <KpiCard label="שורות שנקלטו" value={selectedRows.length || summary.unifiedRowCount || 0} />
+          <KpiCard label="סה״כ צבירה" value={formatCurrency(totalAccumulation || summary.totalAccumulation)} />
+          <KpiCard label="גופים מנהלים" value={issuerCount || summary.issuerCount || 0} />
+        </div>
+      )}
 
       <EducationDataQualityCard dataset={educationDataset} />
 
@@ -2101,6 +2156,19 @@ export default function EducationFundAnalysisView({ analysisData }) {
 
       <EducationTabs activeTab={activeTab} onChange={setActiveTab} />
 
+      {activeTab === "kpi" && (
+        <EducationKpiHome
+          rows={analysisRows}
+          selectedRows={selectedRows}
+          dataset={educationDataset}
+          scopeLabel={scopeLabel}
+          summary={summary}
+          totalAccumulation={totalAccumulation}
+          totalMonthlyDeposits={totalMonthlyDeposits}
+          issuerCount={issuerCount}
+          onNavigate={setActiveTab}
+        />
+      )}
       {activeTab === "fees" && <FeesTab rows={analysisRows} isAggregateScope={isAggregateScope} />}
       {activeTab === "accumulation" && <AccumulationTab rows={analysisRows} isAggregateScope={isAggregateScope} />}
       {activeTab === "tracksByAge" && <TracksByAgeTab rows={analysisRows} isAggregateScope={isAggregateScope} />}

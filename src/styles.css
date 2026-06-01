@@ -4169,3 +4169,50 @@ body,
     grid-template-columns: 1fr;
   }
 }
+
+/* v68 — Executive insurance fee control: separate tables per policy period */
+.periodFeeGrid {
+  display: grid;
+  gap: 18px;
+  margin-top: 18px;
+}
+
+.periodFeeBlock {
+  border: 1px solid rgba(29, 78, 137, 0.16);
+  border-radius: 22px;
+  background: #ffffff;
+  box-shadow: 0 16px 38px rgba(15, 23, 42, 0.07);
+  padding: 18px;
+}
+
+.periodFeeHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.periodFeeHeader h4 {
+  margin: 2px 0 6px;
+  font-size: 20px;
+  color: #16345d;
+}
+
+.periodFeeHeader p {
+  margin: 0;
+  color: #64748b;
+}
+
+.periodFeeStats {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
+@media (max-width: 780px) {
+  .periodFeeHeader {
+    flex-direction: column;
+  }
+}

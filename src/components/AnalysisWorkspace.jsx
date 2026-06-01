@@ -1,740 +1,4319 @@
-// Path: src/components/AnalysisWorkspace.jsx
-// v42 — Portal Architecture manager counting fix
-// Executive Dashboard becomes the home screen after analysis.
-// Product Center opens each product only on explicit user selection.
-//
-// Core UX rule:
-// - Home / aggregate mode: KPI, risks, product split, manager split, product cards only.
-// - Product detail mode: the selected product analysis screen.
-// - No employee/customer lists are shown on the executive home screen.
+/* Path: src/styles.css */
+/* ─────────────────────────────────────────────────────────────────────────────
+   Global
+───────────────────────────────────────────────────────────────────────────── */
 
-import React, { useEffect, useMemo, useState } from "react";
-import Dashboard from "./Dashboard.jsx";
-import EducationFundAnalysisView from "./EducationFundAnalysisView.jsx";
-import { PRODUCT_MODES, getProductModeLabel } from "./ProductModeSelector.jsx";
-
-const PRODUCT_LABELS = {
-  [PRODUCT_MODES.PENSION]: "פנסיה",
-  [PRODUCT_MODES.HISHTALMUT]: "קרן השתלמות",
-};
-
-const FUTURE_PRODUCTS = [
-  { key: "aca", label: "אכ\"ע", description: "ניתוח כיסוי אובדן כושר עבודה", status: "בקרוב" },
-  { key: "meetings", label: "פגישות", description: "מעקב פגישות ולקוחות באיחור", status: "בקרוב" },
-  { key: "gemel", label: "קופות גמל", description: "ניתוח קופות גמל", status: "עתידי" },
-  { key: "managers", label: "ביטוחי מנהלים", description: "ניתוח פוליסות מנהלים", status: "עתידי" },
-];
-
-function asArray(value) {
-  return Array.isArray(value) ? value : [];
+* {
+  box-sizing: border-box;
 }
 
-function toNumber(value) {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string") {
-    const normalized = value.replace(/,/g, "").replace(/%/g, "").replace(/₪/g, "").trim();
-    const parsed = Number(normalized);
-    return Number.isFinite(parsed) ? parsed : 0;
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family:
+    Calibri,
+    Arial,
+    "Segoe UI",
+    sans-serif;
+  background: #f3f6fb;
+  color: #14213d;
+}
+
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+.app {
+  min-height: 100vh;
+  padding: 28px;
+  background:
+    radial-gradient(circle at top right, rgba(47, 111, 219, 0.09), transparent 28%),
+    linear-gradient(180deg, #f8fbff 0%, #eef3fa 100%);
+}
+
+.card {
+  max-width: 1180px;
+  margin: 0 auto 24px;
+  padding: 24px;
+  border: 1px solid #dbe3ef;
+  border-radius: 26px;
+  background: #ffffff;
+  box-shadow: 0 18px 45px rgba(15, 23, 42, 0.06);
+}
+
+.hero {
+  max-width: 1180px;
+  margin: 0 auto 22px;
+  padding: 34px;
+  border-radius: 30px;
+  color: #ffffff;
+  background:
+    linear-gradient(135deg, rgba(15, 35, 68, 0.97), rgba(47, 111, 219, 0.9)),
+    radial-gradient(circle at top left, rgba(212, 175, 55, 0.28), transparent 30%);
+  box-shadow: 0 22px 50px rgba(15, 35, 68, 0.22);
+}
+
+.hero h1 {
+  margin: 0 0 10px;
+  font-size: 36px;
+  line-height: 1.2;
+}
+
+.hero p {
+  margin: 0;
+  max-width: 760px;
+  line-height: 1.7;
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.eyebrow {
+  margin: 0 0 8px;
+  color: #d4af37;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.primaryButton {
+  border: 0;
+  border-radius: 16px;
+  padding: 13px 22px;
+  background: #2f6fdb;
+  color: #ffffff;
+  font-weight: 800;
+  box-shadow: 0 12px 24px rgba(47, 111, 219, 0.25);
+}
+
+.primaryButton:hover:not(:disabled) {
+  background: #235cbd;
+}
+
+.primaryButton:disabled {
+  opacity: 0.45;
+  box-shadow: none;
+}
+
+.secondaryButton {
+  border: 1px solid #cbd5e1;
+  border-radius: 14px;
+  padding: 12px 18px;
+  background: #ffffff;
+  color: #334155;
+  font-weight: 700;
+}
+
+.secondaryButton:hover:not(:disabled) {
+  background: #f8fafc;
+}
+
+.secondaryButton:disabled {
+  opacity: 0.5;
+}
+
+.hint {
+  margin: 14px 0 0;
+  color: #64748b;
+  line-height: 1.6;
+}
+
+.successHint {
+  margin: 14px 0 0;
+  color: #15803d;
+  font-weight: 700;
+}
+
+.statusBox,
+.errorBox {
+  max-width: 1180px;
+  margin: 16px auto;
+  padding: 14px 18px;
+  border-radius: 18px;
+  font-weight: 700;
+}
+
+.statusBox {
+  border: 1px solid #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.errorBox {
+  border: 1px solid #fecaca;
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Upload Panel
+───────────────────────────────────────────────────────────────────────────── */
+
+.uploadPanel {
+  position: relative;
+  overflow: hidden;
+}
+
+.uploadPanelDragging {
+  outline: 2px dashed #2f6fdb;
+  outline-offset: 6px;
+  background: linear-gradient(180deg, #f7fbff 0%, #ffffff 100%);
+}
+
+.uploadHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 22px;
+}
+
+.uploadHeader h2 {
+  margin: 0 0 8px;
+  font-size: 28px;
+}
+
+.uploadHeader p {
+  margin: 0;
+  color: #5b6475;
+  line-height: 1.6;
+}
+
+.uploadProgressCard {
+  min-width: 150px;
+  padding: 14px;
+  border: 1px solid #dbe3ef;
+  border-radius: 18px;
+  background: #f8fafc;
+  text-align: center;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.04);
+}
+
+.uploadProgressCard strong {
+  display: block;
+  font-size: 28px;
+  color: #0f2344;
+}
+
+.uploadProgressCard span {
+  display: block;
+  font-size: 13px;
+  color: #64748b;
+  margin-bottom: 10px;
+}
+
+.uploadProgressBar {
+  width: 100%;
+  height: 8px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  overflow: hidden;
+}
+
+.uploadProgressBar div {
+  height: 100%;
+  border-radius: 999px;
+  background: #2f6fdb;
+  transition: width 0.2s ease;
+}
+
+.uploadGlobalDropZone {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 18px;
+  padding: 16px;
+  border: 1px dashed #9bb8e8;
+  border-radius: 20px;
+  background: #f5f9ff;
+  color: #1f3f77;
+}
+
+.uploadGlobalDropZone strong {
+  display: block;
+  margin-bottom: 3px;
+}
+
+.uploadGlobalDropZone span {
+  display: block;
+  color: #64748b;
+  font-size: 14px;
+}
+
+.uploadGlobalIcon {
+  width: 46px;
+  height: 46px;
+  border-radius: 16px;
+  background: #e5efff;
+  color: #2f6fdb;
+  display: grid;
+  place-items: center;
+  font-size: 28px;
+  font-weight: 800;
+}
+
+.uploadGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.uploadBox {
+  position: relative;
+  display: flex;
+  min-height: 220px;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 18px;
+  border: 1px solid #dbe3ef;
+  border-radius: 22px;
+  background: #ffffff;
+  cursor: pointer;
+  transition:
+    transform 0.18s ease,
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    background 0.18s ease;
+}
+
+.uploadBox:hover {
+  transform: translateY(-2px);
+  border-color: #8eb2ef;
+  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.08);
+}
+
+.uploadBox.dragActive {
+  border-color: #2f6fdb;
+  background: #eef6ff;
+  box-shadow: 0 14px 30px rgba(47, 111, 219, 0.18);
+}
+
+.uploadBox.hasFile {
+  border-color: #78c28b;
+  background: #f7fff8;
+}
+
+.uploadBox.requiredSlot:not(.hasFile) {
+  border-color: #f2c2c2;
+}
+
+.uploadBox input[type="file"] {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.uploadBoxTop {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.uploadStatusIcon {
+  width: 34px;
+  height: 34px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  font-weight: 800;
+}
+
+.uploadStatusIcon.success {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.uploadStatusIcon.required {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.uploadStatusIcon.optional {
+  background: #e0ecff;
+  color: #2563eb;
+}
+
+.uploadBoxText {
+  min-width: 0;
+}
+
+.uploadTitleRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.uploadTitleRow strong {
+  color: #0f2344;
+  font-size: 17px;
+}
+
+.uploadBoxText span {
+  color: #64748b;
+  font-size: 14px;
+}
+
+.slotBadge {
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.slotBadge.required {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.slotBadge.optional {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.uploadDropHint {
+  margin: 26px 0 14px;
+  padding: 14px;
+  border-radius: 16px;
+  background: #f8fafc;
+  border: 1px dashed #cbd5e1;
+  text-align: center;
+  color: #475569;
+  font-weight: 700;
+}
+
+.uploadHint {
+  margin: 0;
+  color: #94a3b8;
+  font-size: 13px;
+}
+
+.selectedFileCard {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 16px;
+  background: #ffffff;
+  border: 1px solid #bbf7d0;
+}
+
+.selectedFileCard strong {
+  display: block;
+  max-width: 210px;
+  color: #0f2344;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.selectedFileCard span {
+  display: block;
+  color: #64748b;
+  font-size: 13px;
+  margin-top: 3px;
+}
+
+.removeFileButton {
+  position: relative;
+  z-index: 3;
+  border: 0;
+  border-radius: 12px;
+  padding: 8px 12px;
+  background: #fee2e2;
+  color: #991b1b;
+  font-weight: 700;
+}
+
+.removeFileButton:hover {
+  background: #fecaca;
+}
+
+.uploadActions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 22px;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Dashboard
+───────────────────────────────────────────────────────────────────────────── */
+
+.dashboard {
+  min-height: 100vh;
+  padding: 28px;
+  background: #f3f6fb;
+}
+
+.dashboard-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: flex-start;
+  max-width: 1680px;
+  margin: 0 auto 18px;
+  padding: 22px 26px;
+  border: 1px solid #dbe3ef;
+  border-radius: 26px;
+  background: #ffffff;
+  box-shadow: 0 16px 38px rgba(15, 23, 42, 0.06);
+}
+
+.dashboard-title {
+  margin: 0 0 6px;
+  font-size: 34px;
+  color: #0f2344;
+}
+
+.dashboard-subtitle {
+  margin: 0;
+  color: #68758b;
+  font-size: 16px;
+}
+
+.summary-pills {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: 10px;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  padding: 8px 13px;
+  font-weight: 800;
+  font-size: 14px;
+}
+
+.pill-green {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.pill-red {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.pill-neutral {
+  background: #e2e8f0;
+  color: #334155;
+}
+
+.pill-warning {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.tab-bar {
+  max-width: 1680px;
+  margin: 0 auto 18px;
+  padding: 8px;
+  border: 1px solid #dbe3ef;
+  border-radius: 22px;
+  background: #ffffff;
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.04);
+}
+
+.tab-btn {
+  position: relative;
+  border: 0;
+  border-radius: 16px;
+  padding: 12px 16px;
+  background: transparent;
+  color: #52617a;
+  font-weight: 800;
+  white-space: nowrap;
+  transition:
+    background 0.16s ease,
+    color 0.16s ease,
+    box-shadow 0.16s ease;
+}
+
+.tab-btn:hover {
+  background: #f2f6fc;
+  color: #0f2344;
+}
+
+.tab-btn.active {
+  background: #eaf2ff;
+  color: #2f6fdb;
+  box-shadow: inset 0 0 0 1px #c7dcff;
+}
+
+.tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  margin-right: 8px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #ef4444;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.dashboard-content {
+  max-width: 1680px;
+  margin: 0 auto;
+  padding: 22px;
+  border: 1px solid #dbe3ef;
+  border-radius: 26px;
+  background: #ffffff;
+  box-shadow: 0 16px 38px rgba(15, 23, 42, 0.05);
+}
+
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 14px;
+}
+
+.kpi-card {
+  padding: 18px;
+  border-radius: 22px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.04);
+}
+
+.kpi-label {
+  display: block;
+  margin-bottom: 8px;
+  color: #64748b;
+  font-weight: 700;
+}
+
+.kpi-value {
+  display: block;
+  color: #0f2344;
+  font-size: 28px;
+  line-height: 1.1;
+}
+
+.card-blue {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+}
+
+.card-green {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+
+.card-red {
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+
+.card-warning {
+  background: #fffbeb;
+  border-color: #fde68a;
+}
+
+.card-neutral {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+}
+
+.sub-tabs,
+.filter-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.sub-tab-btn,
+.filter-btn {
+  border: 1px solid #cbd5e1;
+  border-radius: 14px;
+  padding: 10px 14px;
+  background: #ffffff;
+  color: #475569;
+  font-weight: 800;
+}
+
+.sub-tab-btn:hover,
+.filter-btn:hover {
+  background: #f8fafc;
+}
+
+.sub-tab-btn.active,
+.filter-btn.active {
+  border-color: #2f6fdb;
+  background: #eaf2ff;
+  color: #2f6fdb;
+}
+
+.search-input {
+  min-height: 42px;
+  border: 1px solid #cbd5e1;
+  border-radius: 14px;
+  padding: 10px 14px;
+  background: #ffffff;
+  color: #0f2344;
+  font-weight: 700;
+}
+
+.filter-count {
+  color: #64748b;
+  font-weight: 800;
+}
+
+.section-note {
+  margin: 0 0 14px;
+  color: #64748b;
+  font-weight: 700;
+}
+
+.table-wrap {
+  width: 100%;
+  overflow: auto;
+  border: 1px solid #dbe3ef;
+  border-radius: 20px;
+  background: #ffffff;
+}
+
+.data-table {
+  width: 100%;
+  min-width: 860px;
+  border-collapse: separate;
+  border-spacing: 0;
+  background: #ffffff;
+}
+
+.data-table th,
+.data-table td {
+  padding: 13px 14px;
+  border-bottom: 1px solid #e8eef6;
+  text-align: right;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.data-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #f8fafc;
+  color: #334155;
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.data-table tbody tr:hover {
+  background: #f8fbff;
+}
+
+.col-label {
+  font-weight: 900;
+  color: #0f2344;
+}
+
+.col-label-wrap,
+.col-track,
+.action-text {
+  white-space: normal;
+  min-width: 220px;
+  max-width: 420px;
+  line-height: 1.45;
+}
+
+.col-total {
+  font-weight: 900;
+  background: #f8fafc;
+}
+
+.col-approved {
+  color: #2563eb;
+  font-weight: 900;
+}
+
+.has-value {
+  font-weight: 900;
+  color: #0f2344;
+}
+
+.has-value-warn {
+  font-weight: 900;
+  color: #b45309;
+}
+
+.cell-danger {
+  color: #b91c1c;
+  font-weight: 900;
+  background: #fef2f2;
+}
+
+.row-danger {
+  background: #fff7f7;
+}
+
+.row-success {
+  background: #f7fff8;
+}
+
+.row-warning {
+  background: #fffbea;
+}
+
+.row-muted {
+  background: #f8fafc;
+  color: #64748b;
+}
+
+.row-total {
+  background: #f1f5f9;
+  font-weight: 900;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 5px 10px;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.badge-success {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.badge-danger {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.badge-warning {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.badge-neutral {
+  background: #e2e8f0;
+  color: #334155;
+}
+
+.tier-flag {
+  display: inline-flex;
+  border-radius: 999px;
+  padding: 5px 10px;
+  background: #fef3c7;
+  color: #92400e;
+  font-weight: 900;
+}
+
+.action-row {
+  cursor: pointer;
+}
+
+.action-row.selected {
+  background: #eaf2ff;
+}
+
+.detail-row td {
+  padding: 0;
+  background: #f8fafc;
+}
+
+.detail-box {
+  padding: 14px 18px;
+  line-height: 1.6;
+}
+
+.detail-label {
+  font-weight: 900;
+  color: #0f2344;
+}
+
+.empty-state {
+  padding: 34px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 22px;
+  background: #f8fafc;
+  text-align: center;
+  color: #64748b;
+  font-weight: 800;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Responsive
+───────────────────────────────────────────────────────────────────────────── */
+
+@media (max-width: 980px) {
+  .app,
+  .dashboard {
+    padding: 16px;
   }
-  return 0;
-}
 
-function fmtNumber(value) {
-  return new Intl.NumberFormat("he-IL", { maximumFractionDigits: 0 }).format(toNumber(value));
-}
-
-function fmtMoney(value) {
-  return new Intl.NumberFormat("he-IL", {
-    style: "currency",
-    currency: "ILS",
-    maximumFractionDigits: 0,
-  }).format(toNumber(value));
-}
-
-function fmtPct(value) {
-  const numeric = toNumber(value);
-  return `${new Intl.NumberFormat("he-IL", { maximumFractionDigits: 1 }).format(numeric)}%`;
-}
-
-function normalizeText(value) {
-  return String(value || "").trim();
-}
-
-function uniqueCount(values) {
-  return new Set(values.map(normalizeText).filter(Boolean)).size;
-}
-
-function firstDefined(...values) {
-  return values.find((value) => value !== undefined && value !== null && value !== "");
-}
-
-function getAvailableProducts(analysisData) {
-  const productResults = analysisData?.productResults || {};
-  const products = [];
-
-  if (productResults[PRODUCT_MODES.PENSION] || analysisData?.pensionSummary || analysisData?.pensionRows) {
-    products.push(PRODUCT_MODES.PENSION);
+  .hero {
+    padding: 24px;
   }
 
-  if (
-    productResults[PRODUCT_MODES.HISHTALMUT] ||
-    analysisData?.educationFundSummary ||
-    analysisData?.educationFundRows ||
-    analysisData?.productSummary?.productType === PRODUCT_MODES.HISHTALMUT
-  ) {
-    products.push(PRODUCT_MODES.HISHTALMUT);
+  .uploadHeader,
+  .dashboard-header {
+    flex-direction: column;
   }
 
-  return products.length ? products : [PRODUCT_MODES.PENSION];
-}
-
-function getArrangementManagerName(row) {
-  return normalizeText(
-    firstDefined(
-      row?.arrangementManagerName,
-      row?.uploadManagerName,
-      row?.arrangementManager,
-      row?.managerName,
-      row?.manager,
-      row?.sourceManagerName
-    )
-  );
-}
-
-function getIssuerName(row) {
-  return normalizeText(
-    firstDefined(
-      row?.issuerCanonical,
-      row?.issuerOriginal,
-      row?.issuer,
-      row?.companyName,
-      row?.manager,
-      row?.fundManager
-    )
-  );
-}
-
-function getEmployeeKey(row) {
-  return normalizeText(
-    firstDefined(
-      row?.employeeKey,
-      row?.employeeId,
-      row?.workerId,
-      row?.customerId,
-      row?.idNumber,
-      row?.tz,
-      row?.memberId,
-      row?.policyNumber,
-      row?.accountNumber
-    )
-  );
-}
-
-function getAccumulation(row) {
-  return toNumber(
-    firstDefined(
-      row?.accumulation,
-      row?.currentBalance,
-      row?.balance,
-      row?.totalAccumulation,
-      row?.savingBalance,
-      row?.צבירה
-    )
-  );
-}
-
-function getMonthlyDeposit(row) {
-  return toNumber(
-    firstDefined(
-      row?.monthlyDeposit,
-      row?.lastPremium,
-      row?.premium,
-      row?.deposit,
-      row?.totalMonthlyDeposits,
-      row?.monthlyContribution
-    )
-  );
-}
-
-function getPensionRows(result) {
-  return asArray(
-    result?.pensionRows ||
-      result?.pensionSummary?.unifiedRows ||
-      result?.unifiedPensionPersonalData?.rows ||
-      result?.unifiedEmployeeData?.rows
-  );
-}
-
-function getEducationRows(result) {
-  const directRows = asArray(result?.educationFundRows || result?.unifiedRows || result?.productSummary?.rows);
-  if (directRows.length) return directRows;
-
-  return asArray(result?.managerResults).flatMap((managerResult) => [
-    ...asArray(managerResult?.unifiedRows),
-    ...asArray(managerResult?.educationFundRows),
-    ...asArray(managerResult?.rawRows),
-    ...asArray(managerResult?.rowsRaw),
-  ]);
-}
-
-function isPensionFeeWarning(row) {
-  const status = normalizeText(firstDefined(row?.auditStatus, row?.feeStatus, row?.status));
-  return ["warning", "invalid", "not_ok", "לא תקין", "חריגה"].includes(status) || row?.isFeeException === true;
-}
-
-function isEducationFeeWarning(row) {
-  const status = normalizeText(firstDefined(row?.calculatedFeeStatus, row?.feeStatus, row?.status));
-  return ["warning", "invalid", "not_ok", "לא תקין", "חריגה"].includes(status) || row?.isFeeException === true;
-}
-
-function isAgeTrackWarning(row) {
-  const status = normalizeText(
-    firstDefined(
-      row?.ageTrackStatus,
-      row?.trackAgeFitStatus,
-      row?.ageFitStatus,
-      row?.ageAnalysisStatus,
-      row?.ageTrackFit?.status
-    )
-  );
-  return ["review", "warning", "invalid", "not_ok", "לא תואם גיל", "לא תקין"].includes(status);
-}
-
-function isMissingDataRow(row) {
-  return (
-    !getEmployeeKey(row) ||
-    !getIssuerName(row) ||
-    getAccumulation(row) <= 0 ||
-    row?.hasMissingCriticalData === true ||
-    row?.missingData === true
-  );
-}
-
-function getProductDiagnosticsWarnings(result) {
-  const diagnosticsWarnings = asArray(result?.diagnostics?.warnings);
-  const managerWarnings = asArray(result?.managerResults).flatMap((managerResult) => asArray(managerResult?.warnings));
-  return [...diagnosticsWarnings, ...managerWarnings].filter(Boolean);
-}
-
-function groupSum(items, getKey, getValue) {
-  const map = new Map();
-  items.forEach((item) => {
-    const key = normalizeText(getKey(item)) || "לא מסווג";
-    const current = map.get(key) || { label: key, value: 0, rows: 0 };
-    current.value += toNumber(getValue(item));
-    current.rows += 1;
-    map.set(key, current);
-  });
-  return [...map.values()].sort((a, b) => b.value - a.value);
-}
-
-function buildProductExecutiveSummary(productMode, productResult) {
-  const label = PRODUCT_LABELS[productMode] || getProductModeLabel(productMode);
-  const rows = productMode === PRODUCT_MODES.HISHTALMUT ? getEducationRows(productResult) : getPensionRows(productResult);
-
-  const summary = productResult?.productSummary || productResult?.educationFundSummary || productResult?.pensionSummary || {};
-  const diagnosticsCounts = productResult?.diagnostics?.counts || {};
-  const warnings = getProductDiagnosticsWarnings(productResult);
-
-  const managerCount =
-    toNumber(summary.managers) ||
-    toNumber(diagnosticsCounts.managers) ||
-    asArray(productResult?.managerResults).length ||
-    uniqueCount(rows.map(getArrangementManagerName));
-
-  const employeeCount = uniqueCount(rows.map(getEmployeeKey)) || rows.length;
-  const totalAccumulation = rows.reduce((sum, row) => sum + getAccumulation(row), 0) || toNumber(summary.totalAccumulation);
-  const totalMonthlyDeposits = rows.reduce((sum, row) => sum + getMonthlyDeposit(row), 0) || toNumber(summary.totalMonthlyDeposits);
-
-  const feeWarnings = rows.filter(productMode === PRODUCT_MODES.HISHTALMUT ? isEducationFeeWarning : isPensionFeeWarning).length;
-  const ageWarnings = rows.filter(isAgeTrackWarning).length;
-  const missingDataRows = rows.filter(isMissingDataRow).length;
-  const dataWarnings = warnings.length;
-  const exceptionRows = rows.filter((row) => {
-    if (productMode === PRODUCT_MODES.HISHTALMUT) return isEducationFeeWarning(row) || isAgeTrackWarning(row) || isMissingDataRow(row);
-    return isPensionFeeWarning(row) || isAgeTrackWarning(row) || isMissingDataRow(row);
-  }).length;
-
-  const activeRows = Math.max(0, rows.length - exceptionRows);
-  const complianceRate = rows.length ? Math.max(0, (activeRows / rows.length) * 100) : 0;
-
-  return {
-    productMode,
-    label,
-    managerCount,
-    rowCount: rows.length,
-    employeeCount,
-    activeRows,
-    totalAccumulation,
-    totalMonthlyDeposits,
-    averageAccumulation: employeeCount ? totalAccumulation / employeeCount : 0,
-    exceptionRows,
-    feeWarnings,
-    ageWarnings,
-    dataWarnings,
-    missingDataRows,
-    issuerCount: uniqueCount(rows.map(getIssuerName)),
-    complianceRate,
-    rows,
-  };
-}
-
-function buildExecutiveAnalytics(analysisData) {
-  const productResults = analysisData?.productResults || {};
-  const productSummaries = Object.entries(productResults)
-    .map(([productMode, productResult]) => buildProductExecutiveSummary(productMode, productResult))
-    .filter((item) => item.rowCount || item.managerCount || item.totalAccumulation || item.totalMonthlyDeposits);
-
-  const allRows = productSummaries.flatMap((item) => item.rows.map((row) => ({ ...row, __productLabel: item.label })));
-
-  const distinctArrangementManagerCount = uniqueCount(
-    allRows.map(getArrangementManagerName)
-  ) || uniqueCount(
-    asArray(analysisData?.managerSlots || analysisData?.arrangementManagers || analysisData?.managers).map((manager) =>
-      firstDefined(manager?.name, manager?.managerName, manager?.label, manager?.id)
-    )
-  ) || Math.max(...productSummaries.map((item) => item.managerCount), 0);
-
-  const totals = productSummaries.reduce(
-    (acc, item) => {
-      acc.rowCount += item.rowCount;
-      acc.employeeCount += item.employeeCount;
-      acc.activeRows += item.activeRows;
-      acc.totalAccumulation += item.totalAccumulation;
-      acc.totalMonthlyDeposits += item.totalMonthlyDeposits;
-      acc.exceptionRows += item.exceptionRows;
-      acc.feeWarnings += item.feeWarnings;
-      acc.ageWarnings += item.ageWarnings;
-      acc.dataWarnings += item.dataWarnings;
-      acc.missingDataRows += item.missingDataRows;
-      return acc;
-    },
-    {
-      managerCount: 0,
-      rowCount: 0,
-      employeeCount: 0,
-      activeRows: 0,
-      totalAccumulation: 0,
-      totalMonthlyDeposits: 0,
-      exceptionRows: 0,
-      feeWarnings: 0,
-      ageWarnings: 0,
-      dataWarnings: 0,
-      missingDataRows: 0,
-    }
-  );
-
-  totals.managerCount = distinctArrangementManagerCount;
-
-  const complianceBase = totals.rowCount || 0;
-  const complianceRate = complianceBase ? Math.max(0, ((complianceBase - totals.exceptionRows) / complianceBase) * 100) : 0;
-
-  const riskItems = [
-    {
-      key: "fees",
-      label: "דמי ניהול",
-      count: totals.feeWarnings,
-      products: productSummaries.filter((item) => item.feeWarnings > 0).map((item) => `${item.label}: ${fmtNumber(item.feeWarnings)}`),
-    },
-    {
-      key: "ageTracks",
-      label: "מסלול גיל",
-      count: totals.ageWarnings,
-      products: productSummaries.filter((item) => item.ageWarnings > 0).map((item) => `${item.label}: ${fmtNumber(item.ageWarnings)}`),
-    },
-    {
-      key: "dataQuality",
-      label: "שגיאות נתונים",
-      count: totals.dataWarnings,
-      products: productSummaries.filter((item) => item.dataWarnings > 0).map((item) => `${item.label}: ${fmtNumber(item.dataWarnings)}`),
-    },
-    {
-      key: "missingData",
-      label: "נתונים חסרים",
-      count: totals.missingDataRows,
-      products: productSummaries.filter((item) => item.missingDataRows > 0).map((item) => `${item.label}: ${fmtNumber(item.missingDataRows)}`),
-    },
-  ];
-
-  const productDistribution = productSummaries.map((item) => ({
-    key: item.productMode,
-    label: item.label,
-    value: item.totalAccumulation,
-    rows: item.rowCount,
-    monthly: item.totalMonthlyDeposits,
-  }));
-
-  const managerDistribution = groupSum(allRows, getArrangementManagerName, getAccumulation).slice(0, 6);
-
-  return {
-    productSummaries,
-    totals,
-    complianceRate,
-    riskItems,
-    productDistribution,
-    managerDistribution,
-  };
-}
-
-function ExecutiveKpiCard({ label, value, subtext, tone = "neutral", icon }) {
-  return (
-    <article className={`executiveKpiCard v41 ${tone}`}>
-      <div className="executiveKpiIcon" aria-hidden="true">{icon || "•"}</div>
-      <div>
-        <span>{label}</span>
-        <strong>{value}</strong>
-        {subtext ? <small>{subtext}</small> : null}
-      </div>
-    </article>
-  );
-}
-
-function DonutBreakdown({ title, centerLabel, centerValue, items, emptyText }) {
-  const total = items.reduce((sum, item) => sum + toNumber(item.value), 0);
-  let cursor = 0;
-  const palette = ["#2563eb", "#16a34a", "#7c3aed", "#f59e0b", "#0f766e", "#64748b"];
-  const stops = items.map((item, index) => {
-    const percent = total ? (toNumber(item.value) / total) * 100 : 0;
-    const start = cursor;
-    cursor += percent;
-    return `${palette[index % palette.length]} ${start}% ${cursor}%`;
-  });
-  const background = total ? `conic-gradient(${stops.join(", ")})` : "#e5e7eb";
-
-  return (
-    <section className="executivePanel v41 donutPanel">
-      <div className="executivePanelTitle">
-        <h3>{title}</h3>
-      </div>
-      {total ? (
-        <div className="donutContent">
-          <div className="donutChart" style={{ background }}>
-            <div className="donutCenter">
-              <span>{centerLabel}</span>
-              <strong>{centerValue}</strong>
-            </div>
-          </div>
-          <div className="donutLegend">
-            {items.map((item, index) => {
-              const pct = total ? (toNumber(item.value) / total) * 100 : 0;
-              return (
-                <div className="donutLegendRow" key={`${item.label}-${index}`}>
-                  <span className="donutColor" style={{ background: palette[index % palette.length] }} />
-                  <div>
-                    <strong>{item.label}</strong>
-                    <small>{fmtMoney(item.value)} · {fmtPct(pct)}</small>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      ) : (
-        <p className="emptyStateText">{emptyText || "אין מספיק נתונים להצגה"}</p>
-      )}
-    </section>
-  );
-}
-
-function RiskCenterPanel({ riskItems }) {
-  return (
-    <section className="executivePanel v41 riskCenterPanel">
-      <div className="executivePanelTitle">
-        <h3>Unified Risk Center</h3>
-        <span>כמות בלבד, ללא חומרה</span>
-      </div>
-      <div className="executiveRiskTableWrap">
-        <table className="executiveTable v41">
-          <thead>
-            <tr>
-              <th>סוג חריגה</th>
-              <th>כמות</th>
-              <th>מוצרים רלוונטיים</th>
-            </tr>
-          </thead>
-          <tbody>
-            {riskItems.map((item) => (
-              <tr key={item.key}>
-                <td>{item.label}</td>
-                <td>{fmtNumber(item.count)}</td>
-                <td>{item.products.length ? item.products.join(" · ") : "אין חריגות"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  );
-}
-
-function ProductSummaryTable({ productSummaries }) {
-  return (
-    <section className="executivePanel v41 productSummaryPanel">
-      <div className="executivePanelTitle">
-        <h3>סיכום לפי מוצרים</h3>
-        <span>נתונים אגרגטיביים בלבד</span>
-      </div>
-      <div className="executiveRiskTableWrap">
-        <table className="executiveTable v41">
-          <thead>
-            <tr>
-              <th>מוצר</th>
-              <th>מנהלי הסדר</th>
-              <th>עובדים / רשומות</th>
-              <th>צבירה</th>
-              <th>הפקדות</th>
-              <th>מוקדי טיפול</th>
-              <th>איכות</th>
-            </tr>
-          </thead>
-          <tbody>
-            {productSummaries.map((item) => (
-              <tr key={item.productMode}>
-                <td><strong>{item.label}</strong></td>
-                <td>{fmtNumber(item.managerCount)}</td>
-                <td>{fmtNumber(item.rowCount)}</td>
-                <td>{fmtMoney(item.totalAccumulation)}</td>
-                <td>{fmtMoney(item.totalMonthlyDeposits)}</td>
-                <td>{fmtNumber(item.exceptionRows)}</td>
-                <td>{fmtPct(item.complianceRate)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  );
-}
-
-function ProductCenter({ productSummaries, selectedProduct, onOpenProduct }) {
-  const activeCards = productSummaries.map((item) => ({
-    key: item.productMode,
-    label: item.label,
-    description: "כניסה למסך ניתוח המוצר",
-    status: "פעיל",
-    enabled: true,
-    metrics: [
-      { label: "רשומות", value: fmtNumber(item.rowCount) },
-      { label: "צבירה", value: fmtMoney(item.totalAccumulation) },
-      { label: "מוקדי טיפול", value: fmtNumber(item.exceptionRows) },
-    ],
-  }));
-
-  const cards = [
-    ...activeCards,
-    ...FUTURE_PRODUCTS.map((item) => ({ ...item, enabled: false, metrics: [] })),
-  ];
-
-  return (
-    <section className="productCenterPanel" dir="rtl">
-      <div className="productCenterHeader">
-        <div>
-          <p className="eyebrow">Product Center</p>
-          <h2>כניסה למוצרי הניתוח</h2>
-          <p>מסך הבית נשאר אגרגטיבי. פירוט עובדים ולקוחות נפתח רק בתוך מוצר פעיל.</p>
-        </div>
-      </div>
-
-      <div className="productCenterGrid">
-        {cards.map((card) => (
-          <button
-            type="button"
-            key={card.key}
-            className={`productPortalCard ${card.enabled ? "enabled" : "disabled"} ${selectedProduct === card.key ? "active" : ""}`}
-            onClick={() => card.enabled && onOpenProduct(card.key)}
-            disabled={!card.enabled}
-          >
-            <span className="productPortalStatus">{card.status}</span>
-            <strong>{card.label}</strong>
-            <small>{card.description}</small>
-            {card.metrics.length ? (
-              <div className="productPortalMetrics">
-                {card.metrics.map((metric) => (
-                  <span key={metric.label}>
-                    <b>{metric.value}</b>
-                    <em>{metric.label}</em>
-                  </span>
-                ))}
-              </div>
-            ) : null}
-          </button>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function ExecutivePortalHome({ analysisData, selectedProduct, onOpenProduct }) {
-  const analytics = useMemo(() => buildExecutiveAnalytics(analysisData), [analysisData]);
-  const { totals, productSummaries, riskItems, complianceRate, productDistribution, managerDistribution } = analytics;
-
-  if (!productSummaries.length) return null;
-
-  return (
-    <div className="executivePortalHome" dir="rtl">
-      <section className="executiveAnalyticsLayer v41" dir="rtl">
-        <div className="executiveLayerHeader v41">
-          <div>
-            <p className="eyebrow">Executive Analytics</p>
-            <h2>תמונת הנהלה מאוחדת</h2>
-            <p>
-              מסך בית אגרגטיבי לכל המוצרים ומנהלי ההסדר. אין כאן רשימות עובדים או פרטים מזהים.
-              כניסה לפרטים מתבצעת דרך Product Center בלבד.
-            </p>
-          </div>
-        </div>
-
-        <div className="executiveKpiSections">
-          <div className="kpiSectionBlock">
-            <h3>נתונים תפעוליים</h3>
-            <div className="executiveKpiGrid v41 compact">
-              <ExecutiveKpiCard label="מנהלי הסדר בטעינה" value={fmtNumber(totals.managerCount)} subtext="כמות מנהלי הסדר שהועלו בפועל" tone="blue" icon="👥" />
-              <ExecutiveKpiCard label="מוצרים פעילים" value={fmtNumber(productSummaries.length)} subtext="פנסיה / השתלמות / עתידי" tone="blue" icon="◫" />
-              <ExecutiveKpiCard label="רשומות שנקלטו" value={fmtNumber(totals.rowCount)} subtext="שורות ניתוח" tone="neutral" icon="≡" />
-              <ExecutiveKpiCard label="מוקדי טיפול" value={fmtNumber(totals.exceptionRows)} subtext="דמי ניהול, גיל, נתונים" tone={totals.exceptionRows ? "warning" : "green"} icon="!" />
-            </div>
-          </div>
-
-          <div className="kpiSectionBlock">
-            <h3>נתונים כספיים</h3>
-            <div className="executiveKpiGrid v41 compact">
-              <ExecutiveKpiCard label="צבירה כוללת" value={fmtMoney(totals.totalAccumulation)} subtext="על בסיס Snapshot נוכחי" tone="gold" icon="₪" />
-              <ExecutiveKpiCard label="הפקדות חודשיות" value={fmtMoney(totals.totalMonthlyDeposits)} subtext="סך הפקדות מזוהות" tone="gold" icon="↻" />
-              <ExecutiveKpiCard label="צבירה ממוצעת" value={fmtMoney(totals.employeeCount ? totals.totalAccumulation / totals.employeeCount : 0)} subtext="לעובד / לקוח מזוהה" tone="neutral" icon="○" />
-            </div>
-          </div>
-
-          <div className="kpiSectionBlock">
-            <h3>איכות נתונים</h3>
-            <div className="executiveKpiGrid v41 compact">
-              <ExecutiveKpiCard label="אחוז עובדים תקינים" value={fmtPct(complianceRate)} subtext="לפי רשומות ללא מוקדי טיפול" tone={complianceRate >= 90 ? "green" : "warning"} icon="✓" />
-              <ExecutiveKpiCard label="שגיאות נתונים" value={fmtNumber(totals.dataWarnings)} subtext="אזהרות מערכת" tone={totals.dataWarnings ? "warning" : "green"} icon="△" />
-              <ExecutiveKpiCard label="נתונים חסרים" value={fmtNumber(totals.missingDataRows)} subtext="רשומות עם חוסר מהותי" tone={totals.missingDataRows ? "warning" : "green"} icon="□" />
-            </div>
-          </div>
-        </div>
-
-        <div className="executivePanelsGrid v41 portal">
-          <DonutBreakdown
-            title="פילוח לפי מוצרים"
-            centerLabel={'סה"כ צבירה'}
-            centerValue={fmtMoney(totals.totalAccumulation)}
-            items={productDistribution}
-          />
-          <DonutBreakdown
-            title="פילוח לפי מנהלי הסדר בטעינה"
-            centerLabel={'סה"כ צבירה'}
-            centerValue={fmtMoney(totals.totalAccumulation)}
-            items={managerDistribution}
-          />
-          <RiskCenterPanel riskItems={riskItems} />
-        </div>
-
-        <ProductSummaryTable productSummaries={productSummaries} />
-      </section>
-
-      <ProductCenter productSummaries={productSummaries} selectedProduct={selectedProduct} onOpenProduct={onOpenProduct} />
-    </div>
-  );
-}
-
-function ProductDetailHeader({ selectedProduct, onBackHome, availableProducts, onSelectProduct }) {
-  return (
-    <header className="productDetailHeader" dir="rtl">
-      <div>
-        <p className="eyebrow">Product Analysis</p>
-        <h2>{getProductModeLabel(selectedProduct)}</h2>
-        <p>מצב פירוט מוצר. במוצר עצמו ניתן להיכנס לנתונים פרטניים בהתאם לבחירת מנהל הסדר.</p>
-      </div>
-      <div className="productDetailActions">
-        <div className="analysisProductTabs compact" dir="rtl">
-          {availableProducts.map((productMode) => (
-            <button
-              key={productMode}
-              type="button"
-              className={selectedProduct === productMode ? "active" : ""}
-              onClick={() => onSelectProduct(productMode)}
-            >
-              {getProductModeLabel(productMode)}
-            </button>
-          ))}
-        </div>
-        <button type="button" className="secondaryButton" onClick={onBackHome}>
-          חזרה למסך הנהלה
-        </button>
-      </div>
-    </header>
-  );
-}
-
-export default function AnalysisWorkspace({ files, analysisData, onBack }) {
-  const availableProducts = useMemo(() => getAvailableProducts(analysisData), [analysisData]);
-
-  const [selectedProduct, setSelectedProduct] = useState(
-    availableProducts.includes(analysisData?.activeProductMode)
-      ? analysisData.activeProductMode
-      : availableProducts[0]
-  );
-  const [viewMode, setViewMode] = useState("portal");
-
-  useEffect(() => {
-    if (!availableProducts.includes(selectedProduct)) {
-      setSelectedProduct(
-        availableProducts.includes(analysisData?.activeProductMode)
-          ? analysisData.activeProductMode
-          : availableProducts[0]
-      );
-      setViewMode("portal");
-    }
-  }, [analysisData?.activeProductMode, availableProducts, selectedProduct]);
-
-  function openProduct(productMode) {
-    setSelectedProduct(productMode);
-    setViewMode("product");
+  .uploadProgressCard {
+    width: 100%;
   }
 
-  const pensionAnalysisData =
-    analysisData?.productResults?.[PRODUCT_MODES.PENSION] ||
-    (analysisData?.productMode === PRODUCT_MODES.PENSION ? analysisData : null) ||
-    analysisData;
+  .uploadGrid {
+    grid-template-columns: 1fr;
+  }
 
-  return (
-    <section className="analysisWorkspace v41" dir="rtl">
-      <header className="analysisWorkspaceHeader v41">
-        <div>
-          <p className="eyebrow">Analysis Portal</p>
-          <h1>מרכז ניתוח יועץ</h1>
-          <p>
-            מסך הבית מציג תמונת הנהלה מאוחדת. דרך Product Center נכנסים לניתוחי המוצרים.
-          </p>
-        </div>
+  .dashboard-title {
+    font-size: 28px;
+  }
 
-        <button type="button" className="secondaryButton" onClick={onBack}>
-          חזרה להעלאה
-        </button>
-      </header>
+  .dashboard-content {
+    padding: 14px;
+  }
+}
 
-      {viewMode === "portal" ? (
-        <ExecutivePortalHome
-          analysisData={analysisData}
-          selectedProduct={selectedProduct}
-          onOpenProduct={openProduct}
-        />
-      ) : (
-        <div className="analysisWorkspaceBody productModeBody">
-          <ProductDetailHeader
-            selectedProduct={selectedProduct}
-            availableProducts={availableProducts}
-            onSelectProduct={setSelectedProduct}
-            onBackHome={() => setViewMode("portal")}
-          />
-          {selectedProduct === PRODUCT_MODES.PENSION ? (
-            <Dashboard files={files} analysisData={pensionAnalysisData} />
-          ) : (
-            <EducationFundAnalysisView analysisData={analysisData} />
-          )}
-        </div>
-      )}
-    </section>
-  );
+/* ─────────────────────────────────────────────────────────────────────────────
+   KPI Executive Overview v06
+───────────────────────────────────────────────────────────────────────────── */
+
+.kpi-overview {
+  display: grid;
+  gap: 18px;
+}
+
+.kpi-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 18px 20px;
+  border: 1px solid #dbe3ef;
+  border-radius: 24px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+}
+
+.kpi-toolbar h2 {
+  margin: 0 0 6px;
+  font-size: 24px;
+  color: #0f2344;
+}
+
+.kpi-toolbar p {
+  margin: 0;
+  color: #64748b;
+  font-weight: 700;
+}
+
+.manager-filter {
+  min-width: 260px;
+  display: grid;
+  gap: 7px;
+  color: #52617a;
+  font-weight: 900;
+}
+
+.manager-filter select {
+  width: 100%;
+  border: 1px solid #c7dcff;
+  border-radius: 16px;
+  padding: 12px 14px;
+  background: #ffffff;
+  color: #0f2344;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.kpi-grid-executive {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.kpi-visual-grid {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.9fr) minmax(420px, 1.1fr);
+  gap: 18px;
+}
+
+.kpi-panel {
+  padding: 20px;
+  border: 1px solid #dbe3ef;
+  border-radius: 24px;
+  background: #ffffff;
+  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.04);
+}
+
+.kpi-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.kpi-panel-header h3 {
+  margin: 0;
+  font-size: 20px;
+  color: #0f2344;
+}
+
+.kpi-panel-header span {
+  color: #64748b;
+  font-weight: 800;
+}
+
+.kpi-status-layout {
+  display: grid;
+  grid-template-columns: 190px 1fr;
+  align-items: center;
+  gap: 18px;
+}
+
+.kpi-donut-wrap {
+  position: relative;
+  width: 178px;
+  height: 178px;
+  margin: 0 auto;
+}
+
+.kpi-donut {
+  width: 178px;
+  height: 178px;
+  transform: rotate(-90deg);
+}
+
+.donut-base,
+.donut-segment {
+  fill: none;
+  stroke-width: 14;
+}
+
+.donut-base {
+  stroke: #e2e8f0;
+}
+
+.donut-segment {
+  stroke-linecap: round;
+}
+
+.donut-green,
+.legend-dot.donut-green {
+  stroke: #22c55e;
+  background: #22c55e;
+}
+
+.donut-red,
+.legend-dot.donut-red {
+  stroke: #ef4444;
+  background: #ef4444;
+}
+
+.donut-neutral,
+.legend-dot.donut-neutral {
+  stroke: #94a3b8;
+  background: #94a3b8;
+}
+
+.kpi-donut-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.kpi-donut-center strong {
+  color: #0f2344;
+  font-size: 26px;
+  line-height: 1;
+}
+
+.kpi-donut-center span {
+  margin-top: 5px;
+  color: #64748b;
+  font-weight: 800;
+}
+
+.kpi-chart-empty {
+  min-height: 160px;
+  display: grid;
+  place-items: center;
+  border: 1px dashed #cbd5e1;
+  border-radius: 20px;
+  color: #64748b;
+  font-weight: 800;
+}
+
+.kpi-legend {
+  display: grid;
+  gap: 10px;
+}
+
+.kpi-legend-row {
+  display: grid;
+  grid-template-columns: 14px 1fr auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 16px;
+  background: #f8fafc;
+  color: #334155;
+}
+
+.legend-dot {
+  width: 11px;
+  height: 11px;
+  border-radius: 999px;
+}
+
+.kpi-legend-row em {
+  color: #64748b;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.manager-bars {
+  display: grid;
+  gap: 14px;
+}
+
+.manager-bar-row {
+  display: grid;
+  gap: 8px;
+}
+
+.manager-bar-label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.manager-bar-label strong {
+  color: #0f2344;
+}
+
+.manager-bar-label span {
+  color: #64748b;
+  font-weight: 800;
+}
+
+.manager-bar-track {
+  height: 12px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e2e8f0;
+}
+
+.manager-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #2f6fdb, #d4af37);
+}
+
+@media (max-width: 980px) {
+  .kpi-toolbar,
+  .manager-bar-label {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .kpi-visual-grid,
+  .kpi-status-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .manager-filter {
+    min-width: 0;
+  }
+}
+
+/* v2026_05_27_global_manager_scope_07 */
+.global-scope-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin: 16px 0 14px;
+  padding: 14px 18px;
+  border: 1px solid #dbe6fb;
+  border-radius: 22px;
+  background: linear-gradient(135deg, #ffffff 0%, #f7faff 100%);
+  box-shadow: 0 12px 28px rgba(16, 45, 92, 0.08);
+}
+
+.global-scope-bar > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.global-scope-bar strong {
+  font-size: 15px;
+  color: #0d1f4f;
+}
+
+.global-scope-bar span,
+.global-scope-bar em {
+  font-size: 13px;
+  color: #61708e;
+  font-style: normal;
+}
+
+.global-manager-filter {
+  min-width: 260px;
+  margin-inline-start: auto;
+}
+
+@media (max-width: 900px) {
+  .global-scope-bar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .global-manager-filter {
+    width: 100%;
+    min-width: 0;
+    margin-inline-start: 0;
+  }
+}
+
+/* v2026_05_27_multi_manager_upload_08 */
+.managerUploadList {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  margin-top: 18px;
+}
+
+.managerUploadCard {
+  border: 1px solid #dbe6fb;
+  border-radius: 26px;
+  padding: 18px;
+  background: linear-gradient(135deg, #ffffff 0%, #f8fbff 100%);
+  box-shadow: 0 16px 36px rgba(16, 45, 92, 0.08);
+}
+
+.managerUploadHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 16px;
+}
+
+.managerUploadHeader > div:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 260px;
+}
+
+.managerStatus {
+  width: fit-content;
+  border-radius: 999px;
+  padding: 5px 11px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.managerStatus.ready {
+  color: #166534;
+  background: #dcfce7;
+  border: 1px solid #bbf7d0;
+}
+
+.managerStatus.missing {
+  color: #92400e;
+  background: #fef3c7;
+  border: 1px solid #fde68a;
+}
+
+.managerNameInput {
+  width: min(360px, 100%);
+  border: 1px solid #c9d8f6;
+  border-radius: 16px;
+  padding: 12px 14px;
+  background: #ffffff;
+  color: #0d1f4f;
+  font-family: inherit;
+  font-size: 17px;
+  font-weight: 800;
+  outline: none;
+}
+
+.managerNameInput:focus {
+  border-color: #7da8ff;
+  box-shadow: 0 0 0 4px rgba(47, 111, 219, 0.12);
+}
+
+.managerUploadActions,
+.uploadActionsSplit,
+.uploadActionsLeft {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.uploadActionsSplit {
+  justify-content: space-between;
+}
+
+.smallButton {
+  min-height: 36px;
+  padding: 8px 12px;
+  font-size: 13px;
+}
+
+.dangerButton {
+  border: 1px solid #fecaca;
+  border-radius: 14px;
+  background: #fff5f5;
+  color: #b91c1c;
+  cursor: pointer;
+  font-family: inherit;
+  font-weight: 800;
+  transition: 0.18s ease;
+}
+
+.dangerButton:hover:not(:disabled) {
+  background: #fee2e2;
+  transform: translateY(-1px);
+}
+
+.dangerButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.managerUploadGrid {
+  margin-top: 0;
+}
+
+@media (max-width: 980px) {
+  .managerUploadHeader,
+  .uploadActionsSplit {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .managerUploadHeader > div:first-child,
+  .managerNameInput {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .managerUploadActions,
+  .uploadActionsLeft {
+    width: 100%;
+  }
+}
+
+/* v2026_05_27_layout_containment_09
+   Keeps dashboard rows, tabs and KPI cards inside the visible document width. */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+.dashboard,
+.app {
+  width: 100%;
+  max-width: 100vw;
+  overflow-x: hidden;
+}
+
+.dashboard-header,
+.global-scope-bar,
+.tab-bar,
+.dashboard-content {
+  width: 100%;
+  max-width: min(1680px, calc(100vw - 56px));
+  box-sizing: border-box;
+}
+
+.tab-bar {
+  flex-wrap: wrap;
+  overflow-x: visible;
+  align-items: center;
+}
+
+.tab-btn {
+  flex: 0 1 auto;
+  max-width: 100%;
+}
+
+.global-scope-bar,
+.kpi-toolbar,
+.kpi-panel-header,
+.manager-bar-label {
+  flex-wrap: wrap;
+}
+
+.global-manager-filter,
+.manager-filter {
+  max-width: 100%;
+}
+
+.kpi-grid,
+.kpi-grid-executive {
+  grid-template-columns: repeat(auto-fit, minmax(165px, 1fr));
+}
+
+.kpi-card,
+.kpi-panel,
+.kpi-overview,
+.manager-bars,
+.manager-bar-row {
+  min-width: 0;
+}
+
+.kpi-value,
+.kpi-label,
+.manager-bar-label strong,
+.manager-bar-label span {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 1200px) {
+  .dashboard {
+    padding: 20px;
+  }
+
+  .dashboard-header,
+  .global-scope-bar,
+  .tab-bar,
+  .dashboard-content {
+    max-width: calc(100vw - 40px);
+  }
+
+  .tab-bar {
+    gap: 6px;
+    padding: 7px;
+  }
+
+  .tab-btn {
+    padding: 10px 12px;
+    font-size: 13px;
+  }
+
+  .tab-badge {
+    min-width: 20px;
+    height: 20px;
+    margin-right: 6px;
+    font-size: 11px;
+  }
+}
+
+@media (max-width: 700px) {
+  .dashboard {
+    padding: 12px;
+  }
+
+  .dashboard-header,
+  .global-scope-bar,
+  .tab-bar,
+  .dashboard-content {
+    max-width: calc(100vw - 24px);
+  }
+
+  .kpi-grid,
+  .kpi-grid-executive {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* v2026_05_27_layout_centering_10
+   RTL-safe centering fix after v09.
+   Keeps the navigation inside the card while preventing the tab group from sticking to the right edge. */
+.dashboard-header,
+.global-scope-bar,
+.tab-bar,
+.dashboard-content {
+  width: min(100%, 1680px);
+  max-width: calc(100vw - 64px);
+  margin-inline: auto;
+}
+
+.tab-bar {
+  direction: rtl;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 8px 10px;
+  overflow: visible;
+  padding: 10px 14px;
+}
+
+.tab-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 42px;
+  max-width: 100%;
+}
+
+.tab-badge {
+  margin-right: 0;
+  margin-inline-start: 0;
+  margin-inline-end: 0;
+}
+
+.global-scope-bar {
+  direction: rtl;
+  flex-wrap: wrap;
+}
+
+.global-scope-bar > div {
+  min-width: 220px;
+}
+
+.global-manager-filter {
+  margin-inline-start: 0;
+}
+
+@media (max-width: 1200px) {
+  .dashboard-header,
+  .global-scope-bar,
+  .tab-bar,
+  .dashboard-content {
+    max-width: calc(100vw - 40px);
+  }
+
+  .tab-bar {
+    justify-content: center;
+  }
+}
+
+@media (max-width: 700px) {
+  .dashboard-header,
+  .global-scope-bar,
+  .tab-bar,
+  .dashboard-content {
+    max-width: calc(100vw - 24px);
+  }
+
+  .tab-bar {
+    justify-content: flex-start;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   CORE HARDENING v23 — Error Boundary Layer
+───────────────────────────────────────────────────────────────────────────── */
+
+.errorBoundaryBox {
+  margin: 12px 0;
+  padding: 16px;
+  border: 1px solid #fecaca;
+  border-radius: 16px;
+  background: #fef2f2;
+  color: #7f1d1d;
+  font-family: Calibri, Arial, sans-serif;
+  direction: rtl;
+}
+
+.errorBoundaryBoxCompact {
+  padding: 12px;
+  border-radius: 12px;
+}
+
+.errorBoundaryHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.errorBoundaryHeader strong {
+  display: block;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.errorBoundaryHeader p {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: #991b1b;
+}
+
+.errorBoundaryHeader button {
+  border: 1px solid #fca5a5;
+  background: #ffffff;
+  color: #991b1b;
+  border-radius: 999px;
+  padding: 7px 12px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.errorBoundaryHeader button:hover {
+  background: #fff7f7;
+}
+
+.errorBoundaryId {
+  display: block;
+  margin-top: 10px;
+  color: #b91c1c;
+  font-size: 12px;
+}
+
+.errorBoundaryDetails {
+  margin-top: 12px;
+  font-size: 12px;
+}
+
+.errorBoundaryDetails summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.errorBoundaryDetails pre {
+  margin-top: 8px;
+  max-height: 160px;
+  overflow: auto;
+  padding: 10px;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #450a0a;
+  direction: ltr;
+  text-align: left;
+  white-space: pre-wrap;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   CORE HARDENING v24 — Upload Validation
+───────────────────────────────────────────────────────────────────────────── */
+
+.uploadStatusSummary {
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 14px;
+  background: #f8fafc;
+  border: 1px solid #dbe3ef;
+  font-family: Calibri, Arial, sans-serif;
+  direction: rtl;
+}
+
+.uploadStatusSummaryHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.uploadStatusSummary strong {
+  display: block;
+  color: #14213d;
+  font-size: 14px;
+}
+
+.uploadStatusSummary small {
+  display: block;
+  margin-top: 2px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.uploadStatusPill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 74px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  background: #eef2ff;
+  color: #1e3a8a;
+}
+
+.uploadStatusPill.ready {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.uploadStatusPill.partial {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.uploadStatusPill.invalid {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.uploadStatusPill.neutral {
+  background: #e2e8f0;
+  color: #475569;
+}
+
+.uploadStatusSummary ul {
+  margin: 10px 0 0;
+  padding: 0 18px 0 0;
+}
+
+.uploadStatusSummary li {
+  margin-bottom: 4px;
+  color: #334155;
+  font-size: 13px;
+}
+
+.uploadStatusSummary li.ready {
+  color: #166534;
+}
+
+.uploadStatusSummary li.missing,
+.uploadStatusSummary li.invalid {
+  color: #991b1b;
+}
+
+.uploadStatusSummary li.optional {
+  color: #64748b;
+}
+
+.uploadBoxInvalid {
+  border-color: #fecaca;
+  background: #fff7f7;
+}
+
+.uploadSlotErrors {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.uploadSlotErrors span {
+  display: block;
+  color: #b91c1c;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.managerStatus.missing {
+  background: #fff7ed;
+  color: #9a3412;
+}
+
+.managerStatus.ready {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+@media (max-width: 760px) {
+  .uploadStatusSummaryHeader {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   CORE HARDENING v26C — Product Mode Selector + Product Preview
+───────────────────────────────────────────────────────────────────────────── */
+
+.productModeSelector {
+  margin: 18px 0;
+  padding: 16px;
+  border: 1px solid #dbe3ef;
+  border-radius: 18px;
+  background: #f8fafc;
+  font-family: Calibri, Arial, sans-serif;
+  direction: rtl;
+}
+
+.productModeSelectorHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+
+.productModeSelectorHeader strong {
+  display: block;
+  color: #14213d;
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.productModeSelectorHeader span {
+  color: #64748b;
+  font-size: 13px;
+}
+
+.productModeOptions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.productModeOption {
+  border: 1px solid #dbe3ef;
+  background: #ffffff;
+  border-radius: 16px;
+  padding: 14px;
+  text-align: right;
+  cursor: pointer;
+  font-family: Calibri, Arial, sans-serif;
+  transition: 0.18s ease;
+}
+
+.productModeOption:hover {
+  border-color: #94a3b8;
+  transform: translateY(-1px);
+}
+
+.productModeOption.active {
+  border-color: #1d4ed8;
+  background: #eff6ff;
+  box-shadow: 0 10px 24px rgba(29, 78, 216, 0.08);
+}
+
+.productModeOption strong {
+  display: block;
+  color: #14213d;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.productModeOption span {
+  display: block;
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.productPreviewPage {
+  display: grid;
+  gap: 18px;
+}
+
+.productPreviewHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 22px;
+  border-radius: 24px;
+  background: linear-gradient(135deg, #eff6ff, #ffffff);
+  border: 1px solid #dbeafe;
+}
+
+.productPreviewHeader h1 {
+  margin: 4px 0 6px;
+  color: #14213d;
+  font-size: 28px;
+}
+
+.productPreviewHeader p {
+  margin: 0;
+  color: #475569;
+  max-width: 760px;
+}
+
+.productPreviewKpiGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.productPreviewKpiGrid article {
+  padding: 16px;
+  border-radius: 18px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 12px 26px rgba(15, 23, 42, 0.05);
+}
+
+.productPreviewKpiGrid span {
+  display: block;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.productPreviewKpiGrid strong {
+  display: block;
+  margin-top: 6px;
+  color: #14213d;
+  font-size: 22px;
+  font-weight: 900;
+}
+
+.productPreviewGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.chipList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chipList span {
+  display: inline-flex;
+  align-items: center;
+  padding: 7px 10px;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #1e3a8a;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.warningList {
+  margin: 0;
+  padding: 0 18px 0 0;
+  color: #92400e;
+}
+
+.warningList li {
+  margin-bottom: 6px;
+}
+
+.tableScroll {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.productRowsTable {
+  min-width: 920px;
+}
+
+.productRowsTable th {
+  white-space: nowrap;
+}
+
+.productRowsTable td {
+  vertical-align: top;
+}
+
+@media (max-width: 900px) {
+  .productModeOptions,
+  .productPreviewKpiGrid,
+  .productPreviewGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .productPreviewHeader,
+  .productModeSelectorHeader {
+    flex-direction: column;
+  }
+}
+
+/* CORE HARDENING v27 — Multi Product Upload */
+.productModeMiniStatus {
+  display: inline-flex;
+  margin-top: 8px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.productModeMiniStatus.ready {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.productModeMiniStatus.partial {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+/* CORE HARDENING v27B — Central Analysis Workspace */
+
+.analysisWorkspace {
+  display: grid;
+  gap: 18px;
+}
+
+.analysisWorkspaceHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 22px;
+  border-radius: 24px;
+  background: linear-gradient(135deg, #eff6ff, #ffffff);
+  border: 1px solid #dbeafe;
+}
+
+.analysisWorkspaceHeader h1 {
+  margin: 4px 0 6px;
+  color: #14213d;
+  font-size: 28px;
+}
+
+.analysisWorkspaceHeader p {
+  margin: 0;
+  color: #475569;
+  max-width: 780px;
+}
+
+.analysisProductTabs {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 8px;
+  border-radius: 18px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+
+.analysisProductTabs button {
+  border: 1px solid #dbe3ef;
+  background: #ffffff;
+  color: #334155;
+  border-radius: 999px;
+  padding: 10px 18px;
+  font-family: Calibri, Arial, sans-serif;
+  font-size: 15px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.analysisProductTabs button.active {
+  border-color: #1d4ed8;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.analysisWorkspaceBody {
+  display: block;
+}
+
+.productAnalysisPanel {
+  display: grid;
+  gap: 16px;
+}
+
+.productAnalysisHeader {
+  padding: 20px;
+  border-radius: 22px;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+}
+
+.productAnalysisHeader h2 {
+  margin: 4px 0 6px;
+  color: #14213d;
+  font-size: 24px;
+}
+
+.productAnalysisHeader p {
+  margin: 0;
+  color: #64748b;
+}
+
+.productAnalysisKpiGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.productAnalysisKpiGrid article {
+  padding: 16px;
+  border-radius: 18px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 12px 26px rgba(15, 23, 42, 0.05);
+}
+
+.productAnalysisKpiGrid span {
+  display: block;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.productAnalysisKpiGrid strong {
+  display: block;
+  margin-top: 6px;
+  color: #14213d;
+  font-size: 22px;
+  font-weight: 900;
+}
+
+.workspaceCard {
+  padding: 18px;
+  border-radius: 20px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+}
+
+.workspaceCard h3 {
+  margin: 0 0 12px;
+  color: #14213d;
+  font-size: 18px;
+}
+
+@media (max-width: 900px) {
+  .analysisWorkspaceHeader {
+    flex-direction: column;
+  }
+
+  .productAnalysisKpiGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* CORE HARDENING v28 — Education Fund Analysis View */
+
+.educationFundAnalysisView {
+  display: grid;
+  gap: 16px;
+}
+
+.educationTopKpiGrid,
+.educationKpiGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.educationKpiCard {
+  padding: 16px;
+  border-radius: 18px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 12px 26px rgba(15, 23, 42, 0.05);
+}
+
+.educationKpiCard span {
+  display: block;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.educationKpiCard strong {
+  display: block;
+  margin-top: 6px;
+  color: #14213d;
+  font-size: 22px;
+  font-weight: 900;
+}
+
+.educationKpiCard small {
+  display: block;
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.educationAnalysisTabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px;
+  border-radius: 18px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+
+.educationAnalysisTabs button {
+  border: 1px solid #dbe3ef;
+  background: #ffffff;
+  color: #334155;
+  border-radius: 999px;
+  padding: 10px 16px;
+  font-family: Calibri, Arial, sans-serif;
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.educationAnalysisTabs button.active {
+  border-color: #1d4ed8;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.educationTabPanel {
+  display: grid;
+  gap: 16px;
+}
+
+.educationStatusPill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  background: #e2e8f0;
+  color: #334155;
+  white-space: nowrap;
+}
+
+.educationStatusPill.ok {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.educationStatusPill.warning,
+.educationStatusPill.review {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.educationStatusPill.unknown {
+  background: #e2e8f0;
+  color: #475569;
+}
+
+.educationBucketGrid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.educationBucketCard {
+  padding: 14px;
+  border-radius: 16px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+
+.educationBucketCard strong {
+  display: block;
+  color: #14213d;
+  font-size: 15px;
+}
+
+.educationBucketCard span {
+  display: block;
+  margin-top: 6px;
+  color: #1d4ed8;
+  font-size: 18px;
+  font-weight: 900;
+}
+
+.educationBucketCard small {
+  display: block;
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.educationMiniBar {
+  width: 100%;
+  height: 8px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  overflow: hidden;
+  margin-top: 10px;
+}
+
+.educationMiniBar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #1d4ed8;
+}
+
+.educationInsightList {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.educationInsightList li {
+  padding: 12px;
+  border-radius: 14px;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+}
+
+.educationInsightTiles {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.educationInsightTiles article {
+  padding: 16px;
+  border-radius: 18px;
+  background: linear-gradient(135deg, #f8fafc 0%, #eef6ff 100%);
+  border: 1px solid #dbeafe;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+}
+
+.educationInsightTiles strong {
+  display: block;
+  color: #14213d;
+  font-size: 22px;
+  font-weight: 900;
+}
+
+.educationInsightTiles span {
+  display: block;
+  margin-top: 6px;
+  color: #1d4ed8;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.educationInsightTiles small {
+  display: block;
+  margin-top: 6px;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.educationInsightList strong {
+  display: block;
+  color: #9a3412;
+}
+
+.educationInsightList span {
+  display: block;
+  margin-top: 4px;
+  color: #7c2d12;
+  font-size: 13px;
+}
+
+.educationManagerBars {
+  display: grid;
+  gap: 12px;
+}
+
+.educationManagerBarRow {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+}
+
+.educationManagerBarRow > div:first-child {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.educationManagerBarRow strong {
+  color: #14213d;
+}
+
+.educationManagerBarRow span {
+  color: #64748b;
+  font-size: 13px;
+}
+
+@media (max-width: 1100px) {
+  .educationTopKpiGrid,
+  .educationKpiGrid,
+  .educationBucketGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 700px) {
+  .educationTopKpiGrid,
+  .educationKpiGrid,
+  .educationBucketGrid,
+  .educationInsightTiles {
+    grid-template-columns: 1fr;
+  }
+
+  .educationManagerBarRow > div:first-child {
+    flex-direction: column;
+  }
+}
+
+/* CORE HARDENING v31 — Education fund manager scope selector */
+.educationManagerScopeCard {
+  display: grid;
+  gap: 16px;
+}
+
+.educationManagerScopeTabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.educationManagerScopeTabs button {
+  border: 1px solid #d8e1f1;
+  background: #ffffff;
+  border-radius: 18px;
+  padding: 12px 16px;
+  min-width: 210px;
+  display: grid;
+  gap: 4px;
+  text-align: right;
+  cursor: pointer;
+  color: #17233f;
+}
+
+.educationManagerScopeTabs button.active {
+  border-color: #5966ff;
+  background: #f5f7ff;
+  box-shadow: 0 10px 24px rgba(45, 57, 120, 0.08);
+}
+
+.educationManagerScopeTabs button strong {
+  font-size: 15px;
+}
+
+.educationManagerScopeTabs button span {
+  font-size: 13px;
+  color: #66728a;
+}
+
+
+/* CORE HARDENING v32 — Education fund consistent analysis tabs */
+.sectionHeaderRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 14px;
+}
+
+.educationFeeChartWrap {
+  display: grid;
+  gap: 18px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+}
+
+.educationFeeChartLegend {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  color: #475569;
+  font-size: 14px;
+}
+
+.educationFeeChartLegend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.educationFeeChartLegend i,
+.educationFeeBarColumn i {
+  display: inline-block;
+  border-radius: 999px 999px 4px 4px;
+}
+
+.educationFeeChartLegend i {
+  width: 12px;
+  height: 12px;
+}
+
+.educationFeeChartLegend i.ok,
+.educationFeeBarColumn i.ok {
+  background: #16a34a;
+}
+
+.educationFeeChartLegend i.warning,
+.educationFeeBarColumn i.warning {
+  background: #dc2626;
+}
+
+.educationFeeChart {
+  min-height: 260px;
+  display: flex;
+  align-items: flex-end;
+  gap: 18px;
+  padding: 22px 14px 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 18px;
+  background:
+    linear-gradient(to top, rgba(15, 23, 42, 0.05) 1px, transparent 1px) 0 0 / 100% 45px,
+    #ffffff;
+}
+
+.educationFeeChartGroup {
+  min-width: 128px;
+  display: grid;
+  gap: 10px;
+  justify-items: center;
+}
+
+.educationFeeBars {
+  height: 210px;
+  display: flex;
+  align-items: flex-end;
+  gap: 9px;
+}
+
+.educationFeeBarColumn {
+  height: 210px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.educationFeeBarColumn span {
+  font-size: 12px;
+  font-weight: 700;
+  color: #14213d;
+}
+
+.educationFeeBarColumn i {
+  width: 24px;
+  min-height: 6px;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.12);
+}
+
+.educationFeeChartGroup strong {
+  max-width: 126px;
+  min-height: 42px;
+  text-align: center;
+  font-size: 12px;
+  color: #334155;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.educationTableSpacing {
+  margin-top: 18px;
+}
+
+.educationCompactReasonList {
+  margin: 0;
+  padding: 0 18px 0 0;
+  display: grid;
+  gap: 4px;
+  color: #334155;
+}
+
+.educationCompactReasonList li {
+  margin: 0;
+}
+
+.educationStatusPill.warning {
+  background: #fef2f2;
+  color: #b91c1c;
+  border-color: #fecaca;
+}
+
+.educationStatusPill.unknown {
+  background: #fff7ed;
+  color: #c2410c;
+  border-color: #fed7aa;
+}
+
+@media (max-width: 900px) {
+  .sectionHeaderRow {
+    flex-direction: column;
+  }
+
+  .educationFeeChartGroup {
+    min-width: 112px;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   v40 Executive Analytics Layer
+   ───────────────────────────────────────────────────────────────────────────── */
+.executiveAnalyticsLayer {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.98));
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 24px;
+  box-shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
+  padding: 22px;
+  margin: 0 0 22px;
+}
+
+.executiveLayerHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.executiveLayerHeader h2 {
+  margin: 0 0 6px;
+  color: #0f2544;
+  font-size: 1.45rem;
+}
+
+.executiveLayerHeader p {
+  margin: 0;
+  color: #64748b;
+  line-height: 1.7;
+  max-width: 980px;
+}
+
+.executiveKpiGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.executiveKpiCard {
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 18px;
+  background: #ffffff;
+  padding: 16px;
+  min-height: 118px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.05);
+}
+
+.executiveKpiCard span {
+  color: #64748b;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.executiveKpiCard strong {
+  color: #102a43;
+  font-size: 1.55rem;
+  line-height: 1.2;
+  margin: 8px 0 6px;
+}
+
+.executiveKpiCard small {
+  color: #7c8aa5;
+  line-height: 1.4;
+}
+
+.executiveKpiCard.blue {
+  border-color: rgba(37, 99, 235, 0.18);
+  background: linear-gradient(180deg, #ffffff, #eff6ff);
+}
+
+.executiveKpiCard.gold {
+  border-color: rgba(180, 131, 35, 0.2);
+  background: linear-gradient(180deg, #ffffff, #fff7ed);
+}
+
+.executiveKpiCard.green {
+  border-color: rgba(22, 163, 74, 0.18);
+  background: linear-gradient(180deg, #ffffff, #f0fdf4);
+}
+
+.executiveKpiCard.warning {
+  border-color: rgba(245, 158, 11, 0.22);
+  background: linear-gradient(180deg, #ffffff, #fffbeb);
+}
+
+.executivePanelsGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.executivePanel {
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 20px;
+  padding: 16px;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.05);
+  min-width: 0;
+}
+
+.executivePanelTitle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.executivePanelTitle h3 {
+  margin: 0;
+  color: #0f2544;
+  font-size: 1.05rem;
+}
+
+.executivePanelTitle span {
+  color: #64748b;
+  font-size: 0.85rem;
+  background: #f8fafc;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 999px;
+  padding: 6px 10px;
+  white-space: nowrap;
+}
+
+.executiveRiskTableWrap {
+  overflow-x: auto;
+}
+
+.executiveTable {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 520px;
+}
+
+.executiveTable th,
+.executiveTable td {
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  padding: 10px 8px;
+  text-align: right;
+  vertical-align: top;
+}
+
+.executiveTable th {
+  color: #334155;
+  background: #f8fafc;
+  font-weight: 800;
+  font-size: 0.9rem;
+}
+
+.executiveTable td {
+  color: #1e293b;
+  font-size: 0.92rem;
+}
+
+.executiveTable tbody tr:last-child td {
+  border-bottom: none;
+}
+
+@media (max-width: 1100px) {
+  .executiveKpiGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .executivePanelsGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .executiveAnalyticsLayer {
+    padding: 16px;
+    border-radius: 18px;
+  }
+
+  .executiveKpiGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* =========================================================
+   v41 — Portal Architecture / Executive Home + Product Center
+   ========================================================= */
+.analysisWorkspace.v41 {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.analysisWorkspaceHeader.v41 {
+  align-items: center;
+  background: linear-gradient(135deg, #ffffff 0%, #f8fbff 100%);
+  border: 1px solid #e5eaf3;
+  box-shadow: 0 14px 38px rgba(15, 23, 42, 0.06);
+}
+
+.executivePortalHome {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.executiveAnalyticsLayer.v41 {
+  background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
+  border: 1px solid #e6ebf3;
+  border-radius: 26px;
+  padding: 22px;
+  box-shadow: 0 18px 45px rgba(15, 23, 42, 0.07);
+}
+
+.executiveLayerHeader.v41 {
+  margin-bottom: 18px;
+}
+
+.executiveLayerHeader.v41 h2 {
+  margin: 3px 0 6px;
+  font-size: 26px;
+  color: #071a3d;
+}
+
+.executiveLayerHeader.v41 p {
+  max-width: 980px;
+  color: #65738a;
+}
+
+.executiveKpiSections {
+  display: grid;
+  grid-template-columns: 1.15fr 1fr 1fr;
+  gap: 18px;
+  margin-bottom: 18px;
+}
+
+.kpiSectionBlock {
+  border: 1px solid #e7edf6;
+  border-radius: 20px;
+  padding: 16px;
+  background: #ffffff;
+}
+
+.kpiSectionBlock h3 {
+  margin: 0 0 12px;
+  font-size: 15px;
+  color: #0f2a55;
+}
+
+.executiveKpiGrid.v41.compact {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(136px, 1fr));
+  gap: 10px;
+}
+
+.executiveKpiCard.v41 {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  min-height: 112px;
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid #e6ebf3;
+  background: #ffffff;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.045);
+}
+
+.executiveKpiCard.v41 .executiveKpiIcon {
+  flex: 0 0 38px;
+  width: 38px;
+  height: 38px;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+  background: #eff6ff;
+  color: #2563eb;
+}
+
+.executiveKpiCard.v41 span {
+  display: block;
+  color: #64748b;
+  font-weight: 700;
+  font-size: 12px;
+}
+
+.executiveKpiCard.v41 strong {
+  display: block;
+  margin-top: 6px;
+  font-size: 22px;
+  line-height: 1.1;
+  color: #071a3d;
+}
+
+.executiveKpiCard.v41 small {
+  display: block;
+  margin-top: 7px;
+  color: #7b879a;
+  font-size: 11px;
+}
+
+.executiveKpiCard.v41.gold .executiveKpiIcon {
+  background: #fff7ed;
+  color: #d97706;
+}
+
+.executiveKpiCard.v41.green .executiveKpiIcon {
+  background: #ecfdf5;
+  color: #16a34a;
+}
+
+.executiveKpiCard.v41.warning .executiveKpiIcon {
+  background: #fff7ed;
+  color: #ea580c;
+}
+
+
+
+.primaryActionButton {
+  border: 0;
+  border-radius: 999px;
+  padding: 12px 18px;
+  background: linear-gradient(135deg, #173b78, #2563eb);
+  color: #ffffff;
+  font-weight: 900;
+  box-shadow: 0 14px 28px rgba(37, 99, 235, 0.2);
+  white-space: nowrap;
+}
+
+.primaryActionButton:hover {
+  transform: translateY(-1px);
+}
+
+.executivePanelsGrid.v41.portal {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) minmax(280px, 1fr) minmax(360px, 1.05fr);
+  gap: 18px;
+  align-items: stretch;
+}
+
+.executivePanel.v41 {
+  background: #ffffff;
+  border: 1px solid #e6ebf3;
+  border-radius: 22px;
+  padding: 18px;
+  box-shadow: 0 14px 36px rgba(15, 23, 42, 0.055);
+}
+
+.executivePanel.v41 .executivePanelTitle {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.executivePanel.v41 .executivePanelTitle h3 {
+  margin: 0;
+  color: #071a3d;
+  font-size: 18px;
+}
+
+.executivePanel.v41 .executivePanelTitle span {
+  color: #64748b;
+  font-size: 12px;
+  border: 1px solid #dbe4f0;
+  border-radius: 999px;
+  padding: 5px 10px;
+  background: #f8fafc;
+}
+
+.donutContent {
+  display: grid;
+  grid-template-columns: 190px 1fr;
+  gap: 18px;
+  align-items: center;
+}
+
+.donutChart {
+  width: 190px;
+  height: 190px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.05), 0 10px 26px rgba(37, 99, 235, 0.11);
+}
+
+.donutCenter {
+  width: 108px;
+  height: 108px;
+  border-radius: 50%;
+  background: #ffffff;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  padding: 10px;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+}
+
+.donutCenter span {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.donutCenter strong {
+  color: #071a3d;
+  font-size: 15px;
+  line-height: 1.1;
+}
+
+.donutLegend {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.donutLegendRow {
+  display: grid;
+  grid-template-columns: 12px 1fr;
+  gap: 9px;
+  align-items: center;
+  padding-bottom: 9px;
+  border-bottom: 1px solid #edf1f7;
+}
+
+.donutLegendRow:last-child {
+  border-bottom: 0;
+}
+
+.donutColor {
+  width: 11px;
+  height: 11px;
+  border-radius: 999px;
+}
+
+.donutLegendRow strong {
+  display: block;
+  color: #0f172a;
+  font-size: 13px;
+}
+
+.donutLegendRow small {
+  display: block;
+  color: #64748b;
+  margin-top: 3px;
+  font-size: 12px;
+}
+
+.executiveTable.v41 {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  overflow: hidden;
+  border: 1px solid #e7edf6;
+  border-radius: 15px;
+}
+
+.executiveTable.v41 th,
+.executiveTable.v41 td {
+  padding: 13px 14px;
+  border-bottom: 1px solid #edf1f7;
+  text-align: right;
+  font-size: 13px;
+}
+
+.executiveTable.v41 th {
+  background: #f8fafc;
+  color: #34445c;
+  font-weight: 800;
+}
+
+.executiveTable.v41 tr:last-child td {
+  border-bottom: 0;
+}
+
+.productSummaryPanel {
+  margin-top: 18px;
+}
+
+.productCenterPanel {
+  background: #ffffff;
+  border: 1px solid #e6ebf3;
+  border-radius: 26px;
+  padding: 22px;
+  box-shadow: 0 18px 45px rgba(15, 23, 42, 0.06);
+}
+
+.productCenterHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.productCenterHeader h2 {
+  margin: 2px 0 6px;
+  color: #071a3d;
+  font-size: 24px;
+}
+
+.productCenterHeader p {
+  color: #64748b;
+  margin: 0;
+}
+
+.productCenterGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 14px;
+}
+
+.productPortalCard {
+  position: relative;
+  min-height: 180px;
+  border: 1px solid #e5eaf3;
+  border-radius: 22px;
+  padding: 18px;
+  text-align: right;
+  background: #ffffff;
+  transition: transform 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.productPortalCard.enabled {
+  cursor: pointer;
+}
+
+.productPortalCard.enabled:hover {
+  transform: translateY(-2px);
+  border-color: #93c5fd;
+  box-shadow: 0 18px 38px rgba(37, 99, 235, 0.11);
+}
+
+.productPortalCard.disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  background: #f8fafc;
+}
+
+.productPortalCard.active {
+  border-color: #2563eb;
+}
+
+.productPortalStatus {
+  display: inline-flex;
+  border-radius: 999px;
+  padding: 5px 10px;
+  background: #eff6ff;
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 800;
+  margin-bottom: 12px;
+}
+
+.productPortalCard.disabled .productPortalStatus {
+  background: #e5e7eb;
+  color: #64748b;
+}
+
+.productPortalCard strong {
+  display: block;
+  color: #071a3d;
+  font-size: 21px;
+  margin-bottom: 5px;
+}
+
+.productPortalCard small {
+  color: #64748b;
+}
+
+.productPortalMetrics {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.productPortalMetrics span {
+  background: #f8fafc;
+  border: 1px solid #edf1f7;
+  border-radius: 14px;
+  padding: 9px;
+}
+
+.productPortalMetrics b {
+  display: block;
+  color: #071a3d;
+  font-size: 14px;
+}
+
+.productPortalMetrics em {
+  display: block;
+  color: #64748b;
+  font-size: 11px;
+  font-style: normal;
+  margin-top: 3px;
+}
+
+.productModeBody {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.productDetailHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #e6ebf3;
+  border-radius: 22px;
+  padding: 18px;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.05);
+}
+
+.productDetailHeader h2 {
+  margin: 2px 0 5px;
+  color: #071a3d;
+}
+
+.productDetailHeader p {
+  margin: 0;
+  color: #64748b;
+}
+
+.productDetailActions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.analysisProductTabs.compact {
+  margin: 0;
+  padding: 4px;
+}
+
+.analysisProductTabs.compact button {
+  padding: 9px 15px;
+  font-size: 13px;
+}
+
+.emptyStateText {
+  color: #64748b;
+  margin: 0;
+}
+
+@media (max-width: 1180px) {
+  .executiveKpiSections,
+  
+
+.primaryActionButton {
+  border: 0;
+  border-radius: 999px;
+  padding: 12px 18px;
+  background: linear-gradient(135deg, #173b78, #2563eb);
+  color: #ffffff;
+  font-weight: 900;
+  box-shadow: 0 14px 28px rgba(37, 99, 235, 0.2);
+  white-space: nowrap;
+}
+
+.primaryActionButton:hover {
+  transform: translateY(-1px);
+}
+
+.executivePanelsGrid.v41.portal {
+    grid-template-columns: 1fr;
+  }
+
+  .donutContent {
+    grid-template-columns: 160px 1fr;
+  }
+
+  .donutChart {
+    width: 160px;
+    height: 160px;
+  }
+}
+
+@media (max-width: 760px) {
+  .productDetailHeader,
+  .analysisWorkspaceHeader.v41 {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .donutContent {
+    grid-template-columns: 1fr;
+    justify-items: center;
+  }
+
+  .productPortalMetrics {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* v46 - Education Fund data quality gate */
+.educationDataQualityCard {
+  border-color: rgba(37, 99, 235, 0.18);
+  background: linear-gradient(135deg, rgba(239, 246, 255, 0.95), rgba(255, 255, 255, 0.98));
+}
+
+.educationKpiGrid.compact {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 14px;
+}
+
+.educationValidationReasonGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.educationValidationReasonGrid article {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.86);
+}
+
+.educationValidationReasonGrid strong {
+  min-width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(245, 158, 11, 0.14);
+  color: #92400e;
+  font-size: 15px;
+}
+
+.educationValidationReasonGrid span {
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+/* v49 — Education fund manager scope mode bar */
+.educationScopeHeaderRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.educationScopeCurrentBadge {
+  border: 1px solid #d8e1f1;
+  background: #f8fbff;
+  color: #31446f;
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.educationScopeModeBar {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.educationScopeModeBar button {
+  border: 1px solid #d8e1f1;
+  background: #ffffff;
+  border-radius: 18px;
+  padding: 14px 16px;
+  min-height: 72px;
+  display: grid;
+  gap: 5px;
+  text-align: right;
+  cursor: pointer;
+  color: #17233f;
+  transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.educationScopeModeBar button:hover {
+  transform: translateY(-1px);
+  border-color: #b9c7ff;
+  box-shadow: 0 10px 24px rgba(45, 57, 120, 0.08);
+}
+
+.educationScopeModeBar button.active {
+  border-color: #3d52d5;
+  background: linear-gradient(135deg, #f5f7ff 0%, #ffffff 100%);
+  box-shadow: 0 12px 28px rgba(61, 82, 213, 0.14);
+}
+
+.educationScopeModeBar button strong {
+  font-size: 15px;
+}
+
+.educationScopeModeBar button span {
+  font-size: 13px;
+  color: #66728a;
+}
+
+.educationManagerSpecificSelector {
+  display: grid;
+  gap: 7px;
+  max-width: 420px;
+}
+
+.educationManagerSpecificSelector label {
+  color: #41506f;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.educationManagerSpecificSelector select {
+  border: 1px solid #cfd9ee;
+  border-radius: 16px;
+  padding: 12px 14px;
+  background: #ffffff;
+  color: #17233f;
+  font-weight: 700;
+  min-height: 46px;
+}
+
+@media (max-width: 760px) {
+  .educationScopeHeaderRow {
+    flex-direction: column;
+  }
+
+  .educationScopeModeBar {
+    grid-template-columns: 1fr;
+  }
+
+  .educationScopeCurrentBadge {
+    white-space: normal;
+  }
+}
+
+/* v50 - Education fund fee analysis engine: three-state fee status */
+.educationStatusPill.exception {
+  background: #fef2f2;
+  color: #b91c1c;
+  border-color: #fecaca;
+}
+
+.educationStatusPill.warning {
+  background: #fef3c7;
+  color: #92400e;
+  border-color: #fde68a;
+}
+
+.educationFeeChartLegend i.warning,
+.educationFeeBarColumn i.warning {
+  background: #f59e0b;
+}
+
+.educationFeeChartLegend i.exception,
+.educationFeeBarColumn i.exception {
+  background: #dc2626;
+}
+
+/* v51 - Education fund management-fee distribution buckets */
+.educationFeeDistribution {
+  min-height: 230px;
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+  padding: 22px 14px 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 18px;
+  background:
+    linear-gradient(to top, rgba(15, 23, 42, 0.05) 1px, transparent 1px) 0 0 / 100% 45px,
+    #ffffff;
+  overflow-x: auto;
+}
+
+.educationFeeDistributionBucket {
+  min-width: 128px;
+  height: 210px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+  text-align: center;
+}
+
+.educationFeeDistributionBucket strong {
+  font-size: 14px;
+  color: #14213d;
+}
+
+.educationFeeDistributionBucket i {
+  width: 42px;
+  min-height: 8px;
+  border-radius: 999px 999px 6px 6px;
+  background: #14213d;
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.14);
+}
+
+.educationFeeDistributionBucket span {
+  font-size: 12px;
+  font-weight: 800;
+  color: #334155;
+}
+
+.educationFeeDistributionBucket small {
+  font-size: 11px;
+  color: #64748b;
+}
+
+
+/* v53 Unified Product Home — Pension + Education Fund
+   Goal: make every product open with the same KPI-first SaaS dashboard shell. */
+.product-shell-hero {
+  position: relative;
+  overflow: hidden;
+  min-height: 118px;
+  border: 1px solid #dbe7f6 !important;
+  border-radius: 28px !important;
+  background:
+    radial-gradient(circle at 92% 14%, rgba(79, 70, 229, 0.10), transparent 28%),
+    radial-gradient(circle at 15% 18%, rgba(59, 130, 246, 0.08), transparent 24%),
+    linear-gradient(180deg, #ffffff 0%, #f9fbff 100%) !important;
+  box-shadow: 0 18px 42px rgba(15, 23, 42, 0.06);
+}
+
+.product-hero-title {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 16px;
+}
+
+.product-hero-icon {
+  width: 54px;
+  height: 54px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #eef2ff, #dbeafe);
+  color: #1e3a8a;
+  font-size: 26px;
+  font-weight: 900;
+  box-shadow: inset 0 0 0 1px #c7d2fe, 0 12px 24px rgba(30, 58, 138, 0.12);
+}
+
+.dashboard-header.product-shell-hero {
+  max-width: 1680px;
+  margin: 0 auto 18px;
+  padding: 24px 28px;
+}
+
+.tab-bar,
+.educationAnalysisTabs {
+  min-height: 66px;
+  align-items: stretch;
+  background: rgba(255, 255, 255, 0.92) !important;
+  border-radius: 24px !important;
+}
+
+.tab-btn,
+.educationAnalysisTabs button {
+  min-width: 130px;
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 0 !important;
+  border-bottom: 3px solid transparent !important;
+  background: transparent !important;
+}
+
+.tab-btn.active,
+.educationAnalysisTabs button.active {
+  color: #4f46e5 !important;
+  background: linear-gradient(180deg, #f8faff 0%, #ffffff 100%) !important;
+  border-bottom-color: #4f46e5 !important;
+  box-shadow: none !important;
+}
+
+.tab-icon {
+  width: 25px;
+  height: 25px;
+  border-radius: 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #64748b;
+  background: #f1f5f9;
+  font-weight: 900;
+}
+
+.tab-btn.active .tab-icon,
+.educationAnalysisTabs button.active .tab-icon {
+  color: #4338ca;
+  background: #eef2ff;
+}
+
+.unified-product-kpi-grid {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)) !important;
+  gap: 16px !important;
+}
+
+.product-kpi-card {
+  position: relative;
+  min-height: 142px;
+  text-align: right;
+  border-radius: 24px !important;
+  padding: 18px !important;
+  overflow: hidden;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%) !important;
+  transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease;
+}
+
+.product-kpi-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 18px 38px rgba(15, 23, 42, 0.09) !important;
+  border-color: #bfdbfe !important;
+}
+
+.product-kpi-card small {
+  display: block;
+  margin-top: 12px;
+  color: #2563eb;
+  font-weight: 800;
+}
+
+.product-kpi-icon {
+  position: absolute;
+  top: 18px;
+  left: 18px;
+  width: 34px;
+  height: 34px;
+  border-radius: 13px;
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  background: #eef2ff;
+  color: #4f46e5 !important;
+  font-size: 18px !important;
+  font-weight: 900;
+}
+
+.product-kpi-card.card-green,
+.educationKpiCard.card-green {
+  border-color: #bbf7d0 !important;
+  background: linear-gradient(180deg, #ffffff 0%, #f0fdf4 100%) !important;
+}
+
+.product-kpi-card.card-red,
+.educationKpiCard.card-red {
+  border-color: #fecaca !important;
+  background: linear-gradient(180deg, #ffffff 0%, #fff1f2 100%) !important;
+}
+
+.product-kpi-card.card-warning,
+.educationKpiCard.card-warning {
+  border-color: #fde68a !important;
+  background: linear-gradient(180deg, #ffffff 0%, #fffbeb 100%) !important;
+}
+
+.product-kpi-card.card-neutral,
+.educationKpiCard.card-neutral {
+  border-color: #e2e8f0 !important;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%) !important;
+}
+
+.product-home-hub,
+.education-kpi-home {
+  display: grid;
+  gap: 20px;
+}
+
+.product-home-toolbar strong {
+  min-width: 190px;
+  padding: 13px 16px;
+  border-radius: 17px;
+  text-align: center;
+  color: #0f2344;
+  border: 1px solid #c7dcff;
+  background: #ffffff;
+}
+
+.product-home-title {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 10px;
+}
+
+.product-home-title h2 {
+  margin: 0 0 6px;
+  color: #0f2344;
+  font-size: 24px;
+}
+
+.product-home-title p {
+  margin: 0;
+  color: #64748b;
+  font-weight: 700;
+}
+
+.product-analysis-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 18px;
+}
+
+.product-analysis-card {
+  position: relative;
+  min-height: 250px;
+  padding: 24px;
+  border-radius: 28px;
+  border: 1px solid #dbe3ef;
+  background: #ffffff;
+  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.05);
+  overflow: hidden;
+}
+
+.analysis-card-icon {
+  width: 58px;
+  height: 58px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 16px;
+  color: #1e3a8a;
+  background: #dbeafe;
+  font-size: 26px;
+  font-weight: 900;
+}
+
+.product-analysis-card h3 {
+  margin: 0 0 10px;
+  color: #0f2344;
+  font-size: 22px;
+}
+
+.product-analysis-card p {
+  min-height: 58px;
+  margin: 0 0 16px;
+  color: #52617a;
+  line-height: 1.7;
+  font-weight: 700;
+}
+
+.product-analysis-card strong {
+  display: block;
+  color: #0f2344;
+  font-size: 20px;
+  margin-bottom: 18px;
+}
+
+.product-analysis-card button {
+  width: 100%;
+  border: 1px solid #c7dcff;
+  border-radius: 16px;
+  padding: 13px 16px;
+  color: #1d4ed8;
+  background: #ffffff;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.product-analysis-card button:hover {
+  background: #eff6ff;
+}
+
+.tone-green .analysis-card-icon { background: #dcfce7; color: #16a34a; }
+.tone-blue .analysis-card-icon { background: #dbeafe; color: #2563eb; }
+.tone-purple .analysis-card-icon { background: #ede9fe; color: #7c3aed; }
+.tone-orange .analysis-card-icon { background: #ffedd5; color: #ea580c; }
+
+.product-manager-snapshot {
+  min-height: auto;
+}
+
+.mini-manager-bars {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.mini-manager-row {
+  display: grid;
+  grid-template-columns: 90px 1fr 52px;
+  align-items: center;
+  gap: 10px;
+  color: #0f2344;
+  font-weight: 800;
+}
+
+.mini-manager-row i {
+  height: 8px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  overflow: hidden;
+}
+
+.mini-manager-row b {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #60a5fa, #4f46e5);
+}
+
+.educationAnalysisTabs {
+  max-width: none !important;
+  margin: 0 0 18px !important;
+  padding: 8px !important;
+  border: 1px solid #dbe3ef !important;
+  overflow-x: auto;
+}
+
+.educationKpiCard.product-kpi-card {
+  cursor: pointer;
+  border: 1px solid #dbe3ef;
+  font-family: Calibri, Arial, sans-serif;
+}
+
+.compact-product-kpis {
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+}
+
+@media (max-width: 980px) {
+  .product-hero-title,
+  .kpi-toolbar.product-home-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .product-analysis-card-grid,
+  .kpi-visual-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .compact-product-kpis {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   v57 Shared Product Home
+   ProductHome.jsx is a shared visual component only. It is injected inside the
+   existing product screens and does not change routing or upload/parsing logic.
+───────────────────────────────────────────────────────────────────────────── */
+
+.v57-product-home {
+  display: grid;
+  gap: 18px;
+}
+
+.v57-product-hero {
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 24px;
+  border: 1px solid rgba(199, 220, 255, 0.9);
+  border-radius: 30px;
+  background:
+    radial-gradient(circle at top right, rgba(212, 175, 55, 0.18), transparent 34%),
+    linear-gradient(135deg, #0f2344 0%, #173b72 52%, #2f6fdb 100%);
+  color: #ffffff;
+  box-shadow: 0 22px 46px rgba(15, 35, 68, 0.18);
+}
+
+.v57-product-title-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.v57-product-icon {
+  width: 66px;
+  height: 66px;
+  border-radius: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #0f2344;
+  background: linear-gradient(180deg, #fff7d6 0%, #d4af37 100%);
+  font-size: 30px;
+  font-weight: 900;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.55), 0 16px 28px rgba(0,0,0,0.18);
+}
+
+.v57-product-hero h2 {
+  margin: 0 0 6px;
+  font-size: 34px;
+  line-height: 1.1;
+}
+
+.v57-product-hero p:not(.eyebrow) {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.82);
+  font-weight: 700;
+}
+
+.v57-scope-pill {
+  min-width: 220px;
+  display: grid;
+  align-content: center;
+  gap: 6px;
+  padding: 16px 18px;
+  border: 1px solid rgba(255,255,255,0.24);
+  border-radius: 22px;
+  background: rgba(255,255,255,0.12);
+  backdrop-filter: blur(8px);
+}
+
+.v57-scope-pill span {
+  color: rgba(255,255,255,0.72);
+  font-weight: 800;
+}
+
+.v57-scope-pill strong {
+  color: #ffffff;
+  font-size: 18px;
+}
+
+.v57-product-nav-row,
+.v57-kpi-strip,
+.v57-analysis-grid,
+.v57-product-main-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.v57-product-nav-row {
+  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+}
+
+.v57-product-nav-row button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 48px;
+  border: 1px solid #dbe3ef;
+  border-radius: 16px;
+  background: #ffffff;
+  color: #0f2344;
+  font-weight: 900;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.04);
+}
+
+.v57-product-nav-row button:hover,
+.v57-analysis-card button:hover,
+.v57-action-card button:hover {
+  background: #eff6ff;
+  border-color: #b9d4ff;
+}
+
+.v57-kpi-strip {
+  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+}
+
+.v57-kpi-tile {
+  min-height: 126px;
+  display: grid;
+  align-content: space-between;
+  gap: 8px;
+  padding: 16px;
+  border: 1px solid #dbe3ef;
+  border-radius: 22px;
+  text-align: right;
+  background: #ffffff;
+  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.045);
+}
+
+.v57-kpi-tile > span {
+  width: 38px;
+  height: 38px;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-weight: 900;
+}
+
+.v57-kpi-tile small {
+  color: #64748b;
+  font-weight: 800;
+}
+
+.v57-kpi-tile strong {
+  color: #0f2344;
+  font-size: 22px;
+  line-height: 1.1;
+}
+
+.v57-product-main-grid {
+  grid-template-columns: minmax(250px, 0.8fr) minmax(320px, 1.2fr);
+}
+
+.v57-action-card,
+.v57-manager-card,
+.v57-analysis-card {
+  border: 1px solid #dbe3ef;
+  border-radius: 28px;
+  background: #ffffff;
+  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.055);
+}
+
+.v57-action-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 22px;
+  padding: 24px;
+  background:
+    radial-gradient(circle at top left, rgba(212, 175, 55, 0.2), transparent 38%),
+    linear-gradient(180deg, #ffffff 0%, #fffaf0 100%);
+}
+
+.v57-action-icon,
+.v57-card-topline span {
+  width: 54px;
+  height: 54px;
+  border-radius: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #92400e;
+  background: #ffedd5;
+  font-size: 24px;
+  font-weight: 900;
+}
+
+.v57-action-card p,
+.v57-action-card small,
+.v57-analysis-card p,
+.v57-bar-row small {
+  color: #64748b;
+  font-weight: 700;
+  line-height: 1.6;
+}
+
+.v57-action-card h3 {
+  margin: 6px 0;
+  color: #0f2344;
+  font-size: 38px;
+}
+
+.v57-action-card button,
+.v57-analysis-card button {
+  width: 100%;
+  border: 1px solid #c7dcff;
+  border-radius: 16px;
+  padding: 13px 16px;
+  color: #1d4ed8;
+  background: #ffffff;
+  font-weight: 900;
+}
+
+.v57-manager-card {
+  padding: 22px;
+}
+
+.v57-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.v57-section-heading h3 {
+  margin: 0;
+  color: #0f2344;
+  font-size: 22px;
+}
+
+.v57-section-heading span {
+  padding: 8px 12px;
+  border-radius: 999px;
+  color: #1d4ed8;
+  background: #eff6ff;
+  font-weight: 900;
+}
+
+.v57-bars {
+  display: grid;
+  gap: 12px;
+}
+
+.v57-bar-row {
+  display: grid;
+  grid-template-columns: minmax(130px, 1fr) 1.4fr 110px;
+  align-items: center;
+  gap: 12px;
+}
+
+.v57-bar-row strong {
+  display: block;
+  color: #0f2344;
+}
+
+.v57-bar-row i {
+  height: 12px;
+  border-radius: 999px;
+  background: #edf2f7;
+  overflow: hidden;
+}
+
+.v57-bar-row i b {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #2f6fdb 0%, #d4af37 100%);
+}
+
+.v57-bar-row em {
+  color: #0f2344;
+  font-style: normal;
+  font-weight: 900;
+  text-align: left;
+}
+
+.v57-analysis-grid {
+  grid-template-columns: repeat(auto-fit, minmax(245px, 1fr));
+}
+
+.v57-analysis-card {
+  min-height: 255px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 22px;
+}
+
+.v57-card-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.v57-card-topline strong {
+  color: #0f2344;
+  font-size: 18px;
+}
+
+.v57-analysis-card h3 {
+  margin: 4px 0 0;
+  color: #0f2344;
+  font-size: 22px;
+}
+
+.v57-analysis-card p {
+  flex: 1;
+  margin: 0;
+}
+
+.v57-kpi-tile.tone-green > span,
+.v57-analysis-card.tone-green .v57-card-topline span { background: #dcfce7; color: #15803d; }
+.v57-kpi-tile.tone-red > span { background: #fee2e2; color: #b91c1c; }
+.v57-kpi-tile.tone-orange > span,
+.v57-analysis-card.tone-orange .v57-card-topline span { background: #ffedd5; color: #c2410c; }
+.v57-kpi-tile.tone-purple > span,
+.v57-analysis-card.tone-purple .v57-card-topline span { background: #ede9fe; color: #6d28d9; }
+.v57-kpi-tile.tone-blue > span,
+.v57-analysis-card.tone-blue .v57-card-topline span { background: #dbeafe; color: #1d4ed8; }
+
+@media (max-width: 900px) {
+  .v57-product-hero,
+  .v57-product-title-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .v57-product-main-grid,
+  .v57-bar-row {
+    grid-template-columns: 1fr;
+  }
+
+  .v57-bar-row em {
+    text-align: right;
+  }
+}
+
+/* v58 product screen corrections */
+.product-return-row {
+  display: flex;
+  justify-content: flex-start;
+  margin: 12px 0 10px;
+}
+
+.product-return-btn {
+  border: 1px solid rgba(37, 99, 235, 0.22);
+  background: linear-gradient(180deg, #ffffff, #f8fbff);
+  color: #12366f;
+  border-radius: 14px;
+  padding: 10px 16px;
+  font-family: Calibri, Arial, sans-serif;
+  font-size: 15px;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 8px 22px rgba(15, 35, 75, 0.08);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.product-return-btn:hover {
+  border-color: rgba(37, 99, 235, 0.45);
+  transform: translateY(-1px);
+}
+
+.product-return-btn span {
+  font-size: 22px;
+  line-height: 1;
+}
+
+/* v59: one clean product bar, no duplicated tab/navigation bars inside product screens */
+.dashboard-single-product-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.product-single-bar {
+  width: 100%;
+  background: #ffffff;
+  border: 1px solid rgba(159, 178, 217, 0.45);
+  border-radius: 22px;
+  padding: 18px 22px;
+  box-shadow: 0 18px 48px rgba(15, 35, 75, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.product-single-title {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 260px;
+}
+
+.product-single-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #eef3ff, #f7f2ff);
+  border: 1px solid rgba(69, 91, 219, 0.18);
+  color: #2634d9;
+  font-size: 24px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.75);
+}
+
+.product-single-title h1 {
+  margin: 2px 0 4px;
+  font-size: 28px;
+  color: #0b1f4f;
+}
+
+.product-single-title p:not(.eyebrow) {
+  margin: 0;
+  color: #647291;
+  font-size: 14px;
+}
+
+.product-single-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.product-single-actions .managerScope,
+.product-single-actions .global-manager-scope,
+.product-single-actions .managerScopeSelector,
+.product-single-actions .educationManagerScope,
+.product-single-actions .manager-selector-card {
+  margin: 0 !important;
+  padding: 0 !important;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.product-single-actions select,
+.product-single-actions .managerScope select,
+.product-single-actions .global-manager-scope select,
+.product-single-actions .educationManagerScope select {
+  min-width: 220px;
+  min-height: 44px;
+  border-radius: 14px;
+  border: 1px solid rgba(87, 116, 180, 0.28);
+  background: #fff;
+  color: #10224f;
+  font-weight: 700;
+  padding: 0 14px;
+}
+
+.product-return-btn {
+  min-height: 44px;
+  border-radius: 14px;
+  border: 1px solid rgba(64, 91, 220, 0.22);
+  background: linear-gradient(180deg, #ffffff, #f7f9ff);
+  color: #10245f;
+  font-weight: 800;
+  padding: 0 18px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.product-return-btn:hover {
+  border-color: rgba(64, 91, 220, 0.5);
+  box-shadow: 0 10px 24px rgba(36, 64, 160, 0.12);
+}
+
+.product-return-row,
+.compact-product-kpis,
+.educationAnalysisTabs {
+  display: none !important;
+}
+
+.v57-product-home {
+  margin-top: 0;
+}
+
+@media (max-width: 920px) {
+  .product-single-bar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .product-single-actions {
+    justify-content: flex-start;
+  }
 }

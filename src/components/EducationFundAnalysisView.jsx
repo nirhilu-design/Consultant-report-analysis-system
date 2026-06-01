@@ -16,6 +16,7 @@
 // - Personal details are optional. If birth date is unavailable, age analysis falls back gracefully.
 
 import React, { useEffect, useMemo, useState } from "react";
+import ProductHome from "./ProductHome.jsx";
 
 const EDUCATION_TABS = [
   { key: "kpi", title: "KPI", icon: "▣" },
@@ -1160,46 +1161,37 @@ function EducationKpiHome({ rows, selectedRows, dataset, scopeLabel, summary, to
     { id: "managers", title: "גופים מנהלים", icon: "▦", text: "פיזור צבירה ועובדים לפי גופים מנהלים מתוך קרנות ההשתלמות.", metric: `${formatNumber(issuerCount)} גופים`, tone: "orange" },
   ];
 
+  const productKpiCards = kpiCards.map((card) => ({
+    label: card.label,
+    value: card.value,
+    target: card.target,
+    icon: card.icon,
+    tone: card.tone === "warning" ? "orange" : card.tone,
+  }));
+
+  const managerBars = buildIssuerSummary(analysisRows).slice(0, 6).map((item) => ({
+    label: item.issuer,
+    value: item.accumulation || item.count || 0,
+    displayValue: formatCurrency(item.accumulation || 0),
+    description: `${formatNumber(item.count)} שורות`,
+  }));
+
   return (
-    <section className="education-kpi-home">
-      <div className="kpi-toolbar product-home-toolbar">
-        <div>
-          <h2>מבט KPI כללי</h2>
-          <p>סיכום קרנות השתלמות לכל הדוחות, עם בחירה לפי מנהל הסדר.</p>
-        </div>
-        <strong>{scopeLabel}</strong>
-      </div>
-
-      <div className="educationTopKpiGrid unified-product-kpi-grid">
-        {kpiCards.map((card) => (
-          <button key={card.label} type="button" className={`educationKpiCard product-kpi-card card-${card.tone}`} onClick={() => onNavigate(card.target)}>
-            <span className="product-kpi-icon">{card.icon}</span>
-            <span>{card.label}</span>
-            <strong>{card.value}</strong>
-            <small>לעיון בפרטים ←</small>
-          </button>
-        ))}
-      </div>
-
-      <div className="product-home-title">
-        <div>
-          <h2>ניתוחים מרכזיים</h2>
-          <p>עמוד בית אחיד למוצר. מכאן עוברים לכל ניתוח מפורט.</p>
-        </div>
-      </div>
-
-      <div className="product-analysis-card-grid">
-        {hubCards.map((card) => (
-          <article key={card.id} className={`product-analysis-card tone-${card.tone}`}>
-            <div className="analysis-card-icon">{card.icon}</div>
-            <h3>{card.title}</h3>
-            <p>{card.text}</p>
-            <strong>{card.metric}</strong>
-            <button type="button" onClick={() => onNavigate(card.id)}>לצפייה בניתוח</button>
-          </article>
-        ))}
-      </div>
-    </section>
+    <ProductHome
+      eyebrow="Education Fund Product Home"
+      title="קרנות השתלמות"
+      subtitle="מסך מוצר אחיד — תמונת מצב מלאה לפני כניסה לניתוח הספציפי."
+      icon="▣"
+      scopeLabel={scopeLabel}
+      kpiCards={productKpiCards}
+      analysisCards={hubCards}
+      managerBars={managerBars}
+      actionTitle="שגיאות ובדיקות"
+      actionValue={formatNumber(dataset.invalidCount)}
+      actionText="עובדים ושורות שדורשים בדיקה לפי דמי ניהול, מסלולים, צבירה או איכות נתונים."
+      actionTarget="errors"
+      onNavigate={onNavigate}
+    />
   );
 }
 

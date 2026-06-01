@@ -875,6 +875,7 @@ button:disabled {
    Responsive
 ───────────────────────────────────────────────────────────────────────────── */
 
+
 @media (max-width: 980px) {
   .app,
   .dashboard {
@@ -1146,6 +1147,7 @@ button:disabled {
   background: linear-gradient(90deg, #2f6fdb, #d4af37);
 }
 
+
 @media (max-width: 980px) {
   .kpi-toolbar,
   .manager-bar-label {
@@ -1325,6 +1327,7 @@ button:disabled {
 .managerUploadGrid {
   margin-top: 0;
 }
+
 
 @media (max-width: 980px) {
   .managerUploadHeader,
@@ -3572,7 +3575,7 @@ body,
 }
 
 .unified-product-kpi-grid {
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)) !important;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
   gap: 16px !important;
 }
 
@@ -3614,6 +3617,13 @@ body,
   color: #4f46e5 !important;
   font-size: 18px !important;
   font-weight: 900;
+}
+
+
+.product-kpi-card.card-blue,
+.educationKpiCard.card-blue {
+  border-color: #bfdbfe !important;
+  background: linear-gradient(180deg, #ffffff 0%, #eff6ff 100%) !important;
 }
 
 .product-kpi-card.card-green,
@@ -3797,6 +3807,13 @@ body,
 
 .compact-product-kpis {
   grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+}
+
+
+@media (max-width: 1180px) {
+  .unified-product-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
 }
 
 @media (max-width: 980px) {

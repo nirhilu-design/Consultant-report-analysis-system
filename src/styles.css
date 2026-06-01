@@ -4216,3 +4216,28 @@ body,
     flex-direction: column;
   }
 }
+
+/* v69 — Executive insurance errors / data-quality tab */
+.executiveErrorsTab .emptyStateCard,
+.emptyStateCard {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 18px 20px;
+  border: 1px solid rgba(31, 78, 121, 0.14);
+  border-radius: 18px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(244, 248, 252, 0.92));
+  box-shadow: 0 12px 32px rgba(31, 78, 121, 0.08);
+  color: #17324d;
+}
+
+.executiveErrorsTab .emptyStateCard strong,
+.emptyStateCard strong {
+  font-size: 18px;
+}
+
+.executiveErrorsTab .emptyStateCard small,
+.emptyStateCard small {
+  color: rgba(23, 50, 77, 0.72);
+  font-size: 14px;
+}

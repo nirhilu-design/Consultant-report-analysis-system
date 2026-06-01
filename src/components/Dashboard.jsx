@@ -1,5 +1,6 @@
 // Path: src/components/Dashboard.jsx
 import { useState, useMemo } from "react";
+import ProductHome from "./ProductHome.jsx";
 import {
   boolText,
   DonutChart,
@@ -194,114 +195,48 @@ function KpiTab({ kpi, rows = [], actions = [], managerFilter, onManagerFilterCh
     ...managerBreakdown.map((item) => item.total || 0)
   );
 
+  const productKpiCards = cards.map((card, index) => ({
+    label: card.label,
+    value: card.value,
+    target: card.target || "kpi",
+    icon: ["▧", "₪", "⌕", "✓", "×", "⚙", "%", "!"][index] || "•",
+    tone: card.color?.includes("green")
+      ? "green"
+      : card.color?.includes("red")
+        ? "red"
+        : card.color?.includes("warning")
+          ? "orange"
+          : "blue",
+  }));
+
+  const analysisCards = [
+    { id: "fees", title: "דמי ניהול", navLabel: "דמי ניהול", icon: "₪", text: "בדיקת עמידה בדמי ניהול מול ההסכם והשוואה בין גופים מנהלים.", metric: `${fmtPct(displayKpi.complianceRate || 0)} עמידה`, tone: "green" },
+    { id: "investment", title: "מסלולי השקעה", navLabel: "מסלולים", icon: "◈", text: "התאמת מסלולי תגמולים ופיצויים, איתור פיצולים וחריגות ברמת עובד.", metric: "מסלולים", tone: "blue" },
+    { id: "tier", title: "צבירות ומדרגות", navLabel: "צבירות", icon: "▤", text: "איתור עובדים שייתכן ויכולים ליהנות ממדרגת צבירה טובה יותר.", metric: fmtMoney(displayKpi.totalAccumulation), tone: "purple" },
+    { id: "action", title: "חריגים ופעולות", navLabel: "שגיאות", icon: "!", text: "ריכוז פעולות פתוחות לטיפול לפי חומרה, גוף מנהל ועובד.", metric: `${fmtNumber(displayKpi.actionItems)} פעולות`, tone: "orange" },
+  ];
+
+  const managerBars = managerBreakdown.map((item) => ({
+    label: item.manager,
+    value: item.total || 0,
+    displayValue: fmtNumber(item.total || 0),
+    description: `${fmtMoney(item.accumulation)} צבירה`,
+  }));
+
   return (
-    <div className="kpi-overview">
-      <div className="kpi-toolbar">
-        <div>
-          <h2>מבט KPI כולל</h2>
-          <p>סיכום מנהלים לכל הדוחות, עם הכנה לבחירה לפי מנהל הסדר.</p>
-        </div>
-
-        <label className="manager-filter">
-          <span>מנהל הסדר</span>
-          <select
-            value={managerFilter}
-            onChange={(event) => onManagerFilterChange(event.target.value)}
-          >
-            <option value="all">כל מנהלי ההסדר</option>
-            {managerOptions.map((manager) => (
-              <option key={manager} value={manager}>
-                {manager}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-
-      <div className="kpi-grid kpi-grid-executive unified-product-kpi-grid">
-        {cards.map(({ label, value, color, target }, index) => (
-          <button
-            type="button"
-            key={label}
-            className={`kpi-card product-kpi-card ${color}`}
-            onClick={() => onNavigate?.(target || "kpi")}
-          >
-            <span className="product-kpi-icon">{["▧", "₪", "⌕", "✓", "×", "⚙", "%", "!"][index] || "•"}</span>
-            <span className="kpi-label">{label}</span>
-            <strong className="kpi-value">{value}</strong>
-            <small>לעיון בפרטים ←</small>
-          </button>
-        ))}
-      </div>
-
-      <div className="kpi-visual-grid">
-        <section className="kpi-panel">
-          <div className="kpi-panel-header">
-            <h3>סטטוס בקרה</h3>
-            <span>{fmtNumber(displayKpi.totalRows)} פוליסות</span>
-          </div>
-
-          <div className="kpi-status-layout">
-            <DonutChart segments={statusSegments} />
-
-            <div className="kpi-legend">
-              {statusSegments.map((segment) => {
-                const pct = displayKpi.totalRows
-                  ? (Number(segment.value || 0) / displayKpi.totalRows) * 100
-                  : 0;
-
-                return (
-                  <div key={segment.label} className="kpi-legend-row">
-                    <span className={`legend-dot ${segment.className}`} />
-                    <strong>{segment.label}</strong>
-                    <span>{fmtNumber(segment.value)}</span>
-                    <em>{pct.toFixed(1)}%</em>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </section>
-
-        <section className="kpi-panel">
-          <div className="kpi-panel-header">
-            <h3>פיזור לפי מנהל הסדר</h3>
-            <span>{managerBreakdown.length} מנהלים</span>
-          </div>
-
-          {managerBreakdown.length ? (
-            <div className="manager-bars">
-              {managerBreakdown.map((item) => (
-                <div key={item.manager} className="manager-bar-row">
-                  <div className="manager-bar-label">
-                    <strong>{item.manager}</strong>
-                    <span>
-                      {fmtNumber(item.total)} פוליסות · {fmtMoney(item.accumulation)}
-                    </span>
-                  </div>
-
-                  <div className="manager-bar-track">
-                    <div
-                      className="manager-bar-fill"
-                      style={{ width: `${(item.total / maxManagerTotal) * 100}%` }}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <EmptyState text="אין נתוני מנהלי הסדר" />
-          )}
-        </section>
-      </div>
-
-      <PensionAnalysisHub
-        kpi={displayKpi}
-        managerBreakdown={managerBreakdown}
-        activeTab="kpi"
-        onNavigate={onNavigate || (() => {})}
-      />
-    </div>
+    <ProductHome
+      eyebrow="Pension Product Home"
+      title="פנסיה"
+      subtitle="מסך מוצר אחיד — תמונת מצב מלאה לפני כניסה לניתוח הספציפי."
+      icon="☂"
+      scopeLabel={managerFilter === "all" ? "כל מנהלי ההסדר" : managerFilter}
+      kpiCards={productKpiCards}
+      analysisCards={analysisCards}
+      managerBars={managerBars}
+      actionValue={fmtNumber(displayKpi.actionItems)}
+      actionText="חריגים, פערי דמי ניהול, בעיות איכות נתונים ופעולות המשך."
+      onNavigate={onNavigate || (() => {})}
+    />
   );
 }
 

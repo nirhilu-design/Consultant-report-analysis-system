@@ -2112,76 +2112,120 @@ export default function EducationFundAnalysisView({ analysisData }) {
   const issuerCount = new Set(analysisRows.map((row) => row.issuerOriginal || row.issuer).filter(Boolean)).size;
 
   return (
-    <section className="educationFundAnalysisView" dir="rtl">
-      <div className="productAnalysisHeader product-shell-hero education-hero">
+    <section className="educationFundAnalysisView dashboard" dir="rtl">
+      <header className="dashboard-header product-shell-hero education-hero">
         <div className="product-hero-title">
           <span className="product-hero-icon">▣</span>
           <div>
             <p className="eyebrow">Education Fund</p>
-            <h2>קרנות השתלמות</h2>
-            <p>מערכת ניהול ובקרה — KPI מרכזי ומעבר אחיד לכל ניתוחי המוצר.</p>
+            <h1 className="dashboard-title">קרנות השתלמות</h1>
+            <p className="dashboard-subtitle">
+              מערכת ניהול ובקרה · {formatNumber(selectedRows.length || summary.unifiedRowCount || 0)} שורות · {formatCurrency(totalAccumulation || summary.totalAccumulation)}
+            </p>
           </div>
         </div>
+
+        <div className="summary-pills">
+          <span className="pill pill-green">✓ {formatNumber(educationDataset.validCount)} תקין</span>
+          <span className="pill pill-red">✗ {formatNumber(educationDataset.invalidCount)} לא תקין</span>
+          {warnings.length > 0 && (
+            <span className="pill pill-warning">QA {formatNumber(warnings.length)} אזהרות</span>
+          )}
+        </div>
+      </header>
+
+      <div className="global-scope-bar">
+        <div>
+          <strong>תצוגת מנהל הסדר</strong>
+          <span>הבחירה כאן משפיעה על כל הטאבים בדוח.</span>
+        </div>
+
+        <label className="manager-filter global-manager-filter">
+          <span>מנהל הסדר</span>
+          <select
+            value={selectedManagerKey}
+            onChange={(event) => setSelectedManagerKey(event.target.value)}
+          >
+            <option value="all">כל מנהלי ההסדר</option>
+            {managerOptions.map((option) => (
+              <option key={option.key} value={option.key}>
+                {option.name}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <em>
+          מוצגות {formatNumber(selectedRows.length)} מתוך {formatNumber(rows.length)} שורות
+        </em>
       </div>
 
-      <ManagerScopeSelector
-        options={managerOptions}
-        selectedKey={selectedManagerKey}
-        onChange={setSelectedManagerKey}
-      />
+      <nav className="tab-bar education-product-tab-bar">
+        {EDUCATION_TABS.map((tab) => (
+          <button
+            key={tab.key}
+            type="button"
+            className={`tab-btn ${activeTab === tab.key ? "active" : ""}`}
+            onClick={() => setActiveTab(tab.key)}
+          >
+            <span className="tab-icon">{tab.icon}</span>
+            <span>{tab.title}</span>
+          </button>
+        ))}
+      </nav>
 
-      {activeTab !== "kpi" && (
-        <div className="educationTopKpiGrid compact-product-kpis">
-          <KpiCard label="שכבת ניתוח" value={scopeLabel} />
-          <KpiCard label="שורות שנקלטו" value={selectedRows.length || summary.unifiedRowCount || 0} />
-          <KpiCard label="סה״כ צבירה" value={formatCurrency(totalAccumulation || summary.totalAccumulation)} />
-          <KpiCard label="גופים מנהלים" value={issuerCount || summary.issuerCount || 0} />
-        </div>
-      )}
+      <main className="dashboard-content">
+        {activeTab !== "kpi" && (
+          <div className="educationTopKpiGrid compact-product-kpis">
+            <KpiCard label="שכבת ניתוח" value={scopeLabel} />
+            <KpiCard label="שורות שנקלטו" value={selectedRows.length || summary.unifiedRowCount || 0} />
+            <KpiCard label="סה״כ צבירה" value={formatCurrency(totalAccumulation || summary.totalAccumulation)} />
+            <KpiCard label="גופים מנהלים" value={issuerCount || summary.issuerCount || 0} />
+          </div>
+        )}
 
-      {activeTab !== "kpi" && <EducationDataQualityCard dataset={educationDataset} />}
+        {activeTab !== "kpi" && <EducationDataQualityCard dataset={educationDataset} />}
 
-      {activeTab !== "kpi" && warnings.length > 0 && (
-        <section className="workspaceCard">
-          <h3>אזהרות כלליות</h3>
-          <ul className="warningList">
-            {warnings.map((warning, index) => (
-              <li key={`${warning}-${index}`}>{warning}</li>
-            ))}
-          </ul>
-        </section>
-      )}
+        {activeTab !== "kpi" && warnings.length > 0 && (
+          <section className="workspaceCard">
+            <h3>אזהרות כלליות</h3>
+            <ul className="warningList">
+              {warnings.map((warning, index) => (
+                <li key={`${warning}-${index}`}>{warning}</li>
+              ))}
+            </ul>
+          </section>
+        )}
 
-      {activeTab !== "kpi" && !rows.length && (
-        <section className="workspaceCard">
-          <h3>אין עדיין נתונים לניתוח</h3>
-          <p className="hint">
-            החוצצים נטענו, אבל לא נמצאו שורות קרן השתלמות בפלט הניתוח. בדרך כלל זה קורה כאשר חסר קובץ נתונים,
-            כאשר הועלה רק קובץ הסכמים, או כאשר הפלט נשמר תחת שדה raw בלבד. גרסה זו כוללת גיבוי אוטומטי גם ל־rawRows.
-          </p>
-        </section>
-      )}
+        {activeTab !== "kpi" && !rows.length && (
+          <section className="workspaceCard">
+            <h3>אין עדיין נתונים לניתוח</h3>
+            <p className="hint">
+              החוצצים נטענו, אבל לא נמצאו שורות קרן השתלמות בפלט הניתוח. בדרך כלל זה קורה כאשר חסר קובץ נתונים,
+              כאשר הועלה רק קובץ הסכמים, או כאשר הפלט נשמר תחת שדה raw בלבד. גרסה זו כוללת גיבוי אוטומטי גם ל־rawRows.
+            </p>
+          </section>
+        )}
 
-      <EducationTabs activeTab={activeTab} onChange={setActiveTab} />
-
-      {activeTab === "kpi" && (
-        <EducationKpiHome
-          rows={analysisRows}
-          selectedRows={selectedRows}
-          dataset={educationDataset}
-          scopeLabel={scopeLabel}
-          summary={summary}
-          totalAccumulation={totalAccumulation}
-          totalMonthlyDeposits={totalMonthlyDeposits}
-          issuerCount={issuerCount}
-          onNavigate={setActiveTab}
-        />
-      )}
-      {activeTab === "fees" && <FeesTab rows={analysisRows} isAggregateScope={isAggregateScope} />}
-      {activeTab === "accumulation" && <AccumulationTab rows={analysisRows} isAggregateScope={isAggregateScope} />}
-      {activeTab === "tracksByAge" && <TracksByAgeTab rows={analysisRows} isAggregateScope={isAggregateScope} />}
-      {activeTab === "managers" && <ManagersTab rows={analysisRows} />}
-      {activeTab === "errors" && <ErrorsTab rows={selectedRows} isAggregateScope={isAggregateScope} />}
+        {activeTab === "kpi" && (
+          <EducationKpiHome
+            rows={analysisRows}
+            selectedRows={selectedRows}
+            dataset={educationDataset}
+            scopeLabel={scopeLabel}
+            summary={summary}
+            totalAccumulation={totalAccumulation}
+            totalMonthlyDeposits={totalMonthlyDeposits}
+            issuerCount={issuerCount}
+            onNavigate={setActiveTab}
+          />
+        )}
+        {activeTab === "fees" && <FeesTab rows={analysisRows} isAggregateScope={isAggregateScope} />}
+        {activeTab === "accumulation" && <AccumulationTab rows={analysisRows} isAggregateScope={isAggregateScope} />}
+        {activeTab === "tracksByAge" && <TracksByAgeTab rows={analysisRows} isAggregateScope={isAggregateScope} />}
+        {activeTab === "managers" && <ManagersTab rows={analysisRows} />}
+        {activeTab === "errors" && <ErrorsTab rows={selectedRows} isAggregateScope={isAggregateScope} />}
+      </main>
     </section>
   );
 }

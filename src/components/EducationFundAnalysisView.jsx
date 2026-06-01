@@ -1143,14 +1143,18 @@ function EducationKpiHome({ rows, selectedRows, dataset, scopeLabel, summary, to
   const nonCompliantCount = feeAnalysis.warningCount + feeAnalysis.exceptionCount;
   const complianceRate = validEmployeeCount ? Math.round((feeAnalysis.okCount / validEmployeeCount) * 1000) / 10 : 0;
 
+  const totalRowsCount = selectedRows.length || summary.unifiedRowCount || 0;
+  const checkedRowsCount = dataset.validCount + dataset.invalidCount;
+
   const kpiCards = [
-    { label: "סה״כ שורות", value: formatNumber(selectedRows.length || summary.unifiedRowCount || 0), tone: "blue", icon: "▧", target: "errors" },
+    { label: "סה״כ קופות", value: formatNumber(totalRowsCount), tone: "blue", icon: "▧", target: "errors" },
     { label: "סך צבירה מנוהלת", value: formatCurrency(totalAccumulation || summary.totalAccumulation), tone: "blue", icon: "₪", target: "accumulation" },
-    { label: "שורות תקינות", value: formatNumber(dataset.validCount), tone: "green", icon: "✓", target: "fees" },
-    { label: "שורות לשגיאות", value: formatNumber(dataset.invalidCount), tone: "red", icon: "×", target: "errors" },
-    { label: "% עמידה כללית", value: `${complianceRate}%`, tone: complianceRate >= 90 ? "green" : "red", icon: "%", target: "fees" },
+    { label: "נבדקו", value: formatNumber(checkedRowsCount), tone: "blue", icon: "⌕", target: "fees" },
+    { label: "תקין", value: formatNumber(dataset.validCount), tone: "green", icon: "✓", target: "fees" },
+    { label: "לא תקין", value: formatNumber(dataset.invalidCount), tone: "red", icon: "×", target: "errors" },
+    { label: "% עמידה", value: `${complianceRate}%`, tone: complianceRate >= 90 ? "green" : "red", icon: "%", target: "fees" },
     { label: "גופים מנהלים", value: formatNumber(issuerCount || summary.issuerCount || 0), tone: "neutral", icon: "▦", target: "managers" },
-    { label: "הפקדה אחרונה", value: formatCurrency(totalMonthlyDeposits || summary.totalMonthlyDeposits), tone: "warning", icon: "↻", target: "accumulation" },
+    { label: "הפקדה חודשית", value: formatCurrency(totalMonthlyDeposits || summary.totalMonthlyDeposits), tone: "warning", icon: "↻", target: "accumulation" },
   ];
 
   const hubCards = [

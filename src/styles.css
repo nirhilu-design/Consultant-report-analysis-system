@@ -2279,6 +2279,43 @@ body,
   border: 1px solid #fed7aa;
 }
 
+.educationInsightTiles {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.educationInsightTiles article {
+  padding: 16px;
+  border-radius: 18px;
+  background: linear-gradient(135deg, #f8fafc 0%, #eef6ff 100%);
+  border: 1px solid #dbeafe;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+}
+
+.educationInsightTiles strong {
+  display: block;
+  color: #14213d;
+  font-size: 22px;
+  font-weight: 900;
+}
+
+.educationInsightTiles span {
+  display: block;
+  margin-top: 6px;
+  color: #1d4ed8;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.educationInsightTiles small {
+  display: block;
+  margin-top: 6px;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .educationInsightList strong {
   display: block;
   color: #9a3412;
@@ -2331,7 +2368,8 @@ body,
 @media (max-width: 700px) {
   .educationTopKpiGrid,
   .educationKpiGrid,
-  .educationBucketGrid {
+  .educationBucketGrid,
+  .educationInsightTiles {
     grid-template-columns: 1fr;
   }
 

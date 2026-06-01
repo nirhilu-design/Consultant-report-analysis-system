@@ -173,46 +173,14 @@ function KpiTab({ kpi, rows = [], actions = [], managerFilter, onManagerFilterCh
   if (!displayKpi) return <EmptyState text="אין נתוני KPI" />;
 
   const cards = [
-    {
-      label: "סה״כ פוליסות",
-      value: fmtNumber(displayKpi.totalRows),
-      color: "card-blue",
-    },
-    {
-      label: "סך צבירה מנוהלת",
-      value: fmtMoney(displayKpi.totalAccumulation),
-      color: "card-blue",
-    },
-    {
-      label: "נבדקו",
-      value: fmtNumber(displayKpi.auditedRows),
-      color: "card-blue",
-    },
-    {
-      label: "תקין",
-      value: fmtNumber(displayKpi.validRows),
-      color: "card-green",
-    },
-    {
-      label: "לא תקין",
-      value: fmtNumber(displayKpi.invalidRows),
-      color: "card-red",
-    },
-    {
-      label: "תפעול בלבד",
-      value: fmtNumber(displayKpi.excludedRows),
-      color: "card-neutral",
-    },
-    {
-      label: "% עמידה",
-      value: fmtPct(displayKpi.complianceRate),
-      color: displayKpi.complianceRate >= 0.9 ? "card-green" : "card-red",
-    },
-    {
-      label: "Action Center",
-      value: fmtNumber(displayKpi.actionItems),
-      color: "card-warning",
-    },
+    { label: "סה״כ פוליסות", value: fmtNumber(displayKpi.totalRows), color: "card-blue", target: "preview" },
+    { label: "סך צבירה מנוהלת", value: fmtMoney(displayKpi.totalAccumulation), color: "card-blue", target: "tier" },
+    { label: "נבדקו", value: fmtNumber(displayKpi.auditedRows), color: "card-blue", target: "quality" },
+    { label: "תקין", value: fmtNumber(displayKpi.validRows), color: "card-green", target: "fees" },
+    { label: "לא תקין", value: fmtNumber(displayKpi.invalidRows), color: "card-red", target: "action" },
+    { label: "תפעול בלבד", value: fmtNumber(displayKpi.excludedRows), color: "card-neutral", target: "preview" },
+    { label: "% עמידה", value: fmtPct(displayKpi.complianceRate), color: displayKpi.complianceRate >= 0.9 ? "card-green" : "card-red", target: "fees" },
+    { label: "Action Center", value: fmtNumber(displayKpi.actionItems), color: "card-warning", target: "action" },
   ];
 
   const statusSegments = [
@@ -251,13 +219,18 @@ function KpiTab({ kpi, rows = [], actions = [], managerFilter, onManagerFilterCh
       </div>
 
       <div className="kpi-grid kpi-grid-executive unified-product-kpi-grid">
-        {cards.map(({ label, value, color }, index) => (
-          <div key={label} className={`kpi-card product-kpi-card ${color}`}>
+        {cards.map(({ label, value, color, target }, index) => (
+          <button
+            type="button"
+            key={label}
+            className={`kpi-card product-kpi-card ${color}`}
+            onClick={() => onNavigate?.(target || "kpi")}
+          >
             <span className="product-kpi-icon">{["▧", "₪", "⌕", "✓", "×", "⚙", "%", "!"][index] || "•"}</span>
             <span className="kpi-label">{label}</span>
             <strong className="kpi-value">{value}</strong>
             <small>לעיון בפרטים ←</small>
-          </div>
+          </button>
         ))}
       </div>
 

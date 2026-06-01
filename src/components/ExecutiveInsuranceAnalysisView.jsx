@@ -1,7 +1,7 @@
 // Path: src/components/ExecutiveInsuranceAnalysisView.jsx
-// v67 — Full product home for ביטוח מנהלים + controls
+// v68 — Executive insurance fee controls split into separate period tables
 // Scope: product page similar to Pension/Education, with focused controls:
-// 1) דמי ניהול with summary table
+// 1) דמי ניהול with separate summary/detail tables per policy period
 // 2) צבירות with chart + table
 // 3) יצרנים / חברות ביטוח
 // Period model: before 2004, 2004-2013, 2013+ without coefficient.
@@ -174,6 +174,18 @@ function groupByPeriod(rows) {
     .map(([, item]) => item);
 }
 
+
+function getPeriodSections(rows) {
+  const preferredOrder = ["before2004", "from2004To2013", "from2013NoCoefficient", "unknown"];
+  return preferredOrder
+    .map((key) => {
+      const periodRows = rows.filter((row) => getPeriodKey(row) === key);
+      const summary = groupByPeriod(periodRows)[0] || makeEmptyGroup(PERIOD_LABELS[key]);
+      return { key, label: PERIOD_LABELS[key], rows: periodRows, summary };
+    })
+    .filter((section) => section.rows.length > 0);
+}
+
 function KpiCard({ label, value, subtext, tone = "blue", onClick }) {
   const Tag = onClick ? "button" : "article";
   return (
@@ -268,81 +280,51 @@ function ProductHome({ rows, onOpenTab }) {
   );
 }
 
-function FeesTab({ rows }) {
-  const okRows = rows.filter((row) => row.feeStatus === "תקין");
-  const notOkRows = rows.filter((row) => row.feeStatus !== "תקין");
-  const byPeriod = groupByPeriod(rows);
-  const byIssuer = groupByIssuer(rows);
-  const samples = rows.slice(0, 120);
+function PeriodFeeTable({ section }) {
+  const periodRows = section.rows;
+  const okRows = periodRows.filter((row) => row.feeStatus === "תקין");
+  const notOkRows = periodRows.filter((row) => row.feeStatus !== "תקין");
+  const issuerSummary = groupByIssuer(periodRows);
+  const detailRows = periodRows.slice(0, 80);
 
   return (
-    <section className="productAnalysisPanel">
-      <div className="productSectionHeader">
+    <article className="periodFeeBlock">
+      <div className="periodFeeHeader">
         <div>
-          <p className="eyebrow">Management Fees Control</p>
-          <h3>בקרת דמי ניהול</h3>
-          <p>ביטוח מנהלים נבדק לפי תקופת הפוליסה, כי לכל תקופה מבנה דמי ניהול שונה.</p>
+          <p className="eyebrow">Period Fee Control</p>
+          <h4>{section.label}</h4>
+          <p>בדיקה עצמאית לתקופת הפוליסות הזו בלבד, מול מבנה דמי הניהול הרלוונטי בדוח ההסכמים.</p>
         </div>
-      </div>
-
-      <div className="productKpiGrid four">
-        <KpiCard label="תקין" value={fmtNumber(okRows.length)} subtext="שורות שעומדות בהסכם" tone="green" />
-        <KpiCard label="לא תקין" value={fmtNumber(notOkRows.length)} subtext="חריגה / חסר הסכם / חסר נתון" tone="red" />
-        <KpiCard label="אחוז תקינות" value={`${rows.length ? Math.round((okRows.length / rows.length) * 100) : 0}%`} subtext="מתוך כלל הפוליסות" tone="gold" />
-        <KpiCard label="סה״כ פוליסות" value={fmtNumber(rows.length)} subtext="שורות ביטוח מנהלים" tone="blue" />
+        <div className="periodFeeStats">
+          <span className="statusPill ok">תקין: {fmtNumber(okRows.length)}</span>
+          <span className="statusPill bad">לא תקין: {fmtNumber(notOkRows.length)}</span>
+        </div>
       </div>
 
       <div className="productTableWrap compactTable">
         <table className="productTable">
           <thead>
             <tr>
-              <th>סיכום לפי תקופה</th>
+              <th>חברת ביטוח</th>
               <th>פוליסות</th>
               <th>תקין</th>
               <th>לא תקין</th>
               <th>חסר הסכם</th>
               <th>חסר נתון</th>
-              <th>דמי ניהול מפרמיה ממוצע</th>
-              <th>דמי ניהול מצבירה ממוצע</th>
-            </tr>
-          </thead>
-          <tbody>
-            {byPeriod.map((item) => (
-              <tr key={item.label}>
-                <td><strong>{item.label}</strong></td>
-                <td>{fmtNumber(item.count)}</td>
-                <td>{fmtNumber(item.ok)}</td>
-                <td>{fmtNumber(item.notOk)}</td>
-                <td>{fmtNumber(item.missingAgreement)}</td>
-                <td>{fmtNumber(item.missingData)}</td>
-                <td>{fmtPct(item.premiumFeeCount ? item.premiumFeeSum / item.premiumFeeCount : null)}</td>
-                <td>{fmtPct(item.accumulationFeeCount ? item.accumulationFeeSum / item.accumulationFeeCount : null)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      <div className="productTableWrap compactTable">
-        <table className="productTable">
-          <thead>
-            <tr>
-              <th>סיכום לפי חברת ביטוח</th>
-              <th>פוליסות</th>
-              <th>תקין</th>
-              <th>לא תקין</th>
               <th>צבירה</th>
               <th>דמי ניהול מפרמיה ממוצע</th>
               <th>דמי ניהול מצבירה ממוצע</th>
             </tr>
           </thead>
           <tbody>
-            {byIssuer.map((item) => (
-              <tr key={item.label}>
+            {issuerSummary.map((item) => (
+              <tr key={`${section.key}-${item.label}`}>
                 <td><strong>{item.label}</strong></td>
                 <td>{fmtNumber(item.count)}</td>
                 <td>{fmtNumber(item.ok)}</td>
                 <td>{fmtNumber(item.notOk)}</td>
+                <td>{fmtNumber(item.missingAgreement)}</td>
+                <td>{fmtNumber(item.missingData)}</td>
                 <td>{fmtMoney(item.accumulation)}</td>
                 <td>{fmtPct(item.premiumFeeCount ? item.premiumFeeSum / item.premiumFeeCount : null)}</td>
                 <td>{fmtPct(item.accumulationFeeCount ? item.accumulationFeeSum / item.accumulationFeeCount : null)}</td>
@@ -359,7 +341,6 @@ function FeesTab({ rows }) {
               <th>סטטוס</th>
               <th>עובד / פוליסה</th>
               <th>חברת ביטוח</th>
-              <th>תקופה</th>
               <th>שנת תחילה</th>
               <th>פרמיה בפועל</th>
               <th>פרמיה הסכם</th>
@@ -370,12 +351,11 @@ function FeesTab({ rows }) {
             </tr>
           </thead>
           <tbody>
-            {samples.map((row, index) => (
-              <tr key={`${row.policyId || row.policyNumber || index}-${index}`}>
+            {detailRows.map((row, index) => (
+              <tr key={`${section.key}-${row.policyId || row.policyNumber || index}-${index}`}>
                 <td><span className={`statusPill ${row.feeStatus === "תקין" ? "ok" : "bad"}`}>{row.feeStatus || "לא תקין"}</span></td>
                 <td>{getEmployeeLabel(row)}</td>
                 <td>{getIssuer(row)}</td>
-                <td>{getPeriodLabel(row)}</td>
                 <td>{row.insuranceStartYear || "—"}</td>
                 <td>{fmtPct(row.actualPremiumFeePercent)}</td>
                 <td>{fmtPct(row.agreementPremiumFeePercent)}</td>
@@ -387,6 +367,37 @@ function FeesTab({ rows }) {
             ))}
           </tbody>
         </table>
+      </div>
+    </article>
+  );
+}
+
+function FeesTab({ rows }) {
+  const okRows = rows.filter((row) => row.feeStatus === "תקין");
+  const notOkRows = rows.filter((row) => row.feeStatus !== "תקין");
+  const periodSections = getPeriodSections(rows);
+
+  return (
+    <section className="productAnalysisPanel">
+      <div className="productSectionHeader">
+        <div>
+          <p className="eyebrow">Management Fees Control</p>
+          <h3>בקרת דמי ניהול</h3>
+          <p>הבקרה מופרדת לפי תקופות ביטוח מנהלים. לכל תקופה מוצגת טבלת בדיקה עצמאית, כי מבנה דמי הניהול שונה בין התקופות.</p>
+        </div>
+      </div>
+
+      <div className="productKpiGrid four">
+        <KpiCard label="תקין" value={fmtNumber(okRows.length)} subtext="שורות שעומדות בהסכם" tone="green" />
+        <KpiCard label="לא תקין" value={fmtNumber(notOkRows.length)} subtext="חריגה / חסר הסכם / חסר נתון" tone="red" />
+        <KpiCard label="אחוז תקינות" value={`${rows.length ? Math.round((okRows.length / rows.length) * 100) : 0}%`} subtext="מתוך כלל הפוליסות" tone="gold" />
+        <KpiCard label="תקופות פעילות" value={fmtNumber(periodSections.length)} subtext="טבלה נפרדת לכל תקופה" tone="blue" />
+      </div>
+
+      <div className="periodFeeGrid">
+        {periodSections.map((section) => (
+          <PeriodFeeTable key={section.key} section={section} />
+        ))}
       </div>
     </section>
   );

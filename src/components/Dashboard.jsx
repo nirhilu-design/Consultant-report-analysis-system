@@ -153,7 +153,7 @@ function buildAggregateQualityIssues(issues = []) {
 // ─── KPI ──────────────────────────────────────────────────────────────────────
 
 
-function KpiTab({ kpi, rows = [], actions = [], managerFilter, onManagerFilterChange, onNavigate }) {
+function KpiTab({ kpi, rows = [], actions = [], managerFilter, onManagerFilterChange, onNavigate, onBackHome }) {
   const managerBreakdown = buildManagerBreakdown(rows);
   const managerOptions = managerBreakdown.map((item) => item.manager);
 
@@ -236,6 +236,7 @@ function KpiTab({ kpi, rows = [], actions = [], managerFilter, onManagerFilterCh
       actionValue={fmtNumber(displayKpi.actionItems)}
       actionText="חריגים, פערי דמי ניהול, בעיות איכות נתונים ופעולות המשך."
       onNavigate={onNavigate || (() => {})}
+      onBackHome={onBackHome}
     />
   );
 }
@@ -1453,7 +1454,7 @@ const TABS = [
 
 // ─── Main Dashboard ───────────────────────────────────────────────────────────
 
-export default function Dashboard({ analysisData }) {
+export default function Dashboard({ analysisData, onBackHome }) {
   const [activeTab, setActiveTab] = useState("kpi");
   const [managerFilter, setManagerFilter] = useState("all");
 
@@ -1521,6 +1522,7 @@ export default function Dashboard({ analysisData }) {
             managerFilter={managerFilter}
             onManagerFilterChange={setManagerFilter}
             onNavigate={setActiveTab}
+            onBackHome={onBackHome}
           />
         );
 

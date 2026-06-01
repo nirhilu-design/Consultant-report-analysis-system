@@ -7,6 +7,7 @@ import React from "react";
 export const PRODUCT_MODES = {
   PENSION: "pension",
   HISHTALMUT: "hishtalmut",
+  EXECUTIVE_INSURANCE: "executiveInsurance",
 };
 
 export const PRODUCT_MODE_OPTIONS = [
@@ -25,11 +26,11 @@ export const PRODUCT_MODE_OPTIONS = [
     enabled: true,
   },
   {
-    key: "executiveInsurance",
+    key: PRODUCT_MODES.EXECUTIVE_INSURANCE,
     title: "ביטוח מנהלים",
-    subtitle: "מוצר הבא בתכנון — עדיין לא נטען לניתוח",
-    status: "בקרוב",
-    enabled: false,
+    subtitle: "דוח יועץ + דוח הסכמים לביטוח מנהלים",
+    status: "פעיל",
+    enabled: true,
   },
 ];
 

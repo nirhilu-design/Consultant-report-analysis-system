@@ -14,11 +14,22 @@ export const PRODUCT_MODE_OPTIONS = [
     key: PRODUCT_MODES.PENSION,
     title: "פנסיה",
     subtitle: "דוח נתונים + דוח הסכמים פנסיוני",
+    status: "פעיל",
+    enabled: true,
   },
   {
     key: PRODUCT_MODES.HISHTALMUT,
     title: "קרן השתלמות",
     subtitle: "קלט מידע + קלט הסכמים לקרנות השתלמות",
+    status: "פעיל",
+    enabled: true,
+  },
+  {
+    key: "executiveInsurance",
+    title: "ביטוח מנהלים",
+    subtitle: "מוצר הבא בתכנון — עדיין לא נטען לניתוח",
+    status: "בקרוב",
+    enabled: false,
   },
 ];
 
@@ -52,11 +63,14 @@ export default function ProductModeSelector({
             <button
               key={option.key}
               type="button"
-              className={`productModeOption ${active ? "active" : ""}`}
-              onClick={() => onChange?.(option.key)}
-              disabled={disabled}
+              className={`productModeOption ${active ? "active" : ""} ${option.enabled === false ? "future" : ""}`}
+              onClick={() => option.enabled !== false && onChange?.(option.key)}
+              disabled={disabled || option.enabled === false}
             >
-              <strong>{option.title}</strong>
+              <div className="productModeOptionTop">
+                <strong>{option.title}</strong>
+                {option.status && <small>{option.status}</small>}
+              </div>
               <span>{option.subtitle}</span>
 
               {item?.hasFiles && (

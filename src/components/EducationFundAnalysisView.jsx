@@ -693,6 +693,59 @@ function getAccumulationBucket(value) {
   return "500K+";
 }
 
+function buildAccumulationInsights(rows) {
+  const normalizedRows = asArray(rows);
+  const totalAccumulation = normalizedRows.reduce((sum, row) => sum + safeNumber(row.currentBalance), 0);
+  const activeRows = normalizedRows.filter((row) => safeNumber(row.currentBalance) > 0);
+  const zeroBalanceRows = normalizedRows.filter((row) => safeNumber(row.currentBalance) <= 0);
+  const highBalanceRows = normalizedRows.filter((row) => safeNumber(row.currentBalance) >= 250000);
+  const sortedByBalance = [...activeRows].sort((a, b) => safeNumber(b.currentBalance) - safeNumber(a.currentBalance));
+  const topFiveRows = sortedByBalance.slice(0, 5);
+  const topFiveAccumulation = topFiveRows.reduce((sum, row) => sum + safeNumber(row.currentBalance), 0);
+  const concentrationRate = totalAccumulation ? Math.round((topFiveAccumulation / totalAccumulation) * 100) : 0;
+
+  const employeeMap = new Map();
+  normalizedRows.forEach((row, index) => {
+    const key = getMemberKey(row) || `${row.policyNumber || row.fundName || "row"}-${index}`;
+    const current = employeeMap.get(key) || {
+      key,
+      clientName: row.clientName || "",
+      employeeCode: row.employeeCode || "",
+      idNumber: row.idNumber || "",
+      rowCount: 0,
+      totalAccumulation: 0,
+      totalMonthlyDeposits: 0,
+      issuers: new Set(),
+      tracks: new Set(),
+    };
+
+    current.rowCount += 1;
+    current.totalAccumulation += safeNumber(row.currentBalance);
+    current.totalMonthlyDeposits += safeNumber(row.monthlyDeposit);
+    if (normalizeText(row.issuerOriginal || row.issuer || row.manager)) current.issuers.add(normalizeText(row.issuerOriginal || row.issuer || row.manager));
+    if (normalizeText(row.investmentTrack || row.investmentTrackRewards || row.investmentTrackCompensation)) current.tracks.add(normalizeText(row.investmentTrack || row.investmentTrackRewards || row.investmentTrackCompensation));
+    employeeMap.set(key, current);
+  });
+
+  const employees = Array.from(employeeMap.values()).sort((a, b) => b.totalAccumulation - a.totalAccumulation);
+  const zeroBalanceEmployees = employees.filter((employee) => employee.totalAccumulation <= 0);
+  const topEmployees = employees.slice(0, 10);
+
+  return {
+    totalAccumulation,
+    activeRows,
+    zeroBalanceRows,
+    highBalanceRows,
+    sortedByBalance,
+    topFiveRows,
+    topFiveAccumulation,
+    concentrationRate,
+    employees,
+    zeroBalanceEmployees,
+    topEmployees,
+  };
+}
+
 function classifyFeeSeverity(gap) {
   if (gap === null || gap === undefined || !Number.isFinite(Number(gap))) return "unknown";
   if (gap <= 0.0001) return "ok";
@@ -1416,7 +1469,8 @@ function FeesTab({ rows, isAggregateScope = false }) {
   );
 }
 
-function AccumulationTab({ rows }) {
+function AccumulationTab({ rows, isAggregateScope = false }) {
+  const insights = useMemo(() => buildAccumulationInsights(rows), [rows]);
   const byBucket = useMemo(
     () =>
       aggregateRows(rows, (row) => getAccumulationBucket(row.currentBalance)).sort((a, b) => {
@@ -1431,11 +1485,11 @@ function AccumulationTab({ rows }) {
     [rows]
   );
 
-  const totalAccumulation = rows.reduce((sum, row) => sum + safeNumber(row.currentBalance), 0);
+  const totalAccumulation = insights.totalAccumulation;
   const balances = rows.map((row) => row.currentBalance);
   const averageBalance = average(balances);
   const medianBalance = median(balances);
-  const activeRows = rows.filter((row) => safeNumber(row.currentBalance) > 0);
+  const activeRows = insights.activeRows;
 
   return (
     <section className="educationTabPanel">
@@ -1444,12 +1498,39 @@ function AccumulationTab({ rows }) {
         <KpiCard label="ממוצע לשורה" value={formatCurrency(averageBalance)} />
         <KpiCard label="חציון לשורה" value={formatCurrency(medianBalance)} />
         <KpiCard label="שורות עם צבירה" value={`${formatNumber(activeRows.length)} / ${formatNumber(rows.length)}`} />
+        <KpiCard label="עובדים ללא צבירה" value={formatNumber(insights.zeroBalanceEmployees.length)} />
+        <KpiCard label="ריכוזיות TOP 5" value={`${insights.concentrationRate}%`} />
       </div>
 
       <section className="workspaceCard">
-        <h3>טבלה מסכמת — צבירה לפי מדרגות</h3>
+        <h3>ניתוח צבירה — תמונת מנהלים</h3>
         <p className="hint">
-          הטבלה מסכמת את הפיזור לפי מדרגות צבירה. היא לא מציגה רשימת קופות בודדות ולכן לא אמורה להכפיל שורות בגלל ריבוי מסלולים או מוצרים לעובד.
+          המטרה כאן היא לזהות איפה יושב הכסף בפועל: מדרגות צבירה, ריכוזיות אצל עובדים גדולים, עובדים ללא צבירה וגופים מנהלים שמרכזים את עיקר התיק.
+        </p>
+
+        <div className="educationInsightTiles">
+          <article>
+            <strong>{formatCurrency(insights.topFiveAccumulation)}</strong>
+            <span>צבירת חמש השורות הגדולות</span>
+            <small>{insights.concentrationRate}% מכלל הצבירה בחוצץ הנוכחי</small>
+          </article>
+          <article>
+            <strong>{formatNumber(insights.highBalanceRows.length)}</strong>
+            <span>שורות מעל 250K</span>
+            <small>מוקד טוב לבדיקה פרטנית של מסלול ודמי ניהול</small>
+          </article>
+          <article>
+            <strong>{formatNumber(insights.zeroBalanceRows.length)}</strong>
+            <span>שורות עם צבירה אפסית</span>
+            <small>כדאי לבדוק האם אלה קופות לא פעילות או בעיית קליטה</small>
+          </article>
+        </div>
+      </section>
+
+      <section className="workspaceCard">
+        <h3>צבירה לפי מדרגות</h3>
+        <p className="hint">
+          התצוגה מסכמת את הפיזור לפי מדרגות צבירה. היא לא מציגה רשימת קופות בודדות ולכן לא אמורה להכפיל שורות בגלל ריבוי מסלולים או מוצרים לעובד.
         </p>
 
         <div className="educationBucketGrid">
@@ -1550,6 +1631,52 @@ function AccumulationTab({ rows }) {
           </table>
         </div>
       </section>
+
+      {!isAggregateScope && (
+        <section className="workspaceCard">
+          <h3>עובדים / קופות עם הצבירה הגבוהה ביותר</h3>
+          <p className="hint">
+            הפירוט הפרטני מוצג רק בבחירת מנהל הסדר יחיד, כדי לא לערבב מזהים בין טעינות שונות. זה המקום שממנו בודקים עובדים משמעותיים לפני מעבר למסלולים ודמי ניהול.
+          </p>
+          <div className="tableScroll">
+            <table className="miniTable productRowsTable">
+              <thead>
+                <tr>
+                  <th>לקוח / עובד</th>
+                  <th>מספר עובד</th>
+                  <th>גוף מנהל</th>
+                  <th>מסלול</th>
+                  <th>צבירה</th>
+                  <th>הפקדה / פרמיה אחרונה</th>
+                  <th>דמי ניהול</th>
+                </tr>
+              </thead>
+              <tbody>
+                {insights.sortedByBalance.slice(0, 15).map((row, index) => (
+                  <tr key={`${row.rowKey || row.policyNumber || "balance"}-${index}`}>
+                    <td>{row.clientName || row.idNumber || "-"}</td>
+                    <td>{row.employeeCode || "-"}</td>
+                    <td>{row.issuerOriginal || row.issuer || row.manager || "-"}</td>
+                    <td>{row.investmentTrack || row.investmentTrackRewards || row.investmentTrackCompensation || "-"}</td>
+                    <td>{formatCurrency(row.currentBalance)}</td>
+                    <td>{formatCurrency(row.monthlyDeposit)}</td>
+                    <td>{formatPercent(row.accumulationFee)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      {isAggregateScope && (
+        <section className="workspaceCard">
+          <h3>פירוט פרטני מוסתר במבט אגרגטיבי</h3>
+          <p className="hint">
+            בבחירה של כל מנהלי ההסדר מוצגים רק נתונים מסכמים. רשימת העובדים והקופות עם הצבירה הגבוהה ביותר מוצגת לאחר בחירת מנהל הסדר יחיד.
+          </p>
+        </section>
+      )}
     </section>
   );
 }
@@ -1975,7 +2102,7 @@ export default function EducationFundAnalysisView({ analysisData }) {
       <EducationTabs activeTab={activeTab} onChange={setActiveTab} />
 
       {activeTab === "fees" && <FeesTab rows={analysisRows} isAggregateScope={isAggregateScope} />}
-      {activeTab === "accumulation" && <AccumulationTab rows={analysisRows} />}
+      {activeTab === "accumulation" && <AccumulationTab rows={analysisRows} isAggregateScope={isAggregateScope} />}
       {activeTab === "tracksByAge" && <TracksByAgeTab rows={analysisRows} isAggregateScope={isAggregateScope} />}
       {activeTab === "managers" && <ManagersTab rows={analysisRows} />}
       {activeTab === "errors" && <ErrorsTab rows={selectedRows} isAggregateScope={isAggregateScope} />}

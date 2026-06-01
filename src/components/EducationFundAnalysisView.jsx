@@ -1,753 +1,2231 @@
-// Path: src/components/ExecutiveInsuranceAnalysisView.jsx
-// v69 — Executive insurance product home adds data-quality/errors control tab
-// Scope: product page similar to Pension/Education, with focused controls:
-// 1) דמי ניהול with separate summary/detail tables per policy period
-// 2) צבירות with chart + table
-// 3) יצרנים / חברות ביטוח
-// Period model: before 2004, 2004-2013, 2013+ without coefficient.
+// Path: src/components/EducationFundAnalysisView.jsx
+// CORE HARDENING v38
+// Education Fund Analysis View — קרן השתלמות
+//
+// Tabs:
+// 1. דמי ניהול מול קובץ הסכמים
+// 2. ניתוח לפי צבירה
+// 3. מסלולי השקעה לפי גיל לקוח
+// 4. צבירות לפי מנהלי השקעות
+// 5. עובדים עם שגיאות לפי מס עובד
+//
+// Notes:
+// - This component is presentation/analysis only.
+// - It does not mutate upload/session state.
+// - It expects education fund rows from analysisData.productResults.hishtalmut.
+// - Personal details are optional. If birth date is unavailable, age analysis falls back gracefully.
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 
-const TABS = {
-  HOME: "home",
-  FEES: "fees",
-  ACCUMULATION: "accumulation",
-  ISSUERS: "issuers",
-  ERRORS: "errors",
-};
-
-const PERIOD_LABELS = {
-  before2004: "לפני 2004",
-  from2004To2013: "2004-2013",
-  from2013NoCoefficient: "2013 והלאה ללא מקדם",
-  unknown: "לא זוהתה תקופה",
-};
+const EDUCATION_TABS = [
+  { key: "kpi", title: "KPI", icon: "▣" },
+  { key: "fees", title: "דמי ניהול", icon: "₪" },
+  { key: "accumulation", title: "צבירות", icon: "▤" },
+  { key: "tracksByAge", title: "מסלול השקעה מול גיל", icon: "◈" },
+  { key: "managers", title: "גופים מנהלים", icon: "▦" },
+  { key: "errors", title: "שגיאות", icon: "◎" },
+];
 
 function asArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
-function toNumber(value) {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string") {
-    const normalized = value.replace(/,/g, "").replace(/%/g, "").replace(/₪/g, "").trim();
-    const parsed = Number(normalized);
-    return Number.isFinite(parsed) ? parsed : 0;
-  }
-  return 0;
-}
+function formatCurrency(value) {
+  const number = Number(value || 0);
 
-function fmtNumber(value) {
-  return new Intl.NumberFormat("he-IL", { maximumFractionDigits: 0 }).format(toNumber(value));
-}
-
-function fmtMoney(value) {
   return new Intl.NumberFormat("he-IL", {
     style: "currency",
     currency: "ILS",
     maximumFractionDigits: 0,
-  }).format(toNumber(value));
+  }).format(number);
 }
 
-function fmtPct(value) {
-  if (value === null || value === undefined || value === "") return "—";
-  return `${new Intl.NumberFormat("he-IL", { maximumFractionDigits: 2 }).format(toNumber(value))}%`;
+function formatNumber(value) {
+  return new Intl.NumberFormat("he-IL", {
+    maximumFractionDigits: 0,
+  }).format(Number(value || 0));
+}
+
+function formatPercent(value, digits = 2) {
+  if (value === null || value === undefined || value === "") return "-";
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "-";
+  return `${number.toFixed(digits)}%`;
 }
 
 function normalizeText(value) {
-  return String(value || "").trim();
+  return String(value ?? "")
+    .replace(/[\u00A0\u200E\u200F]/g, " ")
+    .replace(/[״"]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
+
+function safeNumber(value) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (value === null || value === undefined || value === "") return 0;
+
+  const cleaned = String(value)
+    .replace(/[₪,\s]/g, "")
+    .replace(/[^\d.-]/g, "");
+
+  const parsed = Number(cleaned);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 
 function firstDefined(...values) {
-  return values.find((value) => value !== undefined && value !== null && value !== "");
+  return values.find((value) => value !== null && value !== undefined && value !== "");
 }
 
-function getExecutiveRows(analysisData) {
-  const productResult = analysisData?.productResults?.executiveInsurance || analysisData;
-  return [
-    ...asArray(productResult?.executiveInsuranceRows),
-    ...asArray(productResult?.unifiedRows),
-    ...asArray(productResult?.rawRows),
-    ...asArray(productResult?.managerResults).flatMap((result) =>
-      asArray(result?.executiveInsuranceRows || result?.unifiedRows || result?.rawRows)
-    ),
-  ].filter(Boolean);
-}
+function normalizeEducationRow(row, index = 0, source = "unknown") {
+  const raw = row?.rawProductRow || row?.raw || {};
 
-function dedupeRows(rows) {
-  const seen = new Set();
-  return rows.filter((row, index) => {
-    const key = [
-      normalizeText(row.employeeCode || row.idNumber || row.memberName),
-      normalizeText(row.policyId || row.policyNumber),
-      normalizeText(row.issuer || row.issuerOriginal),
-      normalizeText(row.sourceRowNumber),
-      index,
-    ].join("|");
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-}
+  const currentBalance = safeNumber(firstDefined(
+    row?.currentBalance,
+    row?.accumulation,
+    row?.balance,
+    row?.totalAccumulation,
+    raw?.currentBalance,
+    raw?.accumulation,
+    raw?.balance
+  ));
 
-function getPeriodKey(row) {
-  return row?.agreementPeriod || row?.executiveInsurancePeriod || row?.periodKey || "unknown";
-}
+  const monthlyDeposit = safeNumber(firstDefined(
+    row?.monthlyDeposit,
+    row?.lastPremium,
+    row?.premium,
+    row?.deposit,
+    raw?.monthlyDeposit,
+    raw?.lastPremium,
+    raw?.premium,
+    raw?.deposit
+  ));
 
-function getPeriodLabel(rowOrKey) {
-  const key = typeof rowOrKey === "string" ? rowOrKey : getPeriodKey(rowOrKey);
-  return PERIOD_LABELS[key] || PERIOD_LABELS.unknown;
-}
-
-function getIssuer(row) {
-  return normalizeText(firstDefined(row?.issuer, row?.companyName, row?.issuerOriginal)) || "לא ידוע";
-}
-
-function getAccumulation(row) {
-  return toNumber(firstDefined(row?.totalAccumulation, row?.accumulation, row?.currentBalance));
-}
-
-function getEmployeeLabel(row) {
-  return normalizeText(firstDefined(row?.memberName, row?.employeeCode, row?.idNumber, row?.policyNumber)) || "—";
-}
-function getIssueLabel(row) {
-  if (row?.feeIssue) return normalizeText(row.feeIssue);
-  if (row?.feeIssueCode === "missingAgreement") return "לא נמצא הסכם מתאים לתקופה / חברת ביטוח";
-  if (row?.feeIssueCode === "missingData") return "חסר נתון דמי ניהול בדוח היועץ";
-  if (row?.feeStatus !== "תקין") return "דמי הניהול בפועל אינם תואמים להסכם";
-  if (!row?.insuranceStartYear) return "חסרה שנת תחילת ביטוח";
-  if (getPeriodKey(row) === "unknown") return "לא זוהתה תקופת פוליסה";
-  return "—";
-}
-
-function getRowsWithIssues(rows) {
-  return rows.filter((row) => {
-    if (row.feeStatus !== "תקין") return true;
-    if (!row.insuranceStartYear) return true;
-    if (getPeriodKey(row) === "unknown") return true;
-    return false;
-  });
-}
-
-
-function makeEmptyGroup(label) {
   return {
-    label,
-    count: 0,
-    accumulation: 0,
-    premiumFeeSum: 0,
-    premiumFeeCount: 0,
-    accumulationFeeSum: 0,
-    accumulationFeeCount: 0,
-    ok: 0,
-    notOk: 0,
-    missingAgreement: 0,
-    missingData: 0,
+    ...row,
+    sourceFallback: source,
+    rowKey: row?.rowKey || `${source}-${row?.policyNumber || row?.fundName || row?.employeeCode || index}`,
+    productType: row?.productType || raw?.productType || "hishtalmut",
+    productLabel: row?.productLabel || raw?.productLabel || "קרן השתלמות",
+
+    issuer: firstDefined(row?.issuer, row?.issuerOriginal, row?.manager, raw?.issuer, raw?.issuerOriginal, raw?.manager, ""),
+    issuerOriginal: firstDefined(row?.issuerOriginal, row?.issuer, row?.manager, raw?.issuerOriginal, raw?.issuer, raw?.manager, ""),
+    manager: firstDefined(row?.manager, row?.issuerOriginal, row?.issuer, raw?.manager, raw?.issuerOriginal, raw?.issuer, ""),
+
+    employeeCode: firstDefined(row?.employeeCode, raw?.employeeCode, ""),
+    idNumber: firstDefined(row?.idNumber, raw?.idNumber, ""),
+    memberKey: firstDefined(row?.memberKey, row?.employeeCode, row?.idNumber, raw?.employeeCode, raw?.idNumber, ""),
+    clientName: firstDefined(row?.clientName, raw?.clientName, ""),
+
+    policyNumber: firstDefined(row?.policyNumber, raw?.policyNumber, ""),
+    fundName: firstDefined(row?.fundName, row?.productName, raw?.fundName, raw?.productName, ""),
+    productName: firstDefined(row?.productName, row?.fundName, raw?.productName, raw?.fundName, "קרן השתלמות"),
+
+    investmentTrack: firstDefined(row?.investmentTrack, row?.investmentTrackRewards, row?.investmentTrackCompensation, raw?.investmentTrack, raw?.investmentTrackRewards, raw?.investmentTrackCompensation, ""),
+    investmentTrackRewards: firstDefined(row?.investmentTrackRewards, raw?.investmentTrackRewards, ""),
+    investmentTrackCompensation: firstDefined(row?.investmentTrackCompensation, raw?.investmentTrackCompensation, ""),
+
+    currentBalance,
+    accumulation: currentBalance,
+    monthlyDeposit,
+    lastPremium: monthlyDeposit,
+
+    accumulationFee: firstDefined(row?.accumulationFee, raw?.accumulationFee, null),
+    accumulationFeeAgreement: firstDefined(row?.accumulationFeeAgreement, raw?.accumulationFeeAgreement, null),
+    feeStatus: firstDefined(row?.feeStatus, row?.calculatedFeeStatus, raw?.feeStatus, "unknown"),
+    agreementMatched: Boolean(firstDefined(row?.agreementMatched, raw?.agreementMatched, false)),
+
+    birthDate: firstDefined(row?.birthDate, row?.dateOfBirth, row?.memberBirthDate, raw?.birthDate, raw?.dateOfBirth, raw?.memberBirthDate, null),
+    rawProductRow: raw && Object.keys(raw).length ? raw : row,
   };
 }
 
-function addRowToGroup(group, row) {
-  group.count += 1;
-  group.accumulation += getAccumulation(row);
-  if (row.actualPremiumFeePercent !== null && row.actualPremiumFeePercent !== undefined) {
-    group.premiumFeeSum += toNumber(row.actualPremiumFeePercent);
-    group.premiumFeeCount += 1;
-  }
-  if (row.actualAccumulationFeePercent !== null && row.actualAccumulationFeePercent !== undefined) {
-    group.accumulationFeeSum += toNumber(row.actualAccumulationFeePercent);
-    group.accumulationFeeCount += 1;
-  }
-  if (row.feeStatus === "תקין") group.ok += 1;
-  else group.notOk += 1;
-  if (row.feeIssueCode === "missingAgreement") group.missingAgreement += 1;
-  if (row.feeIssueCode === "missingData") group.missingData += 1;
+function normalizeEducationRows(rows, source) {
+  return asArray(rows)
+    .filter(Boolean)
+    .map((row, index) => normalizeEducationRow(row, index, source));
 }
 
-function groupBy(rows, getKey, getLabel) {
+function getEducationFundData(analysisData) {
+  const productResults = analysisData?.productResults || {};
+  const productResult =
+    productResults.hishtalmut ||
+    productResults.educationFund ||
+    productResults[analysisData?.activeProductMode] ||
+    (analysisData?.productMode === "hishtalmut" || analysisData?.productType === "hishtalmut" ? analysisData : null) ||
+    {};
+
+  const managerRows = asArray(productResult.managerResults).flatMap((managerResult, managerIndex) => {
+    const managerMeta =
+      managerResult?.manager ||
+      managerResult?.uploadManager ||
+      asArray(productResult?.diagnostics?.managers)[managerIndex] ||
+      asArray(analysisData?.productDiagnostics?.hishtalmut?.managers)[managerIndex] ||
+      {};
+
+    const managerId =
+      managerResult?.managerId ||
+      managerResult?.arrangementManagerId ||
+      managerMeta?.id ||
+      `education-manager-${managerIndex + 1}`;
+
+    const managerName =
+      managerResult?.managerName ||
+      managerResult?.arrangementManagerName ||
+      managerMeta?.name ||
+      `מנהל הסדר ${managerIndex + 1}`;
+
+    const managerSource = `managerResults.${managerIndex}`;
+    const scopedRows = [
+      ...normalizeEducationRows(managerResult.unifiedRows, `${managerSource}.unifiedRows`),
+      ...normalizeEducationRows(managerResult.educationFundRows, `${managerSource}.educationFundRows`),
+      ...normalizeEducationRows(managerResult.rawRows, `${managerSource}.rawRows`),
+      ...normalizeEducationRows(managerResult.rowsRaw, `${managerSource}.rowsRaw`),
+      ...normalizeEducationRows(managerResult.educationFundRowsRaw, `${managerSource}.educationFundRowsRaw`),
+    ];
+
+    return scopedRows.map((row) => ({
+      ...row,
+      managerId: row.managerId || managerId,
+      arrangementManagerId: row.arrangementManagerId || managerId,
+      uploadManagerName: row.uploadManagerName || managerName,
+      arrangementManagerName: row.arrangementManagerName || managerName,
+      arrangementManager: row.arrangementManager || managerName,
+      sourceFileName: row.sourceFileName || managerMeta?.files?.dataFile || managerResult?.sourceFileName || "",
+    }));
+  });
+
+  const directRows = managerRows.length
+    ? []
+    : [
+        ...normalizeEducationRows(productResult.unifiedRows, "productResult.unifiedRows"),
+        ...normalizeEducationRows(productResult.educationFundRows, "productResult.educationFundRows"),
+        ...normalizeEducationRows(analysisData?.educationFundRows, "analysisData.educationFundRows"),
+      ];
+
+  const fallbackRows = managerRows.length || directRows.length
+    ? []
+    : [
+        ...normalizeEducationRows(productResult.rawRows, "productResult.rawRows"),
+        ...normalizeEducationRows(productResult.rowsRaw, "productResult.rowsRaw"),
+        ...normalizeEducationRows(productResult.educationFundRowsRaw, "productResult.educationFundRowsRaw"),
+        ...normalizeEducationRows(analysisData?.rawRows, "analysisData.rawRows"),
+      ];
+
+  const rows = managerRows.length ? managerRows : directRows.length ? directRows : fallbackRows;
+
+  const calculatedSummary = {
+    unifiedRowCount: rows.length,
+    totalAccumulation: rows.reduce((sum, row) => sum + safeNumber(row.currentBalance), 0),
+    totalMonthlyDeposits: rows.reduce((sum, row) => sum + safeNumber(row.monthlyDeposit), 0),
+    issuerCount: new Set(rows.map((row) => row.issuerOriginal || row.issuer).filter(Boolean)).size,
+  };
+
+  const summary = {
+    ...(productResult.productSummary || {}),
+    ...(productResult.educationFundSummary || {}),
+    ...(productResult.summary || {}),
+    ...(analysisData?.educationFundSummary || {}),
+    ...(analysisData?.productSummary || {}),
+    // Calculated summary must be last. Some combined summaries can legally miss counters
+    // or keep zero values before rows are normalized, but the UI should reflect the rows
+    // that are actually available to this component.
+    ...calculatedSummary,
+  };
+
+  let warnings = [
+    ...asArray(productResult?.diagnostics?.warnings),
+    ...asArray(productResult?.warnings),
+  ];
+
+  if (rows.length) {
+    warnings = warnings.filter((message) => {
+      const text = normalizeText(message);
+      return !(text.includes("לא זוהו שורות") || text.includes("לא נמצאו שורות"));
+    });
+  }
+
+  if (!directRows.length && fallbackRows.length) {
+    warnings.push("הניתוח משתמש בנתוני rawRows כגיבוי כי unifiedRows לא נמצאו בתוצאת קרן ההשתלמות.");
+  }
+
+  if (!rows.length) {
+    warnings.push("לא נמצאו שורות קרן השתלמות לניתוח. יש לבדוק שהועלה קובץ נתונים למוצר קרן השתלמות ולא רק קובץ הסכמים.");
+  }
+
+  return {
+    productResult,
+    rows,
+    summary,
+    warnings: [...new Set(warnings.filter(Boolean))],
+  };
+}
+
+function getArrangementManagerKey(row) {
+  return (
+    normalizeText(row.arrangementManagerId) ||
+    normalizeText(row.managerId) ||
+    normalizeText(row.uploadManagerName) ||
+    normalizeText(row.arrangementManagerName) ||
+    normalizeText(row.arrangementManager) ||
+    "unknown_manager"
+  );
+}
+
+function getArrangementManagerName(row) {
+  return (
+    normalizeText(row.arrangementManagerName) ||
+    normalizeText(row.uploadManagerName) ||
+    normalizeText(row.arrangementManager) ||
+    normalizeText(row.managerName) ||
+    "מנהל הסדר לא ידוע"
+  );
+}
+
+function buildArrangementManagerOptions(rows) {
   const map = new Map();
+
   rows.forEach((row) => {
-    const key = normalizeText(getKey(row)) || "unknown";
-    const label = getLabel ? getLabel(row, key) : key;
-    const item = map.get(key) || makeEmptyGroup(label);
-    addRowToGroup(item, row);
-    map.set(key, item);
+    const key = getArrangementManagerKey(row);
+    const name = getArrangementManagerName(row);
+    const current = map.get(key) || {
+      key,
+      name,
+      rowCount: 0,
+      totalAccumulation: 0,
+      totalMonthlyDeposits: 0,
+      sourceFiles: new Set(),
+    };
+
+    current.rowCount += 1;
+    current.totalAccumulation += safeNumber(row.currentBalance);
+    current.totalMonthlyDeposits += safeNumber(row.monthlyDeposit);
+    if (row.sourceFileName) current.sourceFiles.add(row.sourceFileName);
+    map.set(key, current);
   });
-  return [...map.values()].sort((a, b) => b.accumulation - a.accumulation || b.count - a.count);
+
+  return Array.from(map.values())
+    .map((manager) => ({
+      ...manager,
+      sourceFiles: Array.from(manager.sourceFiles),
+    }))
+    .sort((a, b) => b.totalAccumulation - a.totalAccumulation);
 }
 
-function groupByIssuer(rows) {
-  return groupBy(rows, getIssuer, (row) => getIssuer(row));
-}
+function ManagerScopeSelector({ options, selectedKey, onChange }) {
+  if (!options.length) {
+    return null;
+  }
 
-function groupByPeriod(rows) {
-  const preferredOrder = ["before2004", "from2004To2013", "from2013NoCoefficient", "unknown"];
-  const map = new Map(preferredOrder.map((key) => [key, makeEmptyGroup(PERIOD_LABELS[key])]));
-  rows.forEach((row) => {
-    const key = getPeriodKey(row);
-    const item = map.get(key) || makeEmptyGroup(getPeriodLabel(key));
-    addRowToGroup(item, row);
-    map.set(key, item);
-  });
-  return [...map.entries()]
-    .filter(([, item]) => item.count > 0)
-    .sort((a, b) => preferredOrder.indexOf(a[0]) - preferredOrder.indexOf(b[0]))
-    .map(([, item]) => item);
-}
+  const totalAccumulation = options.reduce((sum, option) => sum + safeNumber(option.totalAccumulation), 0);
+  const totalRows = options.reduce((sum, option) => sum + Number(option.rowCount || 0), 0);
+  const selectedOption = options.find((option) => option.key === selectedKey) || options[0];
+  const isSpecificMode = selectedKey !== "all";
 
-
-function getPeriodSections(rows) {
-  const preferredOrder = ["before2004", "from2004To2013", "from2013NoCoefficient", "unknown"];
-  return preferredOrder
-    .map((key) => {
-      const periodRows = rows.filter((row) => getPeriodKey(row) === key);
-      const summary = groupByPeriod(periodRows)[0] || makeEmptyGroup(PERIOD_LABELS[key]);
-      return { key, label: PERIOD_LABELS[key], rows: periodRows, summary };
-    })
-    .filter((section) => section.rows.length > 0);
-}
-
-function KpiCard({ label, value, subtext, tone = "blue", onClick }) {
-  const Tag = onClick ? "button" : "article";
-  return (
-    <Tag type={onClick ? "button" : undefined} className={`productKpiCard ${tone} ${onClick ? "clickable" : ""}`} onClick={onClick}>
-      <span>{label}</span>
-      <strong>{value}</strong>
-      {subtext && <small>{subtext}</small>}
-    </Tag>
-  );
-}
-
-function MiniBar({ value, max, label }) {
-  const width = max ? Math.max((toNumber(value) / max) * 100, value ? 5 : 0) : 0;
-  return (
-    <div className="issuerBarTrack" aria-label={label}>
-      <div className="issuerBarFill" style={{ width: `${width}%` }} />
-    </div>
-  );
-}
-
-function ProductHome({ rows, onOpenTab }) {
-  const issuers = groupByIssuer(rows);
-  const periods = groupByPeriod(rows);
-  const okRows = rows.filter((row) => row.feeStatus === "תקין");
-  const issueRows = getRowsWithIssues(rows);
-  const totalAccumulation = rows.reduce((sum, row) => sum + getAccumulation(row), 0);
-  const notOkRows = rows.length - okRows.length;
+  const handleSpecificMode = () => {
+    onChange(selectedOption?.key || options[0]?.key || "all");
+  };
 
   return (
-    <section className="productAnalysisPanel executiveProductHome">
-      <div className="productSectionHeader">
+    <section className="workspaceCard educationManagerScopeCard">
+      <div className="educationScopeHeaderRow">
         <div>
-          <p className="eyebrow">Product Home</p>
-          <h3>בית מוצר — ביטוח מנהלים</h3>
-          <p>מכאן יוצאים לבקרות. המבנה נשאר זהה לשאר המוצרים: תמונת מצב, ואז בקרות לפי לשוניות.</p>
+          <h3>בחירת מנהל הסדר</h3>
+          <p className="hint">
+            בדומה למסך הפנסיה, קודם בוחרים אם מנתחים את כל מנהלי ההסדר יחד או מנהל הסדר ספציפי, ורק לאחר מכן החוצצים והגרפים מסתננים בהתאם.
+          </p>
+        </div>
+        <div className="educationScopeCurrentBadge">
+          {isSpecificMode ? selectedOption?.name || "מנהל הסדר" : "כל מנהלי ההסדר"}
         </div>
       </div>
 
-      <div className="productKpiGrid four">
-        <KpiCard label="פוליסות" value={fmtNumber(rows.length)} subtext="שורות ביטוח מנהלים" tone="blue" />
-        <KpiCard label="חברות ביטוח" value={fmtNumber(issuers.length)} subtext="יצרנים מזוהים" tone="gold" />
-        <KpiCard label="צבירה כוללת" value={fmtMoney(totalAccumulation)} subtext="ערך פדיון כולל" tone="blue" />
-        <KpiCard label="לא תקין בדמי ניהול" value={fmtNumber(notOkRows)} subtext="לבדיקה מול הסכם" tone={notOkRows ? "red" : "green"} />
-        <KpiCard label="פערי מידע" value={fmtNumber(issueRows.length)} subtext="חסר הסכם / חסר נתון / תקופה לא מזוהה" tone={issueRows.length ? "red" : "green"} onClick={() => onOpenTab(TABS.ERRORS)} />
-      </div>
+      <div className="educationScopeModeBar" dir="rtl" aria-label="מצב תצוגת מנהל הסדר">
+        <button
+          type="button"
+          className={selectedKey === "all" ? "active" : ""}
+          onClick={() => onChange("all")}
+        >
+          <strong>כל מנהלי ההסדר</strong>
+          <span>{formatCurrency(totalAccumulation)} · {totalRows} שורות</span>
+        </button>
 
-      <div className="productControlGrid">
-        <button type="button" className="productControlCard" onClick={() => onOpenTab(TABS.FEES)}>
-          <span className="productPortalStatus">בקרה</span>
-          <strong>דמי ניהול</strong>
-          <small>בדיקה תקין / לא תקין לפי חברת ביטוח ולפי תקופת פוליסה.</small>
-        </button>
-        <button type="button" className="productControlCard" onClick={() => onOpenTab(TABS.ACCUMULATION)}>
-          <span className="productPortalStatus">ניתוח</span>
-          <strong>צבירות</strong>
-          <small>גרף וטבלה מסכמת לפי תקופות וחברות ביטוח.</small>
-        </button>
-        <button type="button" className="productControlCard" onClick={() => onOpenTab(TABS.ISSUERS)}>
-          <span className="productPortalStatus">ניתוח</span>
-          <strong>יצרנים / חברות ביטוח</strong>
-          <small>פילוח פוליסות וצבירה לפי יצרן.</small>
-        </button>
-        <button type="button" className="productControlCard" onClick={() => onOpenTab(TABS.ERRORS)}>
-          <span className="productPortalStatus">בקרת מידע</span>
-          <strong>שגיאות / פערי מידע</strong>
-          <small>ריכוז פוליסות שחסרה להן תקופה, הסכם או נתון דמי ניהול.</small>
+        <button
+          type="button"
+          className={isSpecificMode ? "active" : ""}
+          onClick={handleSpecificMode}
+        >
+          <strong>מנהל הסדר ספציפי</strong>
+          <span>{selectedOption?.name || "בחר מנהל הסדר"}</span>
         </button>
       </div>
 
-      <div className="productTableWrap compactTable">
-        <table className="productTable">
-          <thead>
-            <tr>
-              <th>תקופת ביטוח מנהלים</th>
-              <th>פוליסות</th>
-              <th>צבירה</th>
-              <th>תקין</th>
-              <th>לא תקין</th>
-              <th>פרמיה ממוצעת</th>
-              <th>צבירה ממוצעת</th>
-            </tr>
-          </thead>
-          <tbody>
-            {periods.map((item) => (
-              <tr key={item.label}>
-                <td><strong>{item.label}</strong></td>
-                <td>{fmtNumber(item.count)}</td>
-                <td>{fmtMoney(item.accumulation)}</td>
-                <td>{fmtNumber(item.ok)}</td>
-                <td>{fmtNumber(item.notOk)}</td>
-                <td>{fmtPct(item.premiumFeeCount ? item.premiumFeeSum / item.premiumFeeCount : null)}</td>
-                <td>{fmtPct(item.accumulationFeeCount ? item.accumulationFeeSum / item.accumulationFeeCount : null)}</td>
-              </tr>
+      {isSpecificMode && (
+        <div className="educationManagerSpecificSelector">
+          <label htmlFor="education-manager-scope-select">מנהל הסדר לניתוח</label>
+          <select
+            id="education-manager-scope-select"
+            value={selectedOption?.key || ""}
+            onChange={(event) => onChange(event.target.value)}
+          >
+            {options.map((option) => (
+              <option key={option.key} value={option.key}>
+                {option.name} — {formatCurrency(option.totalAccumulation)} · {option.rowCount} שורות
+              </option>
             ))}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  );
-}
-
-function PeriodFeeTable({ section }) {
-  const periodRows = section.rows;
-  const okRows = periodRows.filter((row) => row.feeStatus === "תקין");
-  const notOkRows = periodRows.filter((row) => row.feeStatus !== "תקין");
-  const issuerSummary = groupByIssuer(periodRows);
-  const detailRows = periodRows.slice(0, 80);
-
-  return (
-    <article className="periodFeeBlock">
-      <div className="periodFeeHeader">
-        <div>
-          <p className="eyebrow">Period Fee Control</p>
-          <h4>{section.label}</h4>
-          <p>בדיקה עצמאית לתקופת הפוליסות הזו בלבד, מול מבנה דמי הניהול הרלוונטי בדוח ההסכמים.</p>
+          </select>
         </div>
-        <div className="periodFeeStats">
-          <span className="statusPill ok">תקין: {fmtNumber(okRows.length)}</span>
-          <span className="statusPill bad">לא תקין: {fmtNumber(notOkRows.length)}</span>
-        </div>
-      </div>
-
-      <div className="productTableWrap compactTable">
-        <table className="productTable">
-          <thead>
-            <tr>
-              <th>חברת ביטוח</th>
-              <th>פוליסות</th>
-              <th>תקין</th>
-              <th>לא תקין</th>
-              <th>חסר הסכם</th>
-              <th>חסר נתון</th>
-              <th>צבירה</th>
-              <th>דמי ניהול מפרמיה ממוצע</th>
-              <th>דמי ניהול מצבירה ממוצע</th>
-            </tr>
-          </thead>
-          <tbody>
-            {issuerSummary.map((item) => (
-              <tr key={`${section.key}-${item.label}`}>
-                <td><strong>{item.label}</strong></td>
-                <td>{fmtNumber(item.count)}</td>
-                <td>{fmtNumber(item.ok)}</td>
-                <td>{fmtNumber(item.notOk)}</td>
-                <td>{fmtNumber(item.missingAgreement)}</td>
-                <td>{fmtNumber(item.missingData)}</td>
-                <td>{fmtMoney(item.accumulation)}</td>
-                <td>{fmtPct(item.premiumFeeCount ? item.premiumFeeSum / item.premiumFeeCount : null)}</td>
-                <td>{fmtPct(item.accumulationFeeCount ? item.accumulationFeeSum / item.accumulationFeeCount : null)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      <div className="productTableWrap">
-        <table className="productTable">
-          <thead>
-            <tr>
-              <th>סטטוס</th>
-              <th>עובד / פוליסה</th>
-              <th>חברת ביטוח</th>
-              <th>שנת תחילה</th>
-              <th>פרמיה בפועל</th>
-              <th>פרמיה הסכם</th>
-              <th>צבירה בפועל</th>
-              <th>צבירה הסכם</th>
-              <th>צבירה ₪</th>
-              <th>הערה</th>
-            </tr>
-          </thead>
-          <tbody>
-            {detailRows.map((row, index) => (
-              <tr key={`${section.key}-${row.policyId || row.policyNumber || index}-${index}`}>
-                <td><span className={`statusPill ${row.feeStatus === "תקין" ? "ok" : "bad"}`}>{row.feeStatus || "לא תקין"}</span></td>
-                <td>{getEmployeeLabel(row)}</td>
-                <td>{getIssuer(row)}</td>
-                <td>{row.insuranceStartYear || "—"}</td>
-                <td>{fmtPct(row.actualPremiumFeePercent)}</td>
-                <td>{fmtPct(row.agreementPremiumFeePercent)}</td>
-                <td>{fmtPct(row.actualAccumulationFeePercent)}</td>
-                <td>{fmtPct(row.agreementAccumulationFeePercent)}</td>
-                <td>{fmtMoney(getAccumulation(row))}</td>
-                <td>{row.feeIssue || "—"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </article>
-  );
-}
-
-function FeesTab({ rows }) {
-  const okRows = rows.filter((row) => row.feeStatus === "תקין");
-  const notOkRows = rows.filter((row) => row.feeStatus !== "תקין");
-  const periodSections = getPeriodSections(rows);
-
-  return (
-    <section className="productAnalysisPanel">
-      <div className="productSectionHeader">
-        <div>
-          <p className="eyebrow">Management Fees Control</p>
-          <h3>בקרת דמי ניהול</h3>
-          <p>הבקרה מופרדת לפי תקופות ביטוח מנהלים. לכל תקופה מוצגת טבלת בדיקה עצמאית, כי מבנה דמי הניהול שונה בין התקופות.</p>
-        </div>
-      </div>
-
-      <div className="productKpiGrid four">
-        <KpiCard label="תקין" value={fmtNumber(okRows.length)} subtext="שורות שעומדות בהסכם" tone="green" />
-        <KpiCard label="לא תקין" value={fmtNumber(notOkRows.length)} subtext="חריגה / חסר הסכם / חסר נתון" tone="red" />
-        <KpiCard label="אחוז תקינות" value={`${rows.length ? Math.round((okRows.length / rows.length) * 100) : 0}%`} subtext="מתוך כלל הפוליסות" tone="gold" />
-        <KpiCard label="תקופות פעילות" value={fmtNumber(periodSections.length)} subtext="טבלה נפרדת לכל תקופה" tone="blue" />
-      </div>
-
-      <div className="periodFeeGrid">
-        {periodSections.map((section) => (
-          <PeriodFeeTable key={section.key} section={section} />
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function AccumulationTab({ rows }) {
-  const byIssuer = groupByIssuer(rows);
-  const byPeriod = groupByPeriod(rows);
-  const maxIssuerAccumulation = Math.max(...byIssuer.map((item) => item.accumulation), 1);
-  const maxPeriodAccumulation = Math.max(...byPeriod.map((item) => item.accumulation), 1);
-
-  return (
-    <section className="productAnalysisPanel">
-      <div className="productSectionHeader">
-        <div>
-          <p className="eyebrow">Accumulation Analysis</p>
-          <h3>ניתוח צבירות</h3>
-          <p>גרף וטבלה כדי לראות איפה יושבת הצבירה של ביטוחי המנהלים.</p>
-        </div>
-      </div>
-
-      <div className="issuerBarsList">
-        {byIssuer.map((item) => (
-          <article className="issuerBarCard" key={item.label}>
-            <div className="issuerBarTop">
-              <strong>{item.label}</strong>
-              <span>{fmtNumber(item.count)} פוליסות · {fmtMoney(item.accumulation)}</span>
-            </div>
-            <MiniBar value={item.accumulation} max={maxIssuerAccumulation} label={item.label} />
-            <small>תקין: {fmtNumber(item.ok)} · לא תקין: {fmtNumber(item.notOk)}</small>
-          </article>
-        ))}
-      </div>
-
-      <div className="productTableWrap compactTable">
-        <table className="productTable">
-          <thead>
-            <tr>
-              <th>תקופה</th>
-              <th>פוליסות</th>
-              <th>צבירה</th>
-              <th>חלק יחסי</th>
-              <th>תקין</th>
-              <th>לא תקין</th>
-            </tr>
-          </thead>
-          <tbody>
-            {byPeriod.map((item) => {
-              const total = byPeriod.reduce((sum, period) => sum + period.accumulation, 0);
-              return (
-                <tr key={item.label}>
-                  <td><strong>{item.label}</strong></td>
-                  <td>{fmtNumber(item.count)}</td>
-                  <td>{fmtMoney(item.accumulation)}</td>
-                  <td>
-                    <MiniBar value={item.accumulation} max={maxPeriodAccumulation} label={item.label} />
-                    <small>{fmtPct(total ? (item.accumulation / total) * 100 : 0)}</small>
-                  </td>
-                  <td>{fmtNumber(item.ok)}</td>
-                  <td>{fmtNumber(item.notOk)}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-
-      <div className="productTableWrap compactTable">
-        <table className="productTable">
-          <thead>
-            <tr>
-              <th>חברת ביטוח</th>
-              <th>פוליסות</th>
-              <th>צבירה</th>
-              <th>צבירה ממוצעת לפוליסה</th>
-              <th>תקין בדמי ניהול</th>
-              <th>לא תקין בדמי ניהול</th>
-            </tr>
-          </thead>
-          <tbody>
-            {byIssuer.map((item) => (
-              <tr key={item.label}>
-                <td><strong>{item.label}</strong></td>
-                <td>{fmtNumber(item.count)}</td>
-                <td>{fmtMoney(item.accumulation)}</td>
-                <td>{fmtMoney(item.count ? item.accumulation / item.count : 0)}</td>
-                <td>{fmtNumber(item.ok)}</td>
-                <td>{fmtNumber(item.notOk)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  );
-}
-
-function IssuersTab({ rows }) {
-  const issuers = groupByIssuer(rows);
-  const maxCount = Math.max(...issuers.map((item) => item.count), 1);
-
-  return (
-    <section className="productAnalysisPanel">
-      <div className="productSectionHeader">
-        <div>
-          <p className="eyebrow">Insurance Companies</p>
-          <h3>ניתוח לפי יצרנים / חברות ביטוח</h3>
-          <p>חלוקה של פוליסות, צבירה וסטטוס דמי ניהול לפי חברת הביטוח.</p>
-        </div>
-      </div>
-
-      <div className="issuerBarsList">
-        {issuers.map((item) => (
-          <article className="issuerBarCard" key={item.label}>
-            <div className="issuerBarTop">
-              <strong>{item.label}</strong>
-              <span>{fmtNumber(item.count)} פוליסות · {fmtMoney(item.accumulation)}</span>
-            </div>
-            <MiniBar value={item.count} max={maxCount} label={item.label} />
-            <small>תקין: {fmtNumber(item.ok)} · לא תקין: {fmtNumber(item.notOk)}</small>
-          </article>
-        ))}
-      </div>
-
-      <div className="productTableWrap compactTable">
-        <table className="productTable">
-          <thead>
-            <tr>
-              <th>חברת ביטוח</th>
-              <th>פוליסות</th>
-              <th>צבירה</th>
-              <th>צבירה ממוצעת</th>
-              <th>תקין</th>
-              <th>לא תקין</th>
-              <th>דמי ניהול מפרמיה ממוצע</th>
-              <th>דמי ניהול מצבירה ממוצע</th>
-            </tr>
-          </thead>
-          <tbody>
-            {issuers.map((item) => (
-              <tr key={item.label}>
-                <td><strong>{item.label}</strong></td>
-                <td>{fmtNumber(item.count)}</td>
-                <td>{fmtMoney(item.accumulation)}</td>
-                <td>{fmtMoney(item.count ? item.accumulation / item.count : 0)}</td>
-                <td>{fmtNumber(item.ok)}</td>
-                <td>{fmtNumber(item.notOk)}</td>
-                <td>{fmtPct(item.premiumFeeCount ? item.premiumFeeSum / item.premiumFeeCount : null)}</td>
-                <td>{fmtPct(item.accumulationFeeCount ? item.accumulationFeeSum / item.accumulationFeeCount : null)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  );
-}
-
-
-function ErrorsTab({ rows }) {
-  const issueRows = getRowsWithIssues(rows);
-  const byPeriod = groupByPeriod(issueRows);
-  const byIssuer = groupByIssuer(issueRows);
-  const missingAgreement = issueRows.filter((row) => row.feeIssueCode === "missingAgreement").length;
-  const missingData = issueRows.filter((row) => row.feeIssueCode === "missingData").length;
-  const unknownPeriod = issueRows.filter((row) => getPeriodKey(row) === "unknown" || !row.insuranceStartYear).length;
-  const detailRows = issueRows.slice(0, 120);
-
-  return (
-    <section className="productAnalysisPanel executiveErrorsTab">
-      <div className="productSectionHeader">
-        <div>
-          <p className="eyebrow">Data Quality Control</p>
-          <h3>שגיאות / פערי מידע</h3>
-          <p>ריכוז הפוליסות שלא ניתן לאשר בצורה נקייה: חסר הסכם, חסר נתון בדוח היועץ, או תקופת פוליסה שלא זוהתה.</p>
-        </div>
-      </div>
-
-      <div className="productKpiGrid four">
-        <KpiCard label="פערים לבדיקה" value={fmtNumber(issueRows.length)} subtext="פוליסות עם בעיה" tone={issueRows.length ? "red" : "green"} />
-        <KpiCard label="חסר הסכם" value={fmtNumber(missingAgreement)} subtext="אין התאמה להסכם" tone={missingAgreement ? "red" : "green"} />
-        <KpiCard label="חסר נתון" value={fmtNumber(missingData)} subtext="דמי ניהול חסרים" tone={missingData ? "red" : "green"} />
-        <KpiCard label="תקופה לא מזוהה" value={fmtNumber(unknownPeriod)} subtext="שנת תחילה / מקדם" tone={unknownPeriod ? "red" : "green"} />
-      </div>
-
-      {issueRows.length === 0 ? (
-        <div className="emptyStateCard">
-          <strong>לא נמצאו פערי מידע בביטוח מנהלים.</strong>
-          <small>כל הפוליסות שזוהו עברו שיוך תקופה ובדיקת דמי ניהול תקינה.</small>
-        </div>
-      ) : (
-        <>
-          <div className="productTableWrap compactTable">
-            <table className="productTable">
-              <thead>
-                <tr>
-                  <th>תקופה</th>
-                  <th>פוליסות עם פער</th>
-                  <th>חסר הסכם</th>
-                  <th>חסר נתון</th>
-                  <th>צבירה מושפעת</th>
-                </tr>
-              </thead>
-              <tbody>
-                {byPeriod.map((item) => (
-                  <tr key={item.label}>
-                    <td><strong>{item.label}</strong></td>
-                    <td>{fmtNumber(item.count)}</td>
-                    <td>{fmtNumber(item.missingAgreement)}</td>
-                    <td>{fmtNumber(item.missingData)}</td>
-                    <td>{fmtMoney(item.accumulation)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="productTableWrap compactTable">
-            <table className="productTable">
-              <thead>
-                <tr>
-                  <th>חברת ביטוח</th>
-                  <th>פוליסות עם פער</th>
-                  <th>חסר הסכם</th>
-                  <th>חסר נתון</th>
-                  <th>צבירה מושפעת</th>
-                </tr>
-              </thead>
-              <tbody>
-                {byIssuer.map((item) => (
-                  <tr key={item.label}>
-                    <td><strong>{item.label}</strong></td>
-                    <td>{fmtNumber(item.count)}</td>
-                    <td>{fmtNumber(item.missingAgreement)}</td>
-                    <td>{fmtNumber(item.missingData)}</td>
-                    <td>{fmtMoney(item.accumulation)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="productTableWrap">
-            <table className="productTable">
-              <thead>
-                <tr>
-                  <th>עובד / פוליסה</th>
-                  <th>חברת ביטוח</th>
-                  <th>תקופה</th>
-                  <th>שנת תחילה</th>
-                  <th>סטטוס דמי ניהול</th>
-                  <th>פרמיה בפועל</th>
-                  <th>פרמיה הסכם</th>
-                  <th>צבירה בפועל</th>
-                  <th>צבירה הסכם</th>
-                  <th>סיבת הפער</th>
-                </tr>
-              </thead>
-              <tbody>
-                {detailRows.map((row, index) => (
-                  <tr key={`${row.policyId || row.policyNumber || row.employeeCode || index}-${index}`}>
-                    <td>{getEmployeeLabel(row)}</td>
-                    <td>{getIssuer(row)}</td>
-                    <td>{getPeriodLabel(row)}</td>
-                    <td>{row.insuranceStartYear || "—"}</td>
-                    <td><span className={`statusPill ${row.feeStatus === "תקין" ? "ok" : "bad"}`}>{row.feeStatus || "לא תקין"}</span></td>
-                    <td>{fmtPct(row.actualPremiumFeePercent)}</td>
-                    <td>{fmtPct(row.agreementPremiumFeePercent)}</td>
-                    <td>{fmtPct(row.actualAccumulationFeePercent)}</td>
-                    <td>{fmtPct(row.agreementAccumulationFeePercent)}</td>
-                    <td>{getIssueLabel(row)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </>
       )}
     </section>
   );
 }
 
-export default function ExecutiveInsuranceAnalysisView({ analysisData }) {
-  const rows = useMemo(() => dedupeRows(getExecutiveRows(analysisData)), [analysisData]);
-  const [activeTab, setActiveTab] = useState(TABS.HOME);
+function getEmployeeErrorKey(row) {
+  return normalizeText(row.employeeCode) || normalizeText(row.idNumber) || normalizeText(row.memberKey) || normalizeText(row.clientName);
+}
 
-  const issuers = groupByIssuer(rows);
-  const periods = groupByPeriod(rows);
-  const okRows = rows.filter((row) => row.feeStatus === "תקין");
-  const issueRows = getRowsWithIssues(rows);
-  const totalAccumulation = rows.reduce((sum, row) => sum + getAccumulation(row), 0);
+function getMemberKey(row) {
+  return getEmployeeErrorKey(row);
+}
+
+function parseDateValue(value) {
+  if (!value) return null;
+
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    // Excel serial date rough conversion.
+    const excelEpoch = new Date(Date.UTC(1899, 11, 30));
+    const date = new Date(excelEpoch.getTime() + value * 86400000);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  const text = normalizeText(value);
+  if (!text) return null;
+
+  const iso = new Date(text);
+  if (!Number.isNaN(iso.getTime())) return iso;
+
+  const ddmmyyyy = text.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})$/);
+  if (ddmmyyyy) {
+    const day = Number(ddmmyyyy[1]);
+    const month = Number(ddmmyyyy[2]) - 1;
+    const year = Number(ddmmyyyy[3].length === 2 ? `19${ddmmyyyy[3]}` : ddmmyyyy[3]);
+    const date = new Date(year, month, day);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  return null;
+}
+
+function calculateAge(value) {
+  const birthDate = parseDateValue(value);
+  if (!birthDate) return null;
+
+  const today = new Date();
+  let age = today.getFullYear() - birthDate.getFullYear();
+  const monthDelta = today.getMonth() - birthDate.getMonth();
+
+  if (monthDelta < 0 || (monthDelta === 0 && today.getDate() < birthDate.getDate())) {
+    age -= 1;
+  }
+
+  if (age < 0 || age > 120) return null;
+  return age;
+}
+
+function extractBirthDateFromRow(row) {
+  // For education fund, age analysis must be based on the personal-details file,
+  // not on the product file. Parser v33 enriches row.personalDetails by employeeCode/idNumber.
+  return (
+    row.personalDetails?.birthDate ||
+    row.personalDetails?.birthYear ||
+    row.birthDate ||
+    row.dateOfBirth ||
+    row.memberBirthDate ||
+    null
+  );
+}
+
+function getAgeBucket(age) {
+  if (age === null || age === undefined) return "לא ידוע";
+  if (age < 30) return "עד גיל 30";
+  if (age < 40) return "30–39";
+  if (age < 50) return "40–49";
+  if (age < 60) return "50–59";
+  return "60+";
+}
+
+function classifyTrackRisk(trackName) {
+  const text = normalizeText(trackName);
+
+  if (!text) return "לא ידוע";
+
+  if (/מניית|מניות|s&p|s\s*and\s*p|sp500|נאסדק|nasdaq|100%|מחקה מדד|מדדי מניות/i.test(text)) {
+    return "גבוה";
+  }
+
+  if (/אג"ח|אגח|שקלי|כספי|סולידי|פנסיונרים|קצר/i.test(text)) {
+    return "נמוך";
+  }
+
+  if (/כללי|לבני|גילאי|50|60|מסלול כללי|ברירת מחדל/i.test(text)) {
+    return "בינוני";
+  }
+
+  return "בינוני";
+}
+
+function classifyAgeDesignatedTrack(trackName) {
+  const text = normalizeText(trackName);
+  if (!text) {
+    return { type: "unknown", label: "לא זוהה", minAge: null, maxAge: null };
+  }
+
+  if (/60\s*(ומעלה|\+|פלוס)|לבני\s*60|גילאי\s*60|בני\s*60/i.test(text)) {
+    return { type: "ageDesignated", label: "מיועד לגיל 60+", minAge: 60, maxAge: null };
+  }
+
+  if (/50\s*[-–]\s*60|50\s*(עד|\/)\s*60|לבני\s*50\s*(עד|[-–])\s*60|גילאי\s*50\s*(עד|[-–])\s*60/i.test(text)) {
+    return { type: "ageDesignated", label: "מיועד לגיל 50–60", minAge: 50, maxAge: 60 };
+  }
+
+  if (/(עד|מתחת|פחות מ|קטן מ)\s*50|50\s*(ומטה|ומטה)|לבני\s*50\s*(ומטה|ומטה)|גילאי\s*עד\s*50/i.test(text)) {
+    return { type: "ageDesignated", label: "מיועד עד גיל 50", minAge: null, maxAge: 50 };
+  }
+
+  if (/כללי|ברירת מחדל|מסלול כללי/i.test(text)) {
+    return { type: "general", label: "מסלול כללי", minAge: null, maxAge: null };
+  }
+
+  return { type: "riskOnly", label: "ללא יעד גיל מפורש", minAge: null, maxAge: null };
+}
+
+function getSuggestedRiskByAge(age) {
+  if (age === null || age === undefined) return "לא ידוע";
+  if (age < 50) return "עד גיל 50 / בינוני-גבוה";
+  if (age < 60) return "גילאי 50–60 / בינוני";
+  return "60+ / נמוך-בינוני";
+}
+
+function getAgeRuleLabel(age) {
+  if (age === null || age === undefined) return "לא ידוע";
+  if (age < 50) return "עד גיל 50";
+  if (age < 60) return "גילאי 50–60";
+  return "גיל 60+";
+}
+
+function checkTrackAgeFit(age, trackRisk, trackName = "") {
+  const suggested = getSuggestedRiskByAge(age);
+  const ageTrack = classifyAgeDesignatedTrack(trackName);
+
+  if (age === null || age === undefined || !normalizeText(trackName)) {
+    return {
+      status: "unknown",
+      label: "חסר גיל / מסלול",
+      explanation: "לא ניתן לבדוק התאמת מסלול ללא גיל מקובץ פרטים אישיים או ללא שם מסלול השקעה.",
+      suggested,
+      ageRuleLabel: getAgeRuleLabel(age),
+      ageTrackLabel: ageTrack.label,
+    };
+  }
+
+  if (ageTrack.type === "ageDesignated") {
+    const belowMin = ageTrack.minAge !== null && age < ageTrack.minAge;
+    const aboveMax = ageTrack.maxAge !== null && age >= ageTrack.maxAge;
+
+    if (belowMin || aboveMax) {
+      return {
+        status: "review",
+        label: "לא תואם גיל",
+        explanation: `המסלול ${ageTrack.label}, בעוד שהעובד נמצא בקבוצת ${getAgeRuleLabel(age)}. יש לבדוק העברה למסלול גיל מתאים או אישור בחירה מודעת.`,
+        suggested,
+        ageRuleLabel: getAgeRuleLabel(age),
+        ageTrackLabel: ageTrack.label,
+      };
+    }
+
+    return {
+      status: "ok",
+      label: "תואם גיל",
+      explanation: `המסלול ${ageTrack.label} ותואם לקבוצת הגיל של העובד.`,
+      suggested,
+      ageRuleLabel: getAgeRuleLabel(age),
+      ageTrackLabel: ageTrack.label,
+    };
+  }
+
+  if (age < 50 && trackRisk === "נמוך") {
+    return {
+      status: "review",
+      label: "סולידי לצעיר",
+      explanation: "עובד מתחת לגיל 50 במסלול סולידי/כספי. לא בהכרח שגיאה, אבל דורש בדיקת התאמה לאופק השקעה ארוך.",
+      suggested,
+      ageRuleLabel: getAgeRuleLabel(age),
+      ageTrackLabel: ageTrack.label,
+    };
+  }
+
+  if (age >= 60 && trackRisk === "גבוה") {
+    return {
+      status: "review",
+      label: "מנייתי לגיל 60+",
+      explanation: "עובד בגיל 60 ומעלה במסלול בעל סיכון גבוה. יש לבדוק התאמה לאופק, סיבולת סיכון וצורך בנזילות.",
+      suggested,
+      ageRuleLabel: getAgeRuleLabel(age),
+      ageTrackLabel: ageTrack.label,
+    };
+  }
+
+  return {
+    status: "ok",
+    label: ageTrack.type === "general" ? "כללי / לבדיקה פרטנית" : "נראה סביר",
+    explanation: ageTrack.type === "general"
+      ? "מסלול כללי אינו מסלול גיל מפורש. הוא לא מסומן כחריגה, אבל מומלץ לבדוק אם קיימת מדיניות לקוח למסלול תלוי גיל."
+      : "לא זוהתה חריגה ברורה בין גיל העובד לבין מאפייני המסלול.",
+    suggested,
+    ageRuleLabel: getAgeRuleLabel(age),
+    ageTrackLabel: ageTrack.label,
+  };
+}
+
+function groupBy(rows, keyFn) {
+  const map = new Map();
+
+  rows.forEach((row) => {
+    const key = keyFn(row) || "לא ידוע";
+    const current = map.get(key) || [];
+    current.push(row);
+    map.set(key, current);
+  });
+
+  return Array.from(map.entries()).map(([key, items]) => ({
+    key,
+    rows: items,
+  }));
+}
+
+function aggregateRows(rows, keyFn) {
+  return groupBy(rows, keyFn)
+    .map((group) => {
+      const totalAccumulation = group.rows.reduce((sum, row) => sum + safeNumber(row.currentBalance), 0);
+      const totalMonthlyDeposits = group.rows.reduce((sum, row) => sum + safeNumber(row.monthlyDeposit), 0);
+      const averageAccumulationFee = weightedAverage(group.rows, "accumulationFee", "currentBalance");
+      const agreementMatched = group.rows.filter((row) => row.agreementMatched).length;
+      const feeWarnings = group.rows.filter((row) => row.feeStatus === "warning").length;
+
+      return {
+        key: group.key,
+        rowCount: group.rows.length,
+        totalAccumulation,
+        totalMonthlyDeposits,
+        averageAccumulationFee,
+        agreementMatched,
+        feeWarnings,
+        rows: group.rows,
+      };
+    })
+    .sort((a, b) => b.totalAccumulation - a.totalAccumulation);
+}
+
+function weightedAverage(rows, valueField, weightField) {
+  let weightedSum = 0;
+  let weightSum = 0;
+
+  rows.forEach((row) => {
+    const value = row[valueField];
+    const weight = safeNumber(row[weightField]);
+
+    if (value === null || value === undefined || value === "") return;
+
+    const numericValue = Number(value);
+    if (!Number.isFinite(numericValue)) return;
+
+    weightedSum += numericValue * weight;
+    weightSum += weight;
+  });
+
+  if (!weightSum) return null;
+  return Number((weightedSum / weightSum).toFixed(4));
+}
+
+function average(values) {
+  const numericValues = values.map(safeNumber).filter((value) => Number.isFinite(value));
+  if (!numericValues.length) return 0;
+  return numericValues.reduce((sum, value) => sum + value, 0) / numericValues.length;
+}
+
+function median(values) {
+  const numericValues = values
+    .map(safeNumber)
+    .filter((value) => Number.isFinite(value))
+    .sort((a, b) => a - b);
+
+  if (!numericValues.length) return 0;
+
+  const middle = Math.floor(numericValues.length / 2);
+  if (numericValues.length % 2) return numericValues[middle];
+  return (numericValues[middle - 1] + numericValues[middle]) / 2;
+}
+
+function getAccumulationBucket(value) {
+  const amount = safeNumber(value);
+
+  if (amount < 50000) return "עד 50K";
+  if (amount < 100000) return "50K–100K";
+  if (amount < 250000) return "100K–250K";
+  if (amount < 500000) return "250K–500K";
+  return "500K+";
+}
+
+function buildAccumulationInsights(rows) {
+  const normalizedRows = asArray(rows);
+  const totalAccumulation = normalizedRows.reduce((sum, row) => sum + safeNumber(row.currentBalance), 0);
+  const activeRows = normalizedRows.filter((row) => safeNumber(row.currentBalance) > 0);
+  const zeroBalanceRows = normalizedRows.filter((row) => safeNumber(row.currentBalance) <= 0);
+  const highBalanceRows = normalizedRows.filter((row) => safeNumber(row.currentBalance) >= 250000);
+  const sortedByBalance = [...activeRows].sort((a, b) => safeNumber(b.currentBalance) - safeNumber(a.currentBalance));
+  const topFiveRows = sortedByBalance.slice(0, 5);
+  const topFiveAccumulation = topFiveRows.reduce((sum, row) => sum + safeNumber(row.currentBalance), 0);
+  const concentrationRate = totalAccumulation ? Math.round((topFiveAccumulation / totalAccumulation) * 100) : 0;
+
+  const employeeMap = new Map();
+  normalizedRows.forEach((row, index) => {
+    const key = getMemberKey(row) || `${row.policyNumber || row.fundName || "row"}-${index}`;
+    const current = employeeMap.get(key) || {
+      key,
+      clientName: row.clientName || "",
+      employeeCode: row.employeeCode || "",
+      idNumber: row.idNumber || "",
+      rowCount: 0,
+      totalAccumulation: 0,
+      totalMonthlyDeposits: 0,
+      issuers: new Set(),
+      tracks: new Set(),
+    };
+
+    current.rowCount += 1;
+    current.totalAccumulation += safeNumber(row.currentBalance);
+    current.totalMonthlyDeposits += safeNumber(row.monthlyDeposit);
+    if (normalizeText(row.issuerOriginal || row.issuer || row.manager)) current.issuers.add(normalizeText(row.issuerOriginal || row.issuer || row.manager));
+    if (normalizeText(row.investmentTrack || row.investmentTrackRewards || row.investmentTrackCompensation)) current.tracks.add(normalizeText(row.investmentTrack || row.investmentTrackRewards || row.investmentTrackCompensation));
+    employeeMap.set(key, current);
+  });
+
+  const employees = Array.from(employeeMap.values()).sort((a, b) => b.totalAccumulation - a.totalAccumulation);
+  const zeroBalanceEmployees = employees.filter((employee) => employee.totalAccumulation <= 0);
+  const topEmployees = employees.slice(0, 10);
+
+  return {
+    totalAccumulation,
+    activeRows,
+    zeroBalanceRows,
+    highBalanceRows,
+    sortedByBalance,
+    topFiveRows,
+    topFiveAccumulation,
+    concentrationRate,
+    employees,
+    zeroBalanceEmployees,
+    topEmployees,
+  };
+}
+
+function classifyFeeSeverity(gap) {
+  if (gap === null || gap === undefined || !Number.isFinite(Number(gap))) return "unknown";
+  if (gap <= 0.0001) return "ok";
+  if (gap > 0.1) return "exception";
+  return "warning";
+}
+
+function getCalculatedFeeStatus(gap) {
+  if (gap === null || gap === undefined || !Number.isFinite(Number(gap))) return "unknown";
+  if (gap <= 0.0001) return "ok";
+  if (gap <= 0.1) return "warning";
+  return "exception";
+}
+
+function getFeeSeverityLabel(severity) {
+  if (severity === "exception") return "חריגה";
+  if (severity === "warning") return "חריגה קלה";
+  if (severity === "ok") return "תקין";
+  return "חסר מידע";
+}
+
+function estimateAnnualFeeGapCost(row, gap) {
+  const balance = safeNumber(row.currentBalance);
+  const numericGap = Number(gap);
+  if (!balance || !Number.isFinite(numericGap) || numericGap <= 0) return 0;
+  // Fee values are stored as percentage points, for example 0.6 means 0.6%.
+  return Math.round(balance * (numericGap / 100));
+}
+
+function buildFeeAnalysis(rows) {
+  const enriched = rows.map((row) => {
+    const actualFee = row.accumulationFee;
+    const agreementFee = row.accumulationFeeAgreement;
+    const actualFeeExists = isPresentNumber(actualFee);
+    const agreementFeeExists = isPresentNumber(agreementFee);
+    const gap =
+      !actualFeeExists || !agreementFeeExists
+        ? null
+        : Number((Number(actualFee) - Number(agreementFee)).toFixed(4));
+
+    let status = getCalculatedFeeStatus(gap);
+    if (row.feeStatus === "ok" && gap !== null && gap <= 0.0001) status = "ok";
+    if (row.feeStatus === "warning" && status !== "exception") status = "warning";
+
+    const severity = classifyFeeSeverity(gap);
+    const annualGapCost = estimateAnnualFeeGapCost(row, gap);
+
+    return {
+      ...row,
+      calculatedFeeGap: gap,
+      calculatedFeeStatus: status,
+      calculatedFeeSeverity: severity,
+      estimatedAnnualFeeGapCost: annualGapCost,
+    };
+  });
+
+  const okRows = enriched.filter((row) => row.calculatedFeeStatus === "ok");
+  const warningRows = enriched.filter((row) => row.calculatedFeeStatus === "warning");
+  const exceptionRows = enriched.filter((row) => row.calculatedFeeStatus === "exception");
+  const exceptionAndWarningRows = enriched.filter((row) => row.calculatedFeeStatus === "warning" || row.calculatedFeeStatus === "exception");
+  const unknownRows = enriched.filter((row) => row.calculatedFeeStatus === "unknown");
+  const totalAnnualGapCost = exceptionAndWarningRows.reduce((sum, row) => sum + safeNumber(row.estimatedAnnualFeeGapCost), 0);
+  const criticalRows = exceptionRows;
+  const highRows = exceptionRows;
+
+  return {
+    rows: enriched,
+    warningRows,
+    exceptionRows,
+    exceptionAndWarningRows,
+    okRows,
+    unknownRows,
+    criticalRows,
+    highRows,
+    okCount: okRows.length,
+    warningCount: warningRows.length,
+    exceptionCount: exceptionRows.length,
+    totalNonCompliantCount: exceptionAndWarningRows.length,
+    unknownCount: unknownRows.length,
+    criticalCount: criticalRows.length,
+    highCount: highRows.length,
+    totalAnnualGapCost,
+    agreementCoverage: rows.length ? Math.round(((okRows.length + warningRows.length) / rows.length) * 100) : 0,
+  };
+}
+
+
+function isPresentNumber(value) {
+  if (value === null || value === undefined || value === "") return false;
+  const number = Number(value);
+  return Number.isFinite(number);
+}
+
+function getFeeDisplayStatus(status) {
+  if (status === "ok") return "תקין";
+  if (status === "warning") return "חריגה קלה";
+  if (status === "exception") return "חריגה";
+  return "חסר מידע";
+}
+
+function buildFeeCompanyChart(rows) {
+  const analysis = buildFeeAnalysis(rows);
+  const map = new Map();
+
+  analysis.rows.forEach((row, index) => {
+    const issuer = normalizeText(row.issuerOriginal || row.issuer || row.manager || "לא ידוע");
+    const actualFeeExists = isPresentNumber(row.accumulationFee);
+    const agreementFeeExists = isPresentNumber(row.accumulationFeeAgreement);
+    const memberKey = getMemberKey(row) || `${row.policyNumber || row.fundName || "row"}-${index}`;
+
+    const current = map.get(issuer) || {
+      issuer,
+      okMembers: new Set(),
+      warningMembers: new Set(),
+      exceptionMembers: new Set(),
+      unknownMembers: new Set(),
+      validFeeRows: 0,
+      rowCount: 0,
+      totalAccumulation: 0,
+    };
+
+    current.rowCount += 1;
+    current.totalAccumulation += safeNumber(row.currentBalance);
+
+    if (actualFeeExists && agreementFeeExists) {
+      current.validFeeRows += 1;
+      if (row.calculatedFeeStatus === "exception") current.exceptionMembers.add(memberKey);
+      else if (row.calculatedFeeStatus === "warning") current.warningMembers.add(memberKey);
+      else current.okMembers.add(memberKey);
+    } else {
+      current.unknownMembers.add(memberKey);
+    }
+
+    map.set(issuer, current);
+  });
+
+  return Array.from(map.values())
+    .map((item) => ({
+      issuer: item.issuer,
+      okCount: item.okMembers.size,
+      warningCount: item.warningMembers.size,
+      exceptionCount: item.exceptionMembers.size,
+      nonCompliantCount: item.warningMembers.size + item.exceptionMembers.size,
+      unknownCount: item.unknownMembers.size,
+      validFeeRows: item.validFeeRows,
+      rowCount: item.rowCount,
+      totalAccumulation: item.totalAccumulation,
+    }))
+    .sort((a, b) => b.nonCompliantCount - a.nonCompliantCount || b.exceptionCount - a.exceptionCount || b.okCount - a.okCount || b.totalAccumulation - a.totalAccumulation);
+}
+
+function buildFeeStatusMatrix(companyChart) {
+  const issuers = companyChart.map((item) => item.issuer);
+  const totals = companyChart.reduce(
+    (acc, item) => {
+      acc.ok += item.okCount;
+      acc.warning += item.warningCount;
+      acc.exception += item.exceptionCount || 0;
+      acc.unknown += item.unknownCount;
+      return acc;
+    },
+    { ok: 0, warning: 0, exception: 0, unknown: 0 }
+  );
+
+  const rows = [
+    { key: "ok", label: "תקין", className: "ok", total: totals.ok, getValue: (item) => item.okCount },
+    { key: "warning", label: "חריגה קלה", className: "warning", total: totals.warning, getValue: (item) => item.warningCount },
+    { key: "exception", label: "חריגה", className: "exception", total: totals.exception, getValue: (item) => item.exceptionCount || 0 },
+    { key: "unknown", label: "חסר מידע", className: "unknown", total: totals.unknown, getValue: (item) => item.unknownCount },
+  ];
+
+  return { issuers, rows };
+}
+
+function buildFeeDistributionBuckets(feeRows) {
+  const buckets = [
+    { key: "0-0.25", label: "0%–0.25%", min: 0, max: 0.25, count: 0, totalAccumulation: 0 },
+    { key: "0.25-0.5", label: "0.25%–0.50%", min: 0.25, max: 0.5, count: 0, totalAccumulation: 0 },
+    { key: "0.5-0.75", label: "0.50%–0.75%", min: 0.5, max: 0.75, count: 0, totalAccumulation: 0 },
+    { key: "0.75-1", label: "0.75%–1.00%", min: 0.75, max: 1, count: 0, totalAccumulation: 0 },
+    { key: "1+", label: "1.00%+", min: 1, max: Infinity, count: 0, totalAccumulation: 0 },
+  ];
+
+  feeRows.forEach((row) => {
+    if (!isPresentNumber(row.accumulationFee)) return;
+    const fee = Number(row.accumulationFee);
+    const bucket = buckets.find((item) => fee >= item.min && fee < item.max) || buckets[buckets.length - 1];
+    bucket.count += 1;
+    bucket.totalAccumulation += safeNumber(row.currentBalance);
+  });
+
+  return buckets;
+}
+
+function buildFeeExceptionSummary(feeRows) {
+  return aggregateRows(feeRows, (row) => row.issuerOriginal || row.issuer || row.manager || "לא ידוע")
+    .map((manager) => {
+      const warningRows = manager.rows.filter((row) => row.calculatedFeeStatus === "warning" || row.calculatedFeeStatus === "exception");
+      const exceptionRows = manager.rows.filter((row) => row.calculatedFeeStatus === "exception");
+      const maxGap = warningRows.reduce((max, row) => Math.max(max, safeNumber(row.calculatedFeeGap)), 0);
+      const annualCost = warningRows.reduce((sum, row) => sum + safeNumber(row.estimatedAnnualFeeGapCost), 0);
+      const criticalCount = exceptionRows.length;
+      const highCount = exceptionRows.length;
+      const checkedRows = manager.rows.filter((row) => row.calculatedFeeStatus !== "unknown").length;
+      const warningRate = checkedRows ? Math.round((warningRows.length / checkedRows) * 100) : 0;
+
+      return {
+        ...manager,
+        warningRows,
+        warningCount: warningRows.length,
+        checkedRows,
+        warningRate,
+        maxGap,
+        annualCost,
+        criticalCount,
+        highCount,
+      };
+    })
+    .filter((manager) => manager.warningCount > 0)
+    .sort((a, b) => b.annualCost - a.annualCost || b.maxGap - a.maxGap || b.warningCount - a.warningCount);
+}
+
+function buildEducationEmployeeErrors(rows) {
+  const dataset = buildEducationAnalysisDataset(rows);
+  const feeAnalysis = buildFeeAnalysis(dataset.validRows);
+  const ageAnalysis = buildAgeTrackAnalysis(dataset.validRows);
+  const feeByRowKey = new Map(feeAnalysis.rows.map((row) => [row.rowKey, row]));
+  const ageByRowKey = new Map(ageAnalysis.map((row) => [row.rowKey, row]));
+
+  const errors = [];
+
+  dataset.rows.forEach((row, index) => {
+    const feeRow = feeByRowKey.get(row.rowKey) || row;
+    const ageRow = ageByRowKey.get(row.rowKey) || row;
+    const reasons = [...asArray(row.validationErrors)];
+
+    if (row.isValidForAnalysis) {
+      if (feeRow.calculatedFeeStatus === "warning") reasons.push("דמי הניהול בפועל גבוהים מההסכם");
+      if (!row.personalDetailsMatched) reasons.push("לא נמצא עובד תואם בקובץ פרטים אישיים לפי מס עובד/תעודת זהות");
+      if (ageRow.ageTrackStatus === "unknown") reasons.push("חסר גיל מקובץ פרטים אישיים / מסלול השקעה");
+      if (ageRow.ageTrackStatus === "review") reasons.push("מסלול השקעה דורש בדיקת התאמה לגיל");
+    }
+
+    if (!reasons.length) return;
+
+    const isHardInvalid = !row.isValidForAnalysis;
+    errors.push({
+      ...feeRow,
+      ...ageRow,
+      validationErrors: row.validationErrors,
+      isValidForAnalysis: row.isValidForAnalysis,
+      calculatedAge: ageRow.calculatedAge,
+      trackName: ageRow.trackName || row.investmentTrack || row.investmentTrackRewards || row.investmentTrackCompensation || "",
+      ageTrackLabel: ageRow.ageTrackLabel,
+      errorReasons: [...new Set(reasons)],
+      severity: isHardInvalid ? "unknown" : feeRow.calculatedFeeStatus === "warning" || ageRow.ageTrackStatus === "review" ? "warning" : "unknown",
+      sortValue: safeNumber(row.currentBalance),
+      key: `${row.rowKey || row.policyNumber || row.fundName || "err"}-${index}`,
+    });
+  });
+
+  return errors.sort((a, b) => {
+    if (a.isValidForAnalysis !== b.isValidForAnalysis) return a.isValidForAnalysis ? 1 : -1;
+    return b.sortValue - a.sortValue;
+  });
+}
+
+function buildAgeTrackAnalysis(rows) {
+  return rows.map((row) => {
+    const age = calculateAge(extractBirthDateFromRow(row));
+    const trackName = row.investmentTrack || row.investmentTrackRewards || row.investmentTrackCompensation || "";
+    const trackRisk = classifyTrackRisk(trackName);
+    const fit = checkTrackAgeFit(age, trackRisk, trackName);
+
+    return {
+      ...row,
+      calculatedAge: age,
+      ageBucket: getAgeBucket(age),
+      trackName,
+      trackRisk,
+      suggestedRisk: fit.suggested || getSuggestedRiskByAge(age),
+      suggestedAgeRule: fit.ageRuleLabel || getAgeRuleLabel(age),
+      detectedTrackAgeRule: fit.ageTrackLabel || classifyAgeDesignatedTrack(trackName).label,
+      ageTrackStatus: fit.status,
+      ageTrackLabel: fit.label,
+      ageTrackExplanation: fit.explanation,
+      personalDetailsMatched: Boolean(row.personalDetailsMatched || row.personalDetails),
+    };
+  });
+}
+
+
+function getEducationHardValidationReasons(row) {
+  const reasons = [];
+  const trackName = row.investmentTrack || row.investmentTrackRewards || row.investmentTrackCompensation || "";
+
+  if (!getEmployeeErrorKey(row)) reasons.push("חסר מס עובד / תעודת זהות");
+  if (!normalizeText(row.issuerOriginal || row.issuer || row.manager)) reasons.push("חסר שם גוף מנהל / חברת ביטוח");
+  if (!safeNumber(row.currentBalance)) reasons.push("חסרה או מאופסת צבירה");
+  if (!normalizeText(trackName)) reasons.push("חסר מסלול השקעה");
+  if (!isPresentNumber(row.accumulationFee)) reasons.push("חסרים דמי ניהול בפועל");
+  if (!isPresentNumber(row.accumulationFeeAgreement)) reasons.push("חסר הסכם דמי ניהול מתאים");
+
+  return [...new Set(reasons)];
+}
+
+function buildEducationAnalysisDataset(rows) {
+  const normalizedRows = rows.map((row, index) => {
+    const validationErrors = getEducationHardValidationReasons(row);
+    return {
+      ...row,
+      educationAnalysisRowId: row.rowKey || `${row.policyNumber || row.fundName || row.employeeCode || "education"}-${index}`,
+      validationErrors,
+      isValidForAnalysis: validationErrors.length === 0,
+    };
+  });
+
+  const validRows = normalizedRows.filter((row) => row.isValidForAnalysis);
+  const invalidRows = normalizedRows.filter((row) => !row.isValidForAnalysis);
+  const invalidByReason = invalidRows.reduce((map, row) => {
+    row.validationErrors.forEach((reason) => {
+      map.set(reason, (map.get(reason) || 0) + 1);
+    });
+    return map;
+  }, new Map());
+
+  return {
+    rows: normalizedRows,
+    validRows,
+    invalidRows,
+    validCount: validRows.length,
+    invalidCount: invalidRows.length,
+    validationRate: normalizedRows.length ? Math.round((validRows.length / normalizedRows.length) * 100) : 0,
+    invalidByReason: Array.from(invalidByReason.entries())
+      .map(([reason, count]) => ({ reason, count }))
+      .sort((a, b) => b.count - a.count || a.reason.localeCompare(b.reason, "he")),
+  };
+}
+
+function EducationDataQualityCard({ dataset }) {
+  if (!dataset.rows.length) return null;
 
   return (
-    <section className="productAnalysisView executiveInsuranceView" dir="rtl">
-      <header className="productHero compactHero">
+    <section className="workspaceCard educationDataQualityCard">
+      <div className="sectionHeaderRow">
         <div>
-          <p className="eyebrow">Product Analysis</p>
-          <h2>ביטוח מנהלים</h2>
-          <p>מסך מוצר מלא: בית מוצר, דמי ניהול, צבירות ויצרנים. דמי הניהול מחולקים לפי תקופות פוליסה.</p>
+          <h3>איכות נתונים לפני ניתוח</h3>
+          <p className="hint">
+            v46 מפריד בין שורות תקינות שנכנסות לסטטיסטיקות לבין שורות חסרות מידע שמועברות לחוצץ השגיאות. כך הגרפים לא מתעוותים בגלל עובדים בלי מזהה, צבירה, מסלול או דמי ניהול.
+          </p>
+        </div>
+        <span className="educationStatusPill ok">{dataset.validationRate}% תקינות</span>
+      </div>
+
+      <div className="educationKpiGrid compact">
+        <KpiCard label="שורות בטווח הנבחר" value={dataset.rows.length} />
+        <KpiCard label="נכנסות לניתוחים" value={dataset.validCount} />
+        <KpiCard label="הועברו לשגיאות" value={dataset.invalidCount} />
+      </div>
+
+      {dataset.invalidByReason.length > 0 && (
+        <div className="educationValidationReasonGrid">
+          {dataset.invalidByReason.slice(0, 6).map((item) => (
+            <article key={item.reason}>
+              <strong>{item.count}</strong>
+              <span>{item.reason}</span>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function KpiCard({ label, value, hint }) {
+  return (
+    <article className="educationKpiCard">
+      <span>{label}</span>
+      <strong>{value}</strong>
+      {hint && <small>{hint}</small>}
+    </article>
+  );
+}
+
+
+function EducationTabs({ activeTab, onChange }) {
+  return (
+    <div className="educationAnalysisTabs" dir="rtl">
+      {EDUCATION_TABS.map((tab) => (
+        <button
+          key={tab.key}
+          type="button"
+          className={activeTab === tab.key ? "active" : ""}
+          onClick={() => onChange(tab.key)}
+        >
+          <span className="tab-icon">{tab.icon}</span>
+          <span>{tab.title}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function EducationKpiHome({ rows, selectedRows, dataset, scopeLabel, summary, totalAccumulation, totalMonthlyDeposits, issuerCount, onNavigate }) {
+  const feeAnalysis = useMemo(() => buildFeeAnalysis(rows), [rows]);
+  const accumulation = useMemo(() => buildAccumulationAnalysis(rows), [rows]);
+  const companyChart = useMemo(() => buildFeeCompanyChart(rows), [rows]);
+  const validEmployeeCount = companyChart.reduce((sum, item) => sum + item.okCount + item.warningCount + (item.exceptionCount || 0), 0);
+  const nonCompliantCount = feeAnalysis.warningCount + feeAnalysis.exceptionCount;
+  const complianceRate = validEmployeeCount ? Math.round((feeAnalysis.okCount / validEmployeeCount) * 1000) / 10 : 0;
+
+  const kpiCards = [
+    { label: "סה״כ שורות", value: formatNumber(selectedRows.length || summary.unifiedRowCount || 0), tone: "blue", icon: "▧", target: "errors" },
+    { label: "סך צבירה מנוהלת", value: formatCurrency(totalAccumulation || summary.totalAccumulation), tone: "blue", icon: "₪", target: "accumulation" },
+    { label: "שורות תקינות", value: formatNumber(dataset.validCount), tone: "green", icon: "✓", target: "fees" },
+    { label: "שורות לשגיאות", value: formatNumber(dataset.invalidCount), tone: "red", icon: "×", target: "errors" },
+    { label: "% עמידה כללית", value: `${complianceRate}%`, tone: complianceRate >= 90 ? "green" : "red", icon: "%", target: "fees" },
+    { label: "גופים מנהלים", value: formatNumber(issuerCount || summary.issuerCount || 0), tone: "neutral", icon: "▦", target: "managers" },
+    { label: "הפקדה אחרונה", value: formatCurrency(totalMonthlyDeposits || summary.totalMonthlyDeposits), tone: "warning", icon: "↻", target: "accumulation" },
+  ];
+
+  const hubCards = [
+    { id: "fees", title: "דמי ניהול", icon: "₪", text: "בדיקת דמי ניהול בפועל מול קובץ הסכמים, כולל תקין / חריגה קלה / חריגה.", metric: `${complianceRate}% עמידה`, tone: "green" },
+    { id: "accumulation", title: "צבירות", icon: "▤", text: "ניתוח צבירה, עובדים ללא צבירה, ריכוזיות TOP 5 וטבלת קופות מובילות.", metric: formatCurrency(accumulation.totalAccumulation), tone: "blue" },
+    { id: "tracksByAge", title: "מסלול השקעה מול גיל", icon: "◈", text: "בדיקת התאמת מסלול השקעה לגיל העובד מול קובץ פרטים אישיים.", metric: "התאמת גיל", tone: "purple" },
+    { id: "managers", title: "גופים מנהלים", icon: "▦", text: "פיזור צבירה ועובדים לפי גופים מנהלים מתוך קרנות ההשתלמות.", metric: `${formatNumber(issuerCount)} גופים`, tone: "orange" },
+  ];
+
+  return (
+    <section className="education-kpi-home">
+      <div className="kpi-toolbar product-home-toolbar">
+        <div>
+          <h2>מבט KPI כללי</h2>
+          <p>סיכום קרנות השתלמות לכל הדוחות, עם בחירה לפי מנהל הסדר.</p>
+        </div>
+        <strong>{scopeLabel}</strong>
+      </div>
+
+      <div className="educationTopKpiGrid unified-product-kpi-grid">
+        {kpiCards.map((card) => (
+          <button key={card.label} type="button" className={`educationKpiCard product-kpi-card card-${card.tone}`} onClick={() => onNavigate(card.target)}>
+            <span className="product-kpi-icon">{card.icon}</span>
+            <span>{card.label}</span>
+            <strong>{card.value}</strong>
+            <small>לעיון בפרטים ←</small>
+          </button>
+        ))}
+      </div>
+
+      <div className="product-home-title">
+        <div>
+          <h2>ניתוחים מרכזיים</h2>
+          <p>עמוד בית אחיד למוצר. מכאן עוברים לכל ניתוח מפורט.</p>
+        </div>
+      </div>
+
+      <div className="product-analysis-card-grid">
+        {hubCards.map((card) => (
+          <article key={card.id} className={`product-analysis-card tone-${card.tone}`}>
+            <div className="analysis-card-icon">{card.icon}</div>
+            <h3>{card.title}</h3>
+            <p>{card.text}</p>
+            <strong>{card.metric}</strong>
+            <button type="button" onClick={() => onNavigate(card.id)}>לצפייה בניתוח</button>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function FeesTab({ rows, isAggregateScope = false }) {
+  const analysis = useMemo(() => buildFeeAnalysis(rows), [rows]);
+  const companyChart = useMemo(() => buildFeeCompanyChart(rows), [rows]);
+  const exceptionSummary = useMemo(() => buildFeeExceptionSummary(analysis.rows), [analysis.rows]);
+  const feeDistribution = useMemo(() => buildFeeDistributionBuckets(analysis.rows), [analysis.rows]);
+  const maxCount = Math.max(1, ...companyChart.flatMap((item) => [item.okCount, item.warningCount, item.exceptionCount || 0]));
+  const maxDistributionCount = Math.max(1, ...feeDistribution.map((item) => item.count));
+  const validEmployeeCount = companyChart.reduce((sum, item) => sum + item.okCount + item.warningCount + (item.exceptionCount || 0), 0);
+  const nonCompliantCount = analysis.warningCount + analysis.exceptionCount;
+  const complianceRate = validEmployeeCount ? Math.round((analysis.okCount / validEmployeeCount) * 1000) / 10 : 0;
+  const averagePositiveGap = analysis.exceptionAndWarningRows.length ? average(analysis.exceptionAndWarningRows.map((row) => row.calculatedFeeGap)) : 0;
+  const companiesWithWarnings = companyChart.filter((item) => (item.nonCompliantCount || 0) > 0).length;
+  const topWarningRows = analysis.exceptionAndWarningRows
+    .slice()
+    .sort((a, b) => safeNumber(b.estimatedAnnualFeeGapCost) - safeNumber(a.estimatedAnnualFeeGapCost) || safeNumber(b.calculatedFeeGap) - safeNumber(a.calculatedFeeGap))
+    .slice(0, 15);
+
+  return (
+    <section className="educationTabPanel">
+      <div className="educationKpiGrid">
+        <KpiCard label="עובדים תקינים" value={analysis.okCount} hint="בפועל נמוך או שווה להסכם" />
+        <KpiCard label="עובדים לא תקינים" value={nonCompliantCount} hint="חריגה קלה + חריגה" />
+        <KpiCard label="אחוז עמידה" value={`${complianceRate}%`} hint="מתוך שורות שניתן לבדוק" />
+        <KpiCard label="פער ממוצע בחריגה" value={formatPercent(averagePositiveGap, 4)} hint="מעל ההסכם בלבד" />
+        <KpiCard label="עלות חריגה שנתית משוערת" value={formatCurrency(analysis.totalAnnualGapCost)} />
+        <KpiCard label="שורות חסרות מידע" value={analysis.unknownCount} hint="מועברות לחוצץ שגיאות" />
+        <KpiCard label="חברות עם חריגה" value={companiesWithWarnings} />
+      </div>
+
+      <section className="workspaceCard">
+        <div className="sectionHeaderRow">
+          <div>
+            <h3>דמי ניהול לפי חברת ביטוח</h3>
+            <p className="hint">
+              הספירה מתבצעת לפי עובדים/עמיתים עם שורות תקינות לבדיקה: יש דמי ניהול בפועל ויש דמי ניהול לפי הסכם.
+              ציר X מציג חברות ביטוח / גופים מנהלים, וציר Y מציג מספר עובדים תקינים ולא תקינים.
+            </p>
+          </div>
+          <span className="educationStatusPill ok">{validEmployeeCount} עובדים נספרו</span>
+        </div>
+
+        {companyChart.length ? (
+          <div className="educationFeeChartWrap" dir="rtl">
+            <div className="educationFeeChartLegend">
+              <span><i className="ok" /> תקין</span>
+              <span><i className="warning" /> חריגה קלה</span>
+              <span><i className="exception" /> חריגה</span>
+            </div>
+
+            <div className="educationFeeChart">
+              {companyChart.map((item) => {
+                const okHeight = Math.max(6, Math.round((item.okCount / maxCount) * 180));
+                const warningHeight = Math.max(6, Math.round((item.warningCount / maxCount) * 180));
+                const exceptionHeight = Math.max(6, Math.round(((item.exceptionCount || 0) / maxCount) * 180));
+
+                return (
+                  <article key={item.issuer} className="educationFeeChartGroup">
+                    <div className="educationFeeBars" aria-label={`${item.issuer}: ${item.okCount} תקין, ${item.warningCount} חריגה קלה, ${item.exceptionCount || 0} חריגה`}>
+                      <div className="educationFeeBarColumn">
+                        <span>{item.okCount}</span>
+                        <i className="ok" style={{ height: `${okHeight}px` }} />
+                      </div>
+                      <div className="educationFeeBarColumn">
+                        <span>{item.warningCount}</span>
+                        <i className="warning" style={{ height: `${warningHeight}px` }} />
+                      </div>
+                      <div className="educationFeeBarColumn">
+                        <span>{item.exceptionCount || 0}</span>
+                        <i className="exception" style={{ height: `${exceptionHeight}px` }} />
+                      </div>
+                    </div>
+                    <strong title={item.issuer}>{item.issuer}</strong>
+                  </article>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          <p className="hint">אין מספיק נתונים לבניית גרף דמי ניהול לפי חברות.</p>
+        )}
+      </section>
+
+      <section className="workspaceCard">
+        <div className="sectionHeaderRow">
+          <div>
+            <h3>התפלגות דמי ניהול בפועל</h3>
+            <p className="hint">
+              Bucket analysis לפי דמי הניהול שנמצאו בקובץ קרנות ההשתלמות. זה עוזר לראות אם רוב העובדים יושבים בטווח נמוך או שיש ריכוז חריג סביב מדרגות גבוהות.
+            </p>
+          </div>
+          <span className="educationStatusPill ok">{analysis.rows.length - analysis.unknownCount} שורות עם דמי ניהול</span>
+        </div>
+
+        <div className="educationFeeDistribution" dir="rtl">
+          {feeDistribution.map((bucket) => {
+            const height = Math.max(8, Math.round((bucket.count / maxDistributionCount) * 170));
+            return (
+              <article key={bucket.key} className="educationFeeDistributionBucket">
+                <strong>{bucket.count}</strong>
+                <i style={{ height: `${height}px` }} />
+                <span>{bucket.label}</span>
+                <small>{formatCurrency(bucket.totalAccumulation)}</small>
+              </article>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="workspaceCard">
+        <h3>טבלה מסכמת — סטטוס בדיקה לפי חברת ביטוח</h3>
+        <p className="hint">
+          החברות מוצגות בציר האופקי, וסטטוס הבדיקה מוצג בציר האנכי. נוסף גם אחוז חריגה ועלות שנתית משוערת כדי להבין איפה כדאי להתחיל טיפול.
+        </p>
+        <div className="tableScroll">
+          <table className="miniTable productRowsTable">
+            <thead>
+              <tr>
+                <th>סטטוס</th>
+                {buildFeeStatusMatrix(companyChart).issuers.map((issuer) => (
+                  <th key={issuer}>{issuer}</th>
+                ))}
+                <th>סה״כ</th>
+              </tr>
+            </thead>
+            <tbody>
+              {buildFeeStatusMatrix(companyChart).rows.map((statusRow) => (
+                <tr key={statusRow.key}>
+                  <td>
+                    <span className={`educationStatusPill ${statusRow.className}`}>
+                      {statusRow.label}
+                    </span>
+                  </td>
+                  {companyChart.map((item) => (
+                    <td key={`${statusRow.key}-${item.issuer}`}>{statusRow.getValue(item)}</td>
+                  ))}
+                  <td><strong>{statusRow.total}</strong></td>
+                </tr>
+              ))}
+              <tr>
+                <td><strong>אחוז חריגה</strong></td>
+                {companyChart.map((item) => {
+                  const checked = item.okCount + item.warningCount + (item.exceptionCount || 0);
+                  const percent = checked ? Math.round((((item.warningCount || 0) + (item.exceptionCount || 0)) / checked) * 100) : 0;
+                  return <td key={`warning-rate-${item.issuer}`}>{percent}%</td>;
+                })}
+                <td>
+                  {validEmployeeCount ? Math.round((analysis.totalNonCompliantCount / validEmployeeCount) * 100) : 0}%
+                </td>
+              </tr>
+              <tr>
+                <td><strong>עלות חריגה שנתית</strong></td>
+                {companyChart.map((item) => {
+                  const issuerCost = analysis.exceptionAndWarningRows
+                    .filter((row) => normalizeText(row.issuerOriginal || row.issuer || row.manager || "לא ידוע") === item.issuer)
+                    .reduce((sum, row) => sum + safeNumber(row.estimatedAnnualFeeGapCost), 0);
+                  return <td key={`annual-cost-${item.issuer}`}>{formatCurrency(issuerCost)}</td>;
+                })}
+                <td>{formatCurrency(analysis.totalAnnualGapCost)}</td>
+              </tr>
+              <tr>
+                <td><strong>סה״כ צבירה</strong></td>
+                {companyChart.map((item) => (
+                  <td key={`accumulation-${item.issuer}`}>{formatCurrency(item.totalAccumulation)}</td>
+                ))}
+                <td>{formatCurrency(companyChart.reduce((sum, item) => sum + safeNumber(item.totalAccumulation), 0))}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="workspaceCard">
+        <h3>מוקדי חריגה לטיפול</h3>
+        <p className="hint">
+          הטבלה מרכזת רק גופים עם חריגות דמי ניהול, לפי אומדן עלות שנתית. האומדן מחושב כצבירה כפול הפער בין דמי הניהול בפועל לדמי הניהול בהסכם.
+        </p>
+        {exceptionSummary.length ? (
+          <div className="tableScroll">
+            <table className="miniTable productRowsTable">
+              <thead>
+                <tr>
+                  <th>גוף מנהל</th>
+                  <th>שורות שנבדקו</th>
+                  <th>חריגות</th>
+                  <th>אחוז חריגה</th>
+                  <th>פער מקסימלי</th>
+                  <th>חריגות</th>
+                  <th>עלות שנתית משוערת</th>
+                  <th>צבירה בחריגה</th>
+                </tr>
+              </thead>
+              <tbody>
+                {exceptionSummary.map((manager) => (
+                  <tr key={manager.key}>
+                    <td>{manager.key}</td>
+                    <td>{manager.checkedRows}</td>
+                    <td>{manager.warningCount}</td>
+                    <td>{manager.warningRate}%</td>
+                    <td>{formatPercent(manager.maxGap, 4)}</td>
+                    <td>{manager.criticalCount + manager.highCount}</td>
+                    <td>{formatCurrency(manager.annualCost)}</td>
+                    <td>{formatCurrency(manager.warningRows.reduce((sum, row) => sum + safeNumber(row.currentBalance), 0))}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="hint">לא נמצאו חריגות דמי ניהול ביחס להסכם.</p>
+        )}
+      </section>
+
+      {!isAggregateScope && (
+      <section className="workspaceCard">
+        <h3>Top חריגות דמי ניהול לעבודה</h3>
+        <p className="hint">
+          מוצגות עד 15 החריגות המשמעותיות ביותר, כדי שהיועץ יוכל להתחיל מהשורות עם ההשפעה הכספית הגבוהה ביותר.
+        </p>
+        {topWarningRows.length ? (
+          <div className="tableScroll">
+            <table className="miniTable productRowsTable">
+              <thead>
+                <tr>
+                  <th>עובד</th>
+                  <th>חברת ביטוח</th>
+                  <th>שם קופה</th>
+                  <th>צבירה</th>
+                  <th>בפועל</th>
+                  <th>בהסכם</th>
+                  <th>פער</th>
+                  <th>חומרה</th>
+                  <th>עלות שנתית משוערת</th>
+                </tr>
+              </thead>
+              <tbody>
+                {topWarningRows.map((row, index) => (
+                  <tr key={`${row.policyNumber || row.fundName || "top-fee"}-${index}`}>
+                    <td>{row.clientName || row.employeeCode || row.idNumber || "-"}</td>
+                    <td>{row.issuerOriginal || row.issuer || "-"}</td>
+                    <td>{row.fundName || row.productName || "-"}</td>
+                    <td>{formatCurrency(row.currentBalance)}</td>
+                    <td>{formatPercent(row.accumulationFee)}</td>
+                    <td>{formatPercent(row.accumulationFeeAgreement)}</td>
+                    <td>{formatPercent(row.calculatedFeeGap, 4)}</td>
+                    <td>
+                      <span className={`educationStatusPill ${row.calculatedFeeStatus}`}>
+                        {getFeeDisplayStatus(row.calculatedFeeStatus)}
+                      </span>
+                    </td>
+                    <td>{formatCurrency(row.estimatedAnnualFeeGapCost)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="hint">אין חריגות להצגה.</p>
+        )}
+      </section>
+
+      )}
+
+      {!isAggregateScope && (
+      <section className="workspaceCard">
+        <h3>פירוט שורות דמי ניהול</h3>
+        {analysis.rows.length ? (
+          <div className="tableScroll">
+            <table className="miniTable productRowsTable">
+              <thead>
+                <tr>
+                  <th>עובד</th>
+                  <th>חברת ביטוח</th>
+                  <th>שם קופה</th>
+                  <th>צבירה</th>
+                  <th>בפועל</th>
+                  <th>בהסכם</th>
+                  <th>פער</th>
+                  <th>חומרה</th>
+                  <th>עלות שנתית משוערת</th>
+                  <th>סטטוס</th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {analysis.rows.map((row, index) => (
+                  <tr key={`${row.policyNumber || row.fundName || "fee"}-${index}`}>
+                    <td>{row.clientName || row.employeeCode || row.idNumber || "-"}</td>
+                    <td>{row.issuerOriginal || row.issuer || "-"}</td>
+                    <td>{row.fundName || row.productName || "-"}</td>
+                    <td>{formatCurrency(row.currentBalance)}</td>
+                    <td>{formatPercent(row.accumulationFee)}</td>
+                    <td>{formatPercent(row.accumulationFeeAgreement)}</td>
+                    <td>{row.calculatedFeeGap === null ? "-" : formatPercent(row.calculatedFeeGap, 4)}</td>
+                    <td>{getFeeSeverityLabel(row.calculatedFeeSeverity)}</td>
+                    <td>{formatCurrency(row.estimatedAnnualFeeGapCost)}</td>
+                    <td>
+                      <span className={`educationStatusPill ${row.calculatedFeeStatus}`}>
+                        {getFeeDisplayStatus(row.calculatedFeeStatus)}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="hint">אין נתונים לבדיקת דמי ניהול.</p>
+        )}
+      </section>
+      )}
+
+      {isAggregateScope && (
+        <section className="workspaceCard">
+          <h3>פירוט פרטני מוסתר במבט אגרגטיבי</h3>
+          <p className="hint">בבחירה של כל מנהלי ההסדר מוצגים רק נתונים מסכמים שניתן לאחד ברמת תיק: סטטוס לפי חברה, מוקדי חריגה, עלות חריגה וצבירה. רשימות עובדים, מזהים ושורות פרטניות מוצגות רק לאחר בחירת מנהל הסדר יחיד.</p>
+        </section>
+      )}
+    </section>
+  );
+}
+
+function buildAccumulationAnalysis(rows) {
+  const insights = buildAccumulationInsights(rows);
+  return {
+    ...insights,
+    rowCount: rows.length,
+    totalMonthlyDeposits: rows.reduce((sum, row) => sum + safeNumber(row.monthlyDeposit), 0),
+  };
+}
+
+function AccumulationTab({ rows, isAggregateScope = false }) {
+  const insights = useMemo(() => buildAccumulationInsights(rows), [rows]);
+  const byBucket = useMemo(
+    () =>
+      aggregateRows(rows, (row) => getAccumulationBucket(row.currentBalance)).sort((a, b) => {
+        const order = ["עד 50K", "50K–100K", "100K–250K", "250K–500K", "500K+"];
+        return order.indexOf(a.key) - order.indexOf(b.key);
+      }),
+    [rows]
+  );
+
+  const byManager = useMemo(
+    () => aggregateRows(rows, (row) => row.issuerOriginal || row.issuer || row.manager || "לא ידוע"),
+    [rows]
+  );
+
+  const totalAccumulation = insights.totalAccumulation;
+  const balances = rows.map((row) => row.currentBalance);
+  const averageBalance = average(balances);
+  const medianBalance = median(balances);
+  const activeRows = insights.activeRows;
+
+  return (
+    <section className="educationTabPanel">
+      <div className="educationKpiGrid">
+        <KpiCard label="סה״כ צבירה" value={formatCurrency(totalAccumulation)} />
+        <KpiCard label="ממוצע לשורה" value={formatCurrency(averageBalance)} />
+        <KpiCard label="חציון לשורה" value={formatCurrency(medianBalance)} />
+        <KpiCard label="שורות עם צבירה" value={`${formatNumber(activeRows.length)} / ${formatNumber(rows.length)}`} />
+        <KpiCard label="עובדים ללא צבירה" value={formatNumber(insights.zeroBalanceEmployees.length)} />
+        <KpiCard label="ריכוזיות TOP 5" value={`${insights.concentrationRate}%`} />
+      </div>
+
+      <section className="workspaceCard">
+        <h3>ניתוח צבירה — תמונת מנהלים</h3>
+        <p className="hint">
+          המטרה כאן היא לזהות איפה יושב הכסף בפועל: מדרגות צבירה, ריכוזיות אצל עובדים גדולים, עובדים ללא צבירה וגופים מנהלים שמרכזים את עיקר התיק.
+        </p>
+
+        <div className="educationInsightTiles">
+          <article>
+            <strong>{formatCurrency(insights.topFiveAccumulation)}</strong>
+            <span>צבירת חמש השורות הגדולות</span>
+            <small>{insights.concentrationRate}% מכלל הצבירה בחוצץ הנוכחי</small>
+          </article>
+          <article>
+            <strong>{formatNumber(insights.highBalanceRows.length)}</strong>
+            <span>שורות מעל 250K</span>
+            <small>מוקד טוב לבדיקה פרטנית של מסלול ודמי ניהול</small>
+          </article>
+          <article>
+            <strong>{formatNumber(insights.zeroBalanceRows.length)}</strong>
+            <span>שורות עם צבירה אפסית</span>
+            <small>כדאי לבדוק האם אלה קופות לא פעילות או בעיית קליטה</small>
+          </article>
+        </div>
+      </section>
+
+      <section className="workspaceCard">
+        <h3>צבירה לפי מדרגות</h3>
+        <p className="hint">
+          התצוגה מסכמת את הפיזור לפי מדרגות צבירה. היא לא מציגה רשימת קופות בודדות ולכן לא אמורה להכפיל שורות בגלל ריבוי מסלולים או מוצרים לעובד.
+        </p>
+
+        <div className="educationBucketGrid">
+          {byBucket.map((bucket) => {
+            const percent = totalAccumulation
+              ? Math.round((bucket.totalAccumulation / totalAccumulation) * 100)
+              : 0;
+
+            return (
+              <article key={bucket.key} className="educationBucketCard">
+                <strong>{bucket.key}</strong>
+                <span>{formatCurrency(bucket.totalAccumulation)}</span>
+                <small>
+                  {bucket.rowCount} שורות · {percent}% מהצבירה
+                </small>
+                <div className="educationMiniBar">
+                  <i style={{ width: `${percent}%` }} />
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="workspaceCard">
+        <h3>פירוט מדרגות צבירה</h3>
+        <div className="tableScroll">
+          <table className="miniTable productRowsTable">
+            <thead>
+              <tr>
+                <th>מדרגת צבירה</th>
+                <th>מספר שורות</th>
+                <th>סה״כ צבירה</th>
+                <th>אחוז מהתיק</th>
+                <th>הפקדה / פרמיה אחרונה</th>
+                <th>דמי ניהול ממוצעים</th>
+              </tr>
+            </thead>
+            <tbody>
+              {byBucket.map((bucket) => {
+                const percent = totalAccumulation ? Math.round((bucket.totalAccumulation / totalAccumulation) * 100) : 0;
+                return (
+                  <tr key={bucket.key}>
+                    <td>{bucket.key}</td>
+                    <td>{bucket.rowCount}</td>
+                    <td>{formatCurrency(bucket.totalAccumulation)}</td>
+                    <td>{percent}%</td>
+                    <td>{formatCurrency(bucket.totalMonthlyDeposits)}</td>
+                    <td>{formatPercent(bucket.averageAccumulationFee)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="workspaceCard">
+        <h3>סיכום צבירה לפי גוף מנהל</h3>
+        <p className="hint">
+          במקום טבלת “הקופות הגדולות ביותר” שהציגה שורות גולמיות ועלולה להיראות כמו כפילות, מוצג כאן ריכוז אגרגטיבי לפי גוף מנהל.
+        </p>
+
+        <div className="tableScroll">
+          <table className="miniTable productRowsTable">
+            <thead>
+              <tr>
+                <th>גוף מנהל</th>
+                <th>מספר שורות</th>
+                <th>סה״כ צבירה</th>
+                <th>אחוז מהתיק</th>
+                <th>צבירה ממוצעת</th>
+                <th>הפקדה / פרמיה אחרונה</th>
+                <th>דמי ניהול ממוצעים</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {byManager.map((manager) => {
+                const percent = totalAccumulation
+                  ? Math.round((manager.totalAccumulation / totalAccumulation) * 100)
+                  : 0;
+                const managerAverage = manager.rowCount ? manager.totalAccumulation / manager.rowCount : 0;
+
+                return (
+                  <tr key={manager.key}>
+                    <td>{manager.key}</td>
+                    <td>{manager.rowCount}</td>
+                    <td>{formatCurrency(manager.totalAccumulation)}</td>
+                    <td>{percent}%</td>
+                    <td>{formatCurrency(managerAverage)}</td>
+                    <td>{formatCurrency(manager.totalMonthlyDeposits)}</td>
+                    <td>{formatPercent(manager.averageAccumulationFee)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {!isAggregateScope && (
+        <section className="workspaceCard">
+          <h3>עובדים / קופות עם הצבירה הגבוהה ביותר</h3>
+          <p className="hint">
+            הפירוט הפרטני מוצג רק בבחירת מנהל הסדר יחיד, כדי לא לערבב מזהים בין טעינות שונות. זה המקום שממנו בודקים עובדים משמעותיים לפני מעבר למסלולים ודמי ניהול.
+          </p>
+          <div className="tableScroll">
+            <table className="miniTable productRowsTable">
+              <thead>
+                <tr>
+                  <th>לקוח / עובד</th>
+                  <th>מספר עובד</th>
+                  <th>גוף מנהל</th>
+                  <th>מסלול</th>
+                  <th>צבירה</th>
+                  <th>הפקדה / פרמיה אחרונה</th>
+                  <th>דמי ניהול</th>
+                </tr>
+              </thead>
+              <tbody>
+                {insights.sortedByBalance.slice(0, 15).map((row, index) => (
+                  <tr key={`${row.rowKey || row.policyNumber || "balance"}-${index}`}>
+                    <td>{row.clientName || row.idNumber || "-"}</td>
+                    <td>{row.employeeCode || "-"}</td>
+                    <td>{row.issuerOriginal || row.issuer || row.manager || "-"}</td>
+                    <td>{row.investmentTrack || row.investmentTrackRewards || row.investmentTrackCompensation || "-"}</td>
+                    <td>{formatCurrency(row.currentBalance)}</td>
+                    <td>{formatCurrency(row.monthlyDeposit)}</td>
+                    <td>{formatPercent(row.accumulationFee)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      {isAggregateScope && (
+        <section className="workspaceCard">
+          <h3>פירוט פרטני מוסתר במבט אגרגטיבי</h3>
+          <p className="hint">
+            בבחירה של כל מנהלי ההסדר מוצגים רק נתונים מסכמים. רשימת העובדים והקופות עם הצבירה הגבוהה ביותר מוצגת לאחר בחירת מנהל הסדר יחיד.
+          </p>
+        </section>
+      )}
+    </section>
+  );
+}
+
+function TracksByAgeTab({ rows, isAggregateScope = false }) {
+  const enriched = useMemo(() => buildAgeTrackAnalysis(rows), [rows]);
+  const byAge = useMemo(() => aggregateRows(enriched, (row) => row.ageBucket), [enriched]);
+  const reviewRows = enriched.filter((row) => row.ageTrackStatus === "review");
+  const unknownAgeRows = enriched.filter((row) => row.ageTrackStatus === "unknown");
+  const matchedPersonalRows = enriched.filter((row) => row.personalDetailsMatched);
+  const hasPersonalDetailsData = matchedPersonalRows.length > 0;
+
+  return (
+    <section className="educationTabPanel">
+      <div className="educationKpiGrid">
+        <KpiCard label="דורשים בדיקה" value={reviewRows.length} />
+        <KpiCard label="חסר גיל / מסלול" value={unknownAgeRows.length} />
+        <KpiCard label="מסלולים שונים" value={new Set(enriched.map((row) => row.trackName).filter(Boolean)).size} />
+        <KpiCard label="שורות עם פרטים אישיים" value={`${formatNumber(matchedPersonalRows.length)} / ${formatNumber(enriched.length)}`} />
+      </div>
+
+      {!isAggregateScope && (
+      <section className="workspaceCard">
+        <h3>התאמת מסלול השקעה לפי גיל</h3>
+        <p className="hint">
+          הבדיקה כאן היא אינדיקציה ייעוצית: קודם היא מזהה מסלולים תלויי גיל כמו עד 50, 50–60 ו־60+, ורק לאחר מכן בודקת רמת סיכון משוערת במסלולים שאינם תלויי גיל מפורשים.
+          מקור הגיל הוא קובץ הפרטים האישיים הרוחבי; אם הוא כבר הועלה תחת קרנות הפנסיה, המערכת משתמשת בו גם כאן ואין צורך להעלות אותו שוב תחת השתלמות.
+        </p>
+        {!hasPersonalDetailsData && (
+          <p className="hint warningText">
+            לא נמצאה התאמה לפרטים אישיים בשורות ההשתלמות. אם קובץ הפרטים האישיים כבר הועלה בפנסיה, יש לוודא שהניתוח הורץ יחד עם מוצר הפנסיה ושמספר עובד/תעודת זהות זהים בין הקבצים.
+          </p>
+        )}
+
+        <div className="tableScroll">
+          <table className="miniTable productRowsTable">
+            <thead>
+              <tr>
+                <th>לקוח</th>
+                <th>גיל</th>
+                <th>קבוצת גיל</th>
+                <th>מסלול</th>
+                <th>סיכון מסלול</th>
+                <th>קבוצת גיל מומלצת</th>
+                <th>יעד גיל מהמסלול</th>
+                <th>סטטוס</th>
+                <th>הסבר</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {enriched.map((row, index) => (
+                <tr key={`${row.policyNumber || row.fundName || "age"}-${index}`}>
+                  <td>{row.clientName || row.employeeCode || row.idNumber || "-"}</td>
+                  <td>{row.calculatedAge ?? "-"}</td>
+                  <td>{row.ageBucket}</td>
+                  <td>{row.trackName || "-"}</td>
+                  <td>{row.trackRisk}</td>
+                  <td>{row.suggestedAgeRule || row.suggestedRisk}</td>
+                  <td>{row.detectedTrackAgeRule || "-"}</td>
+                  <td>
+                    <span className={`educationStatusPill ${row.ageTrackStatus}`}>
+                      {row.ageTrackLabel}
+                    </span>
+                  </td>
+                  <td>{row.ageTrackExplanation || "-"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      )}
+
+      {isAggregateScope && (
+        <section className="workspaceCard">
+          <h3>התאמת מסלול השקעה לפי גיל — מבט אגרגטיבי</h3>
+          <p className="hint">בבחירת כל מנהלי ההסדר מוצג סיכום לפי קבוצות גיל וסטטוס התאמה בלבד. פירוט עובד/לקוח, מזהים ושורות פרטניות יוצגו רק לאחר בחירת מנהל הסדר יחיד.</p>
+          {!hasPersonalDetailsData && (
+            <p className="hint warningText">לא נמצאה התאמה לפרטים אישיים בשורות ההשתלמות. אם קובץ הפרטים האישיים כבר הועלה בפנסיה, יש לוודא שהניתוח הורץ יחד עם מוצר הפנסיה ושמספר עובד/תעודת זהות זהים בין הקבצים.</p>
+          )}
+        </section>
+      )}
+
+      <section className="workspaceCard">
+        <h3>צבירה לפי קבוצות גיל</h3>
+
+        <div className="educationBucketGrid">
+          {byAge.map((bucket) => (
+            <article key={bucket.key} className="educationBucketCard">
+              <strong>{bucket.key}</strong>
+              <span>{formatCurrency(bucket.totalAccumulation)}</span>
+              <small>{bucket.rowCount} שורות</small>
+            </article>
+          ))}
+        </div>
+
+        <div className="tableScroll educationTableSpacing">
+          <table className="miniTable productRowsTable">
+            <thead>
+              <tr>
+                <th>קבוצת גיל</th>
+                <th>שורות</th>
+                <th>סה״כ צבירה</th>
+                <th>תקין / סביר</th>
+                <th>דורש בדיקה</th>
+                <th>חסר מידע</th>
+                <th>דמי ניהול ממוצעים</th>
+              </tr>
+            </thead>
+            <tbody>
+              {byAge.map((bucket) => {
+                const okCount = bucket.rows.filter((row) => row.ageTrackStatus === "ok").length;
+                const reviewCount = bucket.rows.filter((row) => row.ageTrackStatus === "review").length;
+                const unknownCount = bucket.rows.filter((row) => row.ageTrackStatus === "unknown").length;
+                return (
+                  <tr key={bucket.key}>
+                    <td>{bucket.key}</td>
+                    <td>{bucket.rowCount}</td>
+                    <td>{formatCurrency(bucket.totalAccumulation)}</td>
+                    <td>{okCount}</td>
+                    <td>{reviewCount}</td>
+                    <td>{unknownCount}</td>
+                    <td>{formatPercent(bucket.averageAccumulationFee)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </section>
+  );
+}
+
+function ManagersTab({ rows }) {
+  const byManager = useMemo(
+    () => aggregateRows(rows, (row) => row.issuerOriginal || row.issuer || row.manager || "לא ידוע"),
+    [rows]
+  );
+
+  const totalAccumulation = rows.reduce((sum, row) => sum + safeNumber(row.currentBalance), 0);
+
+  return (
+    <section className="educationTabPanel">
+      <div className="educationKpiGrid">
+        <KpiCard label="מנהלי השקעות" value={byManager.length} />
+        <KpiCard label="סה״כ צבירה" value={formatCurrency(totalAccumulation)} />
+        <KpiCard label="מנהל מוביל" value={byManager[0]?.key || "-"} />
+        <KpiCard
+          label="ריכוזיות מנהל מוביל"
+          value={totalAccumulation ? `${Math.round((safeNumber(byManager[0]?.totalAccumulation) / totalAccumulation) * 100)}%` : "0%"}
+        />
+      </div>
+
+      <section className="workspaceCard">
+        <h3>צבירות לפי מנהלי השקעות</h3>
+
+        <div className="tableScroll">
+          <table className="miniTable productRowsTable">
+            <thead>
+              <tr>
+                <th>מנהל השקעות / גוף מנהל</th>
+                <th>מספר קופות</th>
+                <th>סה״כ צבירה</th>
+                <th>אחוז מהתיק</th>
+                <th>הפקדה / פרמיה אחרונה</th>
+                <th>דמי ניהול ממוצעים</th>
+                <th>חריגות דמי ניהול</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {byManager.map((manager) => {
+                const percent = totalAccumulation
+                  ? Math.round((manager.totalAccumulation / totalAccumulation) * 100)
+                  : 0;
+
+                return (
+                  <tr key={manager.key}>
+                    <td>{manager.key}</td>
+                    <td>{manager.rowCount}</td>
+                    <td>{formatCurrency(manager.totalAccumulation)}</td>
+                    <td>{percent}%</td>
+                    <td>{formatCurrency(manager.totalMonthlyDeposits)}</td>
+                    <td>{formatPercent(manager.averageAccumulationFee)}</td>
+                    <td>{manager.feeWarnings}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="workspaceCard">
+        <h3>פיזור מנהלים</h3>
+        <div className="educationManagerBars">
+          {byManager.map((manager) => {
+            const percent = totalAccumulation
+              ? Math.round((manager.totalAccumulation / totalAccumulation) * 100)
+              : 0;
+
+            return (
+              <div key={manager.key} className="educationManagerBarRow">
+                <div>
+                  <strong>{manager.key}</strong>
+                  <span>{formatCurrency(manager.totalAccumulation)} · {percent}%</span>
+                </div>
+                <div className="educationMiniBar">
+                  <i style={{ width: `${percent}%` }} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+    </section>
+  );
+}
+
+
+function ErrorsTab({ rows, isAggregateScope = false }) {
+  const errors = useMemo(() => buildEducationEmployeeErrors(rows), [rows]);
+  const feeErrors = errors.filter((row) => row.errorReasons.some((reason) => reason.includes("דמי") || reason.includes("הסכם"))).length;
+  const trackErrors = errors.filter((row) => row.errorReasons.some((reason) => reason.includes("גיל") || reason.includes("מסלול"))).length;
+  const missingDataErrors = errors.filter((row) => row.severity === "unknown").length;
+
+  return (
+    <section className="educationTabPanel">
+      <div className="educationKpiGrid">
+        <KpiCard label="עובדים / שורות עם שגיאה" value={errors.length} />
+        <KpiCard label="שגיאות דמי ניהול" value={feeErrors} />
+        <KpiCard label="שגיאות מסלול / גיל" value={trackErrors} />
+        <KpiCard label="חוסרי מידע" value={missingDataErrors} />
+      </div>
+
+      {isAggregateScope && (
+        <section className="workspaceCard">
+          <h3>סיכום שגיאות אגרגטיבי</h3>
+          <p className="hint">במבט כללי לא מוצגים עובדים, מספרי לקוח או מזהים. הטבלה מציגה רק ספירה לפי מנהל הסדר, סוג שגיאה וחומרה.</p>
+          <div className="tableScroll">
+            <table className="miniTable productRowsTable">
+              <thead>
+                <tr>
+                  <th>מנהל הסדר</th>
+                  <th>סה״כ שורות עם שגיאה</th>
+                  <th>שגיאות דמי ניהול</th>
+                  <th>שגיאות מסלול / גיל</th>
+                  <th>חוסרי מידע</th>
+                  <th>לא תקין</th>
+                </tr>
+              </thead>
+              <tbody>
+                {aggregateRows(errors, (row) => getArrangementManagerName(row)).map((item) => {
+                  const managerErrors = item.rows;
+                  const managerFeeErrors = managerErrors.filter((row) => row.errorReasons.some((reason) => reason.includes("דמי") || reason.includes("הסכם"))).length;
+                  const managerTrackErrors = managerErrors.filter((row) => row.errorReasons.some((reason) => reason.includes("גיל") || reason.includes("מסלול"))).length;
+                  const managerMissingErrors = managerErrors.filter((row) => row.severity === "unknown").length;
+                  const managerWarningErrors = managerErrors.filter((row) => row.severity === "warning").length;
+                  return (
+                    <tr key={item.key}>
+                      <td>{item.key}</td>
+                      <td>{managerErrors.length}</td>
+                      <td>{managerFeeErrors}</td>
+                      <td>{managerTrackErrors}</td>
+                      <td>{managerMissingErrors}</td>
+                      <td>{managerWarningErrors}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      {!isAggregateScope && (
+      <section className="workspaceCard">
+        <h3>רשימת עובדים עם שגיאות לפי מס עובד</h3>
+        <p className="hint">
+          החוצץ הזה מרכז רק עובדים/שורות שדורשים טיפול: חריגות דמי ניהול, חוסר התאמה להסכם, חסר גיל/מסלול או נתוני בסיס חסרים.
+        </p>
+
+        {errors.length ? (
+          <div className="tableScroll">
+            <table className="miniTable productRowsTable">
+              <thead>
+                <tr>
+                  <th>עובד</th>
+                  <th>מזהה</th>
+                  <th>חברת ביטוח</th>
+                  <th>קופה</th>
+                  <th>מנהל הסדר</th>
+                  <th>צבירה</th>
+                  <th>דמי ניהול</th>
+                  <th>גיל / מסלול</th>
+                  <th>שגיאות</th>
+                  <th>סטטוס</th>
+                </tr>
+              </thead>
+              <tbody>
+                {errors.map((row) => (
+                  <tr key={row.key}>
+                    <td>{row.clientName || row.employeeCode || row.idNumber || "-"}</td>
+                    <td>{row.employeeCode || row.idNumber || row.memberKey || "-"}</td>
+                    <td>{row.issuerOriginal || row.issuer || "-"}</td>
+                    <td>{row.fundName || row.productName || "-"}</td>
+                    <td>{getArrangementManagerName(row)}</td>
+                    <td>{formatCurrency(row.currentBalance)}</td>
+                    <td>{formatPercent(row.accumulationFee)} / {formatPercent(row.accumulationFeeAgreement)}</td>
+                    <td>{row.calculatedAge ?? "-"} · {row.trackName || "-"}</td>
+                    <td>
+                      <ul className="educationCompactReasonList">
+                        {row.errorReasons.map((reason) => <li key={reason}>{reason}</li>)}
+                      </ul>
+                    </td>
+                    <td>
+                      <span className={`educationStatusPill ${row.severity}`}>
+                        {row.severity === "warning" ? "לא תקין" : "חסר מידע"}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="hint">לא נמצאו עובדים עם שגיאות לפי מס עובד בשכבת הניתוח הנוכחית.</p>
+        )}
+      </section>
+      )}
+    </section>
+  );
+}
+
+export default function EducationFundAnalysisView({ analysisData }) {
+  const { rows, summary, warnings } = getEducationFundData(analysisData);
+  const [activeTab, setActiveTab] = useState("kpi");
+  const [selectedManagerKey, setSelectedManagerKey] = useState("all");
+
+  const managerOptions = useMemo(() => buildArrangementManagerOptions(rows), [rows]);
+  const selectedRows = useMemo(() => {
+    if (selectedManagerKey === "all") return rows;
+    return rows.filter((row) => getArrangementManagerKey(row) === selectedManagerKey);
+  }, [rows, selectedManagerKey]);
+
+  useEffect(() => {
+    if (!managerOptions.length) {
+      if (selectedManagerKey !== "all") setSelectedManagerKey("all");
+      return;
+    }
+
+    if (selectedManagerKey === "all") return;
+
+    if (!managerOptions.some((option) => option.key === selectedManagerKey)) {
+      setSelectedManagerKey(managerOptions[0].key);
+    }
+  }, [managerOptions, selectedManagerKey]);
+
+  const selectedManager = managerOptions.find((option) => option.key === selectedManagerKey) || null;
+  const isAggregateScope = selectedManagerKey === "all";
+  const scopeLabel = isAggregateScope ? "כל מנהלי ההסדר" : selectedManager?.name || "מנהל הסדר";
+  const educationDataset = useMemo(() => buildEducationAnalysisDataset(selectedRows), [selectedRows]);
+  const analysisRows = educationDataset.validRows;
+  const totalAccumulation = selectedRows.reduce((sum, row) => sum + safeNumber(row.currentBalance), 0);
+  const totalMonthlyDeposits = selectedRows.reduce((sum, row) => sum + safeNumber(row.monthlyDeposit), 0);
+  const issuerCount = new Set(analysisRows.map((row) => row.issuerOriginal || row.issuer).filter(Boolean)).size;
+
+  return (
+    <section className="educationFundAnalysisView dashboard" dir="rtl">
+      <header className="dashboard-header product-shell-hero education-hero">
+        <div className="product-hero-title">
+          <span className="product-hero-icon">▣</span>
+          <div>
+            <p className="eyebrow">Education Fund</p>
+            <h1 className="dashboard-title">קרנות השתלמות</h1>
+            <p className="dashboard-subtitle">
+              מערכת ניהול ובקרה · {formatNumber(selectedRows.length || summary.unifiedRowCount || 0)} שורות · {formatCurrency(totalAccumulation || summary.totalAccumulation)}
+            </p>
+          </div>
+        </div>
+
+        <div className="summary-pills">
+          <span className="pill pill-green">✓ {formatNumber(educationDataset.validCount)} תקין</span>
+          <span className="pill pill-red">✗ {formatNumber(educationDataset.invalidCount)} לא תקין</span>
+          {warnings.length > 0 && (
+            <span className="pill pill-warning">QA {formatNumber(warnings.length)} אזהרות</span>
+          )}
         </div>
       </header>
 
-      <div className="productKpiGrid four">
-        <KpiCard label="פוליסות" value={fmtNumber(rows.length)} subtext="שורות שזוהו בדוח היועץ" tone="blue" />
-        <KpiCard label="חברות ביטוח" value={fmtNumber(issuers.length)} subtext="יצרנים שונים" tone="gold" />
-        <KpiCard label="תקופות" value={fmtNumber(periods.length)} subtext="לפני 2004 / 2004-2013 / 2013+" tone="blue" />
-        <KpiCard label="תקינות דמי ניהול" value={`${rows.length ? Math.round((okRows.length / rows.length) * 100) : 0}%`} subtext={fmtMoney(totalAccumulation)} tone="green" />
-        <KpiCard label="פערי מידע" value={fmtNumber(issueRows.length)} subtext="חסר הסכם / נתון / תקופה" tone={issueRows.length ? "red" : "green"} />
+      <div className="global-scope-bar">
+        <div>
+          <strong>תצוגת מנהל הסדר</strong>
+          <span>הבחירה כאן משפיעה על כל הטאבים בדוח.</span>
+        </div>
+
+        <label className="manager-filter global-manager-filter">
+          <span>מנהל הסדר</span>
+          <select
+            value={selectedManagerKey}
+            onChange={(event) => setSelectedManagerKey(event.target.value)}
+          >
+            <option value="all">כל מנהלי ההסדר</option>
+            {managerOptions.map((option) => (
+              <option key={option.key} value={option.key}>
+                {option.name}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <em>
+          מוצגות {formatNumber(selectedRows.length)} מתוך {formatNumber(rows.length)} שורות
+        </em>
       </div>
 
-      <nav className="productTabs" aria-label="ביטוח מנהלים ניתוחים">
-        <button type="button" className={activeTab === TABS.HOME ? "active" : ""} onClick={() => setActiveTab(TABS.HOME)}>בית מוצר</button>
-        <button type="button" className={activeTab === TABS.FEES ? "active" : ""} onClick={() => setActiveTab(TABS.FEES)}>דמי ניהול</button>
-        <button type="button" className={activeTab === TABS.ACCUMULATION ? "active" : ""} onClick={() => setActiveTab(TABS.ACCUMULATION)}>צבירות</button>
-        <button type="button" className={activeTab === TABS.ISSUERS ? "active" : ""} onClick={() => setActiveTab(TABS.ISSUERS)}>יצרנים</button>
-        <button type="button" className={activeTab === TABS.ERRORS ? "active" : ""} onClick={() => setActiveTab(TABS.ERRORS)}>שגיאות</button>
+      <nav className="tab-bar education-product-tab-bar">
+        {EDUCATION_TABS.map((tab) => (
+          <button
+            key={tab.key}
+            type="button"
+            className={`tab-btn ${activeTab === tab.key ? "active" : ""}`}
+            onClick={() => setActiveTab(tab.key)}
+          >
+            <span className="tab-icon">{tab.icon}</span>
+            <span>{tab.title}</span>
+          </button>
+        ))}
       </nav>
 
-      {activeTab === TABS.HOME ? <ProductHome rows={rows} onOpenTab={setActiveTab} /> : null}
-      {activeTab === TABS.FEES ? <FeesTab rows={rows} /> : null}
-      {activeTab === TABS.ACCUMULATION ? <AccumulationTab rows={rows} /> : null}
-      {activeTab === TABS.ISSUERS ? <IssuersTab rows={rows} /> : null}
-      {activeTab === TABS.ERRORS ? <ErrorsTab rows={rows} /> : null}
+      <main className="dashboard-content">
+        {activeTab !== "kpi" && (
+          <div className="educationTopKpiGrid compact-product-kpis">
+            <KpiCard label="שכבת ניתוח" value={scopeLabel} />
+            <KpiCard label="שורות שנקלטו" value={selectedRows.length || summary.unifiedRowCount || 0} />
+            <KpiCard label="סה״כ צבירה" value={formatCurrency(totalAccumulation || summary.totalAccumulation)} />
+            <KpiCard label="גופים מנהלים" value={issuerCount || summary.issuerCount || 0} />
+          </div>
+        )}
+
+        {activeTab !== "kpi" && <EducationDataQualityCard dataset={educationDataset} />}
+
+        {activeTab !== "kpi" && warnings.length > 0 && (
+          <section className="workspaceCard">
+            <h3>אזהרות כלליות</h3>
+            <ul className="warningList">
+              {warnings.map((warning, index) => (
+                <li key={`${warning}-${index}`}>{warning}</li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        {activeTab !== "kpi" && !rows.length && (
+          <section className="workspaceCard">
+            <h3>אין עדיין נתונים לניתוח</h3>
+            <p className="hint">
+              החוצצים נטענו, אבל לא נמצאו שורות קרן השתלמות בפלט הניתוח. בדרך כלל זה קורה כאשר חסר קובץ נתונים,
+              כאשר הועלה רק קובץ הסכמים, או כאשר הפלט נשמר תחת שדה raw בלבד. גרסה זו כוללת גיבוי אוטומטי גם ל־rawRows.
+            </p>
+          </section>
+        )}
+
+        {activeTab === "kpi" && (
+          <EducationKpiHome
+            rows={analysisRows}
+            selectedRows={selectedRows}
+            dataset={educationDataset}
+            scopeLabel={scopeLabel}
+            summary={summary}
+            totalAccumulation={totalAccumulation}
+            totalMonthlyDeposits={totalMonthlyDeposits}
+            issuerCount={issuerCount}
+            onNavigate={setActiveTab}
+          />
+        )}
+        {activeTab === "fees" && <FeesTab rows={analysisRows} isAggregateScope={isAggregateScope} />}
+        {activeTab === "accumulation" && <AccumulationTab rows={analysisRows} isAggregateScope={isAggregateScope} />}
+        {activeTab === "tracksByAge" && <TracksByAgeTab rows={analysisRows} isAggregateScope={isAggregateScope} />}
+        {activeTab === "managers" && <ManagersTab rows={analysisRows} />}
+        {activeTab === "errors" && <ErrorsTab rows={selectedRows} isAggregateScope={isAggregateScope} />}
+      </main>
     </section>
   );
 }

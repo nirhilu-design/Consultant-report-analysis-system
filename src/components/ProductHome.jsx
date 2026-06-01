@@ -29,6 +29,8 @@ export default function ProductHome({
   actionText = "משימות פתוחות לטיפול מתוך ניתוח המוצר.",
   actionTarget = "action",
   onNavigate,
+  onBackHome,
+  backLabel = "חזרה למסך KPI ראשי",
 }) {
   const topBars = managerBars.slice(0, 6);
   const maxBarValue = Math.max(1, ...topBars.map((bar) => Number(bar.value || 0)));
@@ -45,12 +47,20 @@ export default function ProductHome({
           </div>
         </div>
 
-        {scopeLabel && (
-          <div className="v57-scope-pill">
-            <span>מנהל הסדר</span>
-            <strong>{scopeLabel}</strong>
-          </div>
-        )}
+        <div className="v57-hero-actions">
+          {scopeLabel && (
+            <div className="v57-scope-pill">
+              <span>מנהל הסדר</span>
+              <strong>{scopeLabel}</strong>
+            </div>
+          )}
+          {onBackHome && (
+            <button type="button" className="v57-back-button" onClick={onBackHome}>
+              <span>‹</span>
+              {backLabel}
+            </button>
+          )}
+        </div>
       </header>
 
 

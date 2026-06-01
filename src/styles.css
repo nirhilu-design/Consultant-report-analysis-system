@@ -3832,3 +3832,37 @@ body,
     grid-template-columns: 1fr !important;
   }
 }
+
+/* v64 — Future Product Shell */
+.productModeOptionTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.productModeOptionTop small {
+  padding: 4px 9px;
+  border-radius: 999px;
+  color: #8a6d1d;
+  background: #fff7db;
+  border: 1px solid #f3df9f;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.productModeOption.future {
+  cursor: not-allowed;
+  opacity: 0.78;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+}
+
+.productModeOption.future:hover {
+  border-color: #dbe3ef;
+  transform: none;
+}
+
+.productPortalCard.disabled:first-of-type {
+  border-color: #f3df9f;
+  background: linear-gradient(180deg, #ffffff 0%, #fffaf0 100%);
+}

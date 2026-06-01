@@ -2130,10 +2130,9 @@ export default function EducationFundAnalysisView({ analysisData }) {
         </div>
       )}
 
-      <EducationDataQualityCard dataset={educationDataset} />
+      {activeTab !== "kpi" && <EducationDataQualityCard dataset={educationDataset} />}
 
-
-      {warnings.length > 0 && (
+      {activeTab !== "kpi" && warnings.length > 0 && (
         <section className="workspaceCard">
           <h3>אזהרות כלליות</h3>
           <ul className="warningList">
@@ -2144,7 +2143,7 @@ export default function EducationFundAnalysisView({ analysisData }) {
         </section>
       )}
 
-      {!rows.length && (
+      {activeTab !== "kpi" && !rows.length && (
         <section className="workspaceCard">
           <h3>אין עדיין נתונים לניתוח</h3>
           <p className="hint">

@@ -110,6 +110,7 @@ function getEmployeeLabel(row) {
   return normalizeText(firstDefined(row?.memberName, row?.employeeCode, row?.idNumber, row?.policyNumber)) || "—";
 }
 function getIssueLabel(row) {
+  if (isOperatorOnly(row)) return "מתפעל בלבד — אין בדיקת דמי ניהול מול הסכם";
   if (row?.feeIssue) return normalizeText(row.feeIssue);
   if (row?.feeIssueCode === "missingAgreement") return "לא נמצא הסכם מתאים לתקופה / חברת ביטוח";
   if (row?.feeIssueCode === "missingData") return "חסר נתון דמי ניהול בדוח היועץ";
@@ -121,6 +122,7 @@ function getIssueLabel(row) {
 
 function getRowsWithIssues(rows) {
   return rows.filter((row) => {
+    if (isOperatorOnly(row)) return false;
     if (row.feeStatus !== "תקין") return true;
     if (!row.insuranceStartYear) return true;
     if (getPeriodKey(row) === "unknown") return true;
@@ -149,8 +151,51 @@ function getUniqueEmployeeCount(rows) {
   return keys.size;
 }
 
+function hasAgreementFeeValues(row) {
+  return (
+    row?.agreementPremiumFeePercent !== null &&
+    row?.agreementPremiumFeePercent !== undefined &&
+    row?.agreementPremiumFeePercent !== ""
+  ) || (
+    row?.agreementAccumulationFeePercent !== null &&
+    row?.agreementAccumulationFeePercent !== undefined &&
+    row?.agreementAccumulationFeePercent !== ""
+  );
+}
+
+function hasAgreementMatch(row) {
+  return Boolean(
+    normalizeText(row?.agreementPeriod) ||
+    normalizeText(row?.agreementIssuer) ||
+    normalizeText(row?.agreementIssuerFound) ||
+    normalizeText(row?.matchedAgreementIssuer) ||
+    hasAgreementFeeValues(row)
+  );
+}
+
+function isOperatorOnly(row) {
+  const explicitText = [
+    row?.feeIssue,
+    row?.feeIssueCode,
+    row?.agreementType,
+    row?.serviceType,
+    row?.agreementNotes,
+    row?.operatorStatus,
+  ]
+    .map(normalizeText)
+    .join(" ");
+
+  if (/מתפעל|תפעול|operator/i.test(explicitText)) return true;
+
+  // In the executive-insurance agreements file, cells such as "אין הסכם" are parsed as null fees.
+  // If the issuer/period was matched but both agreement-fee values are empty, treat it as operator-only,
+  // not as a management-fee breach.
+  return hasAgreementMatch(row) && !hasAgreementFeeValues(row);
+}
+
 function isNotCheckable(row) {
   return (
+    isOperatorOnly(row) ||
     row?.feeIssueCode === "missingAgreement" ||
     row?.feeIssueCode === "missingData" ||
     getPeriodKey(row) === "unknown" ||
@@ -160,6 +205,7 @@ function isNotCheckable(row) {
 
 function getFeeStatusKind(row) {
   if (row?.feeStatus === "תקין") return "ok";
+  if (isOperatorOnly(row)) return "operatorOnly";
   if (isNotCheckable(row)) return "notCheckable";
   return "exception";
 }
@@ -167,6 +213,7 @@ function getFeeStatusKind(row) {
 function getFeeStatusLabel(row) {
   const kind = getFeeStatusKind(row);
   if (kind === "ok") return "תקין";
+  if (kind === "operatorOnly") return "מתפעל בלבד";
   if (kind === "notCheckable") return "לא ניתן לבדיקה";
   return "חריגה";
 }
@@ -184,6 +231,7 @@ function makeEmptyGroup(label) {
     ok: 0,
     notOk: 0,
     exception: 0,
+    operatorOnly: 0,
     notCheckable: 0,
     missingAgreement: 0,
     missingData: 0,
@@ -204,6 +252,10 @@ function addRowToGroup(group, row) {
   }
   if (row.feeStatus === "תקין") {
     group.ok += 1;
+  } else if (isOperatorOnly(row)) {
+    group.operatorOnly += 1;
+    group.notCheckable += 1;
+    group.notOk += 1;
   } else if (isNotCheckable(row)) {
     group.notCheckable += 1;
     group.notOk += 1;
@@ -283,6 +335,7 @@ function ProductHome({ rows, onOpenTab }) {
   const issuers = groupByIssuer(rows);
   const okRows = rows.filter((row) => row.feeStatus === "תקין");
   const exceptionRows = rows.filter((row) => getFeeStatusKind(row) === "exception");
+  const operatorOnlyRows = rows.filter((row) => getFeeStatusKind(row) === "operatorOnly");
   const notCheckableRows = rows.filter((row) => getFeeStatusKind(row) === "notCheckable");
   const issueRows = getRowsWithIssues(rows);
   const totalAccumulation = rows.reduce((sum, row) => sum + getAccumulation(row), 0);
@@ -304,6 +357,7 @@ function ProductHome({ rows, onOpenTab }) {
         <KpiCard label="צבירה כוללת" value={fmtMoney(totalAccumulation)} subtext="ערך פדיון כולל" tone="gold" />
         <KpiCard label="חברות ביטוח" value={fmtNumber(issuers.length)} subtext="יצרנים מזוהים" tone="blue" />
         <KpiCard label="חריגה בדמי ניהול" value={fmtNumber(exceptionRows.length)} subtext="פוליסות שאינן עומדות בהסכם" tone={exceptionRows.length ? "red" : "green"} onClick={() => onOpenTab(TABS.FEES)} />
+        <KpiCard label="מתפעל בלבד" value={fmtNumber(operatorOnlyRows.length)} subtext="מזוהה לפי דוח הסכמים" tone={operatorOnlyRows.length ? "blue" : "green"} />
         <KpiCard label="לא ניתן לבדיקה" value={fmtNumber(notCheckableRows.length)} subtext="חסר הסכם / חסר נתון / תקופה" tone={notCheckableRows.length ? "red" : "green"} onClick={() => onOpenTab(TABS.ERRORS)} />
       </div>
 
@@ -364,6 +418,7 @@ function PeriodFeeTable({ section }) {
   const periodRows = section.rows;
   const okRows = periodRows.filter((row) => getFeeStatusKind(row) === "ok");
   const exceptionRows = periodRows.filter((row) => getFeeStatusKind(row) === "exception");
+  const operatorOnlyRows = periodRows.filter((row) => getFeeStatusKind(row) === "operatorOnly");
   const notCheckableRows = periodRows.filter((row) => getFeeStatusKind(row) === "notCheckable");
   const issuerSummary = groupByIssuer(periodRows);
   const detailRows = periodRows.slice(0, 80);
@@ -374,11 +429,12 @@ function PeriodFeeTable({ section }) {
         <div>
           <p className="eyebrow">Period Fee Control</p>
           <h4>{section.label}</h4>
-          <p>בדיקה עצמאית לתקופת הפוליסות הזו בלבד, מול מבנה דמי הניהול הרלוונטי בדוח ההסכמים.</p>
+          <p>בדיקה עצמאית לתקופת הפוליסות הזו בלבד, מול דוח ההסכמים. אם בדוח ההסכמים אין דמי ניהול אלא מתפעל בלבד — הפוליסה אינה נספרת כחריגה.</p>
         </div>
         <div className="periodFeeStats">
           <span className="statusPill ok">תקין: {fmtNumber(okRows.length)}</span>
           <span className="statusPill bad">חריגה: {fmtNumber(exceptionRows.length)}</span>
+          <span className="statusPill ok">מתפעל בלבד: {fmtNumber(operatorOnlyRows.length)}</span>
           <span className="statusPill bad">לא ניתן לבדיקה: {fmtNumber(notCheckableRows.length)}</span>
         </div>
       </div>
@@ -391,6 +447,7 @@ function PeriodFeeTable({ section }) {
               <th>פוליסות</th>
               <th>תקין</th>
               <th>חריגה</th>
+              <th>מתפעל בלבד</th>
               <th>לא ניתן לבדיקה</th>
               <th>חסר הסכם</th>
               <th>חסר נתון</th>
@@ -406,6 +463,7 @@ function PeriodFeeTable({ section }) {
                 <td>{fmtNumber(item.count)}</td>
                 <td>{fmtNumber(item.ok)}</td>
                 <td>{fmtNumber(item.exception)}</td>
+                <td>{fmtNumber(item.operatorOnly)}</td>
                 <td>{fmtNumber(item.notCheckable)}</td>
                 <td>{fmtNumber(item.missingAgreement)}</td>
                 <td>{fmtNumber(item.missingData)}</td>
@@ -437,7 +495,7 @@ function PeriodFeeTable({ section }) {
           <tbody>
             {detailRows.map((row, index) => (
               <tr key={`${section.key}-${row.policyId || row.policyNumber || index}-${index}`}>
-                <td><span className={`statusPill ${getFeeStatusKind(row) === "ok" ? "ok" : "bad"}`}>{getFeeStatusLabel(row)}</span></td>
+                <td><span className={`statusPill ${getFeeStatusKind(row) === "ok" || getFeeStatusKind(row) === "operatorOnly" ? "ok" : "bad"}`}>{getFeeStatusLabel(row)}</span></td>
                 <td>{getEmployeeLabel(row)}</td>
                 <td>{getIssuer(row)}</td>
                 <td>{row.insuranceStartYear || "—"}</td>
@@ -459,8 +517,9 @@ function PeriodFeeTable({ section }) {
 function FeesTab({ rows }) {
   const okRows = rows.filter((row) => getFeeStatusKind(row) === "ok");
   const exceptionRows = rows.filter((row) => getFeeStatusKind(row) === "exception");
+  const operatorOnlyRows = rows.filter((row) => getFeeStatusKind(row) === "operatorOnly");
   const notCheckableRows = rows.filter((row) => getFeeStatusKind(row) === "notCheckable");
-  const checkableRows = rows.length - notCheckableRows.length;
+  const checkableRows = okRows.length + exceptionRows.length;
   const periodSections = getPeriodSections(rows);
 
   return (
@@ -469,15 +528,16 @@ function FeesTab({ rows }) {
         <div>
           <p className="eyebrow">Management Fees Control</p>
           <h3>בקרת דמי ניהול</h3>
-          <p>הבקרה מופרדת לפי תקופות ביטוח מנהלים. פוליסות שהן מתפעל בלבד או שחסר בהן מידע מסומנות כלא ניתן לבדיקה, ולא כחריגה.</p>
+          <p>הבקרה מופרדת לפי תקופות ביטוח מנהלים ונשענת רק על דוח ההסכמים. פוליסות שמופיעות כמתפעל בלבד מופרדות מהחריגות ולא משפיעות על אחוז התקינות.</p>
         </div>
       </div>
 
       <div className="productKpiGrid four">
         <KpiCard label="תקין" value={fmtNumber(okRows.length)} subtext="שורות שעומדות בהסכם" tone="green" />
         <KpiCard label="חריגה" value={fmtNumber(exceptionRows.length)} subtext="נבדק מול הסכם ונמצאה חריגה" tone={exceptionRows.length ? "red" : "green"} />
+        <KpiCard label="מתפעל בלבד" value={fmtNumber(operatorOnlyRows.length)} subtext="אין דמי ניהול לבדיקה בדוח ההסכמים" tone={operatorOnlyRows.length ? "blue" : "green"} />
         <KpiCard label="לא ניתן לבדיקה" value={fmtNumber(notCheckableRows.length)} subtext="חסר הסכם / חסר נתון / תקופה" tone={notCheckableRows.length ? "red" : "blue"} />
-        <KpiCard label="אחוז תקינות" value={`${checkableRows ? Math.round((okRows.length / checkableRows) * 100) : 0}%`} subtext="מתוך פוליסות שניתן לבדוק" tone="gold" />
+        <KpiCard label="אחוז תקינות" value={`${checkableRows ? Math.round((okRows.length / checkableRows) * 100) : 0}%`} subtext="מתוך פוליסות שניתן לבדוק בפועל" tone="gold" />
       </div>
 
       <div className="periodFeeGrid">
@@ -512,7 +572,7 @@ function AccumulationTab({ rows }) {
               <span>{fmtMoney(item.accumulation)}</span>
             </div>
             <MiniBar value={item.accumulation} max={maxIssuerAccumulation} label={`צבירה ${item.label}`} />
-            <small>{fmtNumber(item.count)} פוליסות · תקין: {fmtNumber(item.ok)} · חריגה: {fmtNumber(item.exception)} · לא ניתן לבדיקה: {fmtNumber(item.notCheckable)}</small>
+            <small>{fmtNumber(item.count)} פוליסות · תקין: {fmtNumber(item.ok)} · חריגה: {fmtNumber(item.exception)} · מתפעל בלבד: {fmtNumber(item.operatorOnly)} · לא ניתן לבדיקה: {fmtNumber(item.notCheckable)}</small>
           </article>
         ))}
       </div>
@@ -620,7 +680,7 @@ function ErrorsTab({ rows }) {
                   <td>{getIssuer(row)}</td>
                   <td>{getPolicyId(row)}</td>
                   <td>{getPeriodLabel(row)}</td>
-                  <td><span className={`statusPill ${getFeeStatusKind(row) === "ok" ? "ok" : "bad"}`}>{getFeeStatusLabel(row)}</span></td>
+                  <td><span className={`statusPill ${getFeeStatusKind(row) === "ok" || getFeeStatusKind(row) === "operatorOnly" ? "ok" : "bad"}`}>{getFeeStatusLabel(row)}</span></td>
                   <td>{getIssueLabel(row)}</td>
                 </tr>
               ))}
@@ -647,7 +707,7 @@ export default function ExecutiveInsuranceAnalysisView({ analysisData }) {
         <div>
           <p className="eyebrow">Product Analysis</p>
           <h2>ביטוח מנהלים</h2>
-          <p>בית מוצר, בקרת דמי ניהול, ניתוח צבירות ויצרנים ובקרת שגיאות. דמי הניהול מחולקים לפי תקופות פוליסה.</p>
+          <p>בית מוצר, בקרת דמי ניהול לפי דוח הסכמים ומתפעל בלבד, ניתוח צבירות ויצרנים ובקרת שגיאות.</p>
         </div>
       </header>
 

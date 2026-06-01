@@ -1,5 +1,5 @@
 // Path: src/components/ProductHome.jsx
-// v57 — Shared Product Home UI
+// v58 — Shared Product Home UI
 // This is a visual component only. It does not own routing, parsing, upload state,
 // or product analysis logic. Existing product screens inject it as their landing view.
 
@@ -53,14 +53,6 @@ export default function ProductHome({
         )}
       </header>
 
-      <div className="v57-product-nav-row">
-        {analysisCards.map((card) => (
-          <button key={card.id} type="button" onClick={() => onNavigate?.(card.id)}>
-            <span>{card.icon || "•"}</span>
-            {card.navLabel || card.title}
-          </button>
-        ))}
-      </div>
 
       <div className="v57-kpi-strip">
         {kpiCards.map((card) => (

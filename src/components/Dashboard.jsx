@@ -152,7 +152,7 @@ function buildAggregateQualityIssues(issues = []) {
 // ─── KPI ──────────────────────────────────────────────────────────────────────
 
 
-function KpiTab({ kpi, rows = [], actions = [], managerFilter, onManagerFilterChange }) {
+function KpiTab({ kpi, rows = [], actions = [], managerFilter, onManagerFilterChange, onNavigate }) {
   const managerBreakdown = buildManagerBreakdown(rows);
   const managerOptions = managerBreakdown.map((item) => item.manager);
 
@@ -250,11 +250,13 @@ function KpiTab({ kpi, rows = [], actions = [], managerFilter, onManagerFilterCh
         </label>
       </div>
 
-      <div className="kpi-grid kpi-grid-executive">
-        {cards.map(({ label, value, color }) => (
-          <div key={label} className={`kpi-card ${color}`}>
+      <div className="kpi-grid kpi-grid-executive unified-product-kpi-grid">
+        {cards.map(({ label, value, color }, index) => (
+          <div key={label} className={`kpi-card product-kpi-card ${color}`}>
+            <span className="product-kpi-icon">{["▧", "₪", "⌕", "✓", "×", "⚙", "%", "!"][index] || "•"}</span>
             <span className="kpi-label">{label}</span>
             <strong className="kpi-value">{value}</strong>
+            <small>לעיון בפרטים ←</small>
           </div>
         ))}
       </div>
@@ -319,7 +321,67 @@ function KpiTab({ kpi, rows = [], actions = [], managerFilter, onManagerFilterCh
           )}
         </section>
       </div>
+
+      <PensionAnalysisHub
+        kpi={displayKpi}
+        managerBreakdown={managerBreakdown}
+        activeTab="kpi"
+        onNavigate={onNavigate || (() => {})}
+      />
     </div>
+  );
+}
+
+
+function PensionAnalysisHub({ kpi, managerBreakdown = [], activeTab, onNavigate }) {
+  const cards = [
+    { id: "fees", title: "דמי ניהול", icon: "₪", text: "בדיקת עמידה בדמי ניהול מול ההסכם והשוואה בין גופים מנהלים.", metric: `${fmtPct(kpi?.complianceRate || 0)} עמידה`, tone: "green" },
+    { id: "investment", title: "מסלולי השקעה", icon: "◈", text: "התאמת מסלולי תגמולים ופיצויים, איתור פיצולים וחריגות ברמת עובד.", metric: "מסלולים", tone: "blue" },
+    { id: "insurance", title: "מסלול ביטוח", icon: "◌", text: "בדיקת מסלול ביטוח מול מצב משפחתי וזיהוי עובדים עם מסלול לא מתאים.", metric: "משפחתי", tone: "purple" },
+    { id: "tier", title: "צבירות ומדרגות", icon: "▤", text: "איתור עובדים שייתכן ויכולים ליהנות ממדרגת צבירה טובה יותר.", metric: "מדרגות", tone: "orange" },
+  ];
+
+  const topManagers = managerBreakdown.slice(0, 5);
+  const maxTotal = Math.max(1, ...topManagers.map((item) => item.total || 0));
+
+  return (
+    <section className="product-home-hub">
+      <div className="product-home-title">
+        <div>
+          <h2>ניתוחים מרכזיים</h2>
+          <p>בחר ניתוח לצפייה במבט מפורט. המסך הזה הוא עמוד הבית האחיד של מוצר הפנסיה.</p>
+        </div>
+      </div>
+
+      <div className="product-analysis-card-grid">
+        {cards.map((card) => (
+          <article key={card.id} className={`product-analysis-card tone-${card.tone}`}>
+            <div className="analysis-card-icon">{card.icon}</div>
+            <h3>{card.title}</h3>
+            <p>{card.text}</p>
+            <strong>{card.metric}</strong>
+            <button type="button" onClick={() => onNavigate(card.id)}>לצפייה בניתוח</button>
+          </article>
+        ))}
+      </div>
+
+      {topManagers.length > 0 && (
+        <section className="product-analysis-card product-manager-snapshot">
+          <div className="analysis-card-icon">▦</div>
+          <h3>גופים / מנהלי הסדר</h3>
+          <p>פיזור מהיר לפי מנהלי הסדר וגופים מובילים מתוך המוצר.</p>
+          <div className="mini-manager-bars">
+            {topManagers.map((item) => (
+              <div className="mini-manager-row" key={item.manager}>
+                <span>{item.manager}</span>
+                <i><b style={{ width: `${(item.total / maxTotal) * 100}%` }} /></i>
+                <em>{fmtPct(item.total / Math.max(1, kpi?.totalRows || item.total))}</em>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+    </section>
   );
 }
 
@@ -1470,15 +1532,15 @@ function DataQualityTab({ dataQuality, isAggregateView = false }) {
 // ─── Tabs ─────────────────────────────────────────────────────────────────────
 
 const TABS = [
-  { id: "kpi", label: "KPI" },
-  { id: "fees", label: "בקרת דמי ניהול" },
-  { id: "insurance", label: "מסלול ביטוח × משפחתי" },
-  { id: "investment", label: "מסלולי השקעה" },
-  { id: "tier", label: "מדרגות צבירה" },
-  { id: "action", label: "Action Center" },
-  { id: "preview", label: "Unified Preview" },
-  { id: "qa", label: "QA Trace" },
-  { id: "quality", label: "Data Quality" },
+  { id: "kpi", label: "KPI", icon: "▣" },
+  { id: "fees", label: "בקרת דמי ניהול", icon: "◈" },
+  { id: "insurance", label: "מסלול ביטוח × משפחתי", icon: "◌" },
+  { id: "investment", label: "מסלולי השקעה", icon: "◇" },
+  { id: "tier", label: "מדרגות צבירה", icon: "▤" },
+  { id: "action", label: "Action Center", icon: "!" },
+  { id: "preview", label: "Unified Preview", icon: "▥" },
+  { id: "qa", label: "QA Trace", icon: "✓" },
+  { id: "quality", label: "Data Quality", icon: "◎" },
 ];
 
 // ─── Main Dashboard ───────────────────────────────────────────────────────────
@@ -1550,6 +1612,7 @@ export default function Dashboard({ analysisData }) {
             actions={isAllManagers ? actionCenter || [] : actions}
             managerFilter={managerFilter}
             onManagerFilterChange={setManagerFilter}
+            onNavigate={setActiveTab}
           />
         );
 
@@ -1596,12 +1659,15 @@ export default function Dashboard({ analysisData }) {
 
   return (
     <div className="dashboard" dir="rtl">
-      <header className="dashboard-header">
-        <div>
-          <h1 className="dashboard-title">ניתוח דוח פנסיוני</h1>
-          <p className="dashboard-subtitle">
-            מבט מנהלי הסדר · {pensionRows?.length || 0} פוליסות
-          </p>
+      <header className="dashboard-header product-shell-hero pension-hero">
+        <div className="product-hero-title">
+          <span className="product-hero-icon">☂</span>
+          <div>
+            <h1 className="dashboard-title">פנסיה</h1>
+            <p className="dashboard-subtitle">
+              מערכת ניהול ובקרה · {pensionRows?.length || 0} פוליסות
+            </p>
+          </div>
         </div>
 
         {summary && (
@@ -1648,7 +1714,8 @@ export default function Dashboard({ analysisData }) {
             className={`tab-btn ${activeTab === tab.id ? "active" : ""}`}
             onClick={() => setActiveTab(tab.id)}
           >
-            {tab.label}
+            <span className="tab-icon">{tab.icon}</span>
+            <span>{tab.label}</span>
 
             {tab.id === "action" && actions.length > 0 && (
               <span className="tab-badge">{actions.length}</span>

@@ -735,20 +735,17 @@ function buildAccumulationInsights(rows) {
 function classifyFeeSeverity(gap) {
   if (gap === null || gap === undefined || !Number.isFinite(Number(gap))) return "unknown";
   if (gap <= 0.0001) return "ok";
-  if (gap > 0.1) return "exception";
   return "warning";
 }
 
 function getCalculatedFeeStatus(gap) {
   if (gap === null || gap === undefined || !Number.isFinite(Number(gap))) return "unknown";
   if (gap <= 0.0001) return "ok";
-  if (gap <= 0.1) return "warning";
-  return "exception";
+  return "warning";
 }
 
 function getFeeSeverityLabel(severity) {
-  if (severity === "exception") return "חריגה";
-  if (severity === "warning") return "חריגה קלה";
+  if (severity === "warning") return "לא תקין";
   if (severity === "ok") return "תקין";
   return "חסר מידע";
 }
@@ -789,9 +786,9 @@ function buildFeeAnalysis(rows) {
   });
 
   const okRows = enriched.filter((row) => row.calculatedFeeStatus === "ok");
-  const warningRows = enriched.filter((row) => row.calculatedFeeStatus === "warning");
-  const exceptionRows = enriched.filter((row) => row.calculatedFeeStatus === "exception");
-  const exceptionAndWarningRows = enriched.filter((row) => row.calculatedFeeStatus === "warning" || row.calculatedFeeStatus === "exception");
+  const warningRows = enriched.filter((row) => row.calculatedFeeStatus === "warning" || row.calculatedFeeStatus === "exception");
+  const exceptionRows = [];
+  const exceptionAndWarningRows = warningRows;
   const unknownRows = enriched.filter((row) => row.calculatedFeeStatus === "unknown");
   const totalAnnualGapCost = exceptionAndWarningRows.reduce((sum, row) => sum + safeNumber(row.estimatedAnnualFeeGapCost), 0);
   const criticalRows = exceptionRows;
@@ -827,8 +824,7 @@ function isPresentNumber(value) {
 
 function getFeeDisplayStatus(status) {
   if (status === "ok") return "תקין";
-  if (status === "warning") return "חריגה קלה";
-  if (status === "exception") return "חריגה";
+  if (status === "warning" || status === "exception") return "לא תקין";
   return "חסר מידע";
 }
 
@@ -858,8 +854,7 @@ function buildFeeCompanyChart(rows) {
 
     if (actualFeeExists && agreementFeeExists) {
       current.validFeeRows += 1;
-      if (row.calculatedFeeStatus === "exception") current.exceptionMembers.add(memberKey);
-      else if (row.calculatedFeeStatus === "warning") current.warningMembers.add(memberKey);
+      if (row.calculatedFeeStatus === "warning" || row.calculatedFeeStatus === "exception") current.warningMembers.add(memberKey);
       else current.okMembers.add(memberKey);
     } else {
       current.unknownMembers.add(memberKey);
@@ -888,8 +883,7 @@ function buildFeeStatusMatrix(companyChart) {
   const totals = companyChart.reduce(
     (acc, item) => {
       acc.ok += item.okCount;
-      acc.warning += item.warningCount;
-      acc.exception += item.exceptionCount || 0;
+      acc.warning += item.warningCount + (item.exceptionCount || 0);
       acc.unknown += item.unknownCount;
       return acc;
     },
@@ -898,8 +892,7 @@ function buildFeeStatusMatrix(companyChart) {
 
   const rows = [
     { key: "ok", label: "תקין", className: "ok", total: totals.ok, getValue: (item) => item.okCount },
-    { key: "warning", label: "חריגה קלה", className: "warning", total: totals.warning, getValue: (item) => item.warningCount },
-    { key: "exception", label: "חריגה", className: "exception", total: totals.exception, getValue: (item) => item.exceptionCount || 0 },
+    { key: "warning", label: "לא תקין", className: "warning", total: totals.warning, getValue: (item) => item.warningCount + (item.exceptionCount || 0) },
     { key: "unknown", label: "חסר מידע", className: "unknown", total: totals.unknown, getValue: (item) => item.unknownCount },
   ];
 
@@ -1158,7 +1151,7 @@ function EducationKpiHome({ rows, selectedRows, dataset, scopeLabel, summary, to
   ];
 
   const hubCards = [
-    { id: "fees", title: "דמי ניהול", icon: "₪", text: "בדיקת דמי ניהול בפועל מול קובץ הסכמים, כולל תקין / חריגה קלה / חריגה.", metric: `${complianceRate}% עמידה`, tone: "green" },
+    { id: "fees", title: "דמי ניהול", icon: "₪", text: "בדיקת דמי ניהול בפועל מול קובץ הסכמים, כולל סטטוס תקין / לא תקין בלבד.", metric: `${complianceRate}% עמידה`, tone: "green" },
     { id: "accumulation", title: "צבירות", icon: "▤", text: "ניתוח צבירה, עובדים ללא צבירה, ריכוזיות TOP 5 וטבלת קופות מובילות.", metric: formatCurrency(accumulation.totalAccumulation), tone: "blue" },
     { id: "tracksByAge", title: "מסלול השקעה מול גיל", icon: "◈", text: "בדיקת התאמת מסלול השקעה לגיל העובד מול קובץ פרטים אישיים.", metric: "התאמת גיל", tone: "purple" },
     { id: "managers", title: "גופים מנהלים", icon: "▦", text: "פיזור צבירה ועובדים לפי גופים מנהלים מתוך קרנות ההשתלמות.", metric: `${formatNumber(issuerCount)} גופים`, tone: "orange" },
@@ -1212,7 +1205,7 @@ function FeesTab({ rows, isAggregateScope = false }) {
   const companyChart = useMemo(() => buildFeeCompanyChart(rows), [rows]);
   const exceptionSummary = useMemo(() => buildFeeExceptionSummary(analysis.rows), [analysis.rows]);
   const feeDistribution = useMemo(() => buildFeeDistributionBuckets(analysis.rows), [analysis.rows]);
-  const maxCount = Math.max(1, ...companyChart.flatMap((item) => [item.okCount, item.warningCount, item.exceptionCount || 0]));
+  const maxCount = Math.max(1, ...companyChart.flatMap((item) => [item.okCount, item.nonCompliantCount || 0]));
   const maxDistributionCount = Math.max(1, ...feeDistribution.map((item) => item.count));
   const validEmployeeCount = companyChart.reduce((sum, item) => sum + item.okCount + item.warningCount + (item.exceptionCount || 0), 0);
   const nonCompliantCount = analysis.warningCount + analysis.exceptionCount;
@@ -1228,12 +1221,12 @@ function FeesTab({ rows, isAggregateScope = false }) {
     <section className="educationTabPanel">
       <div className="educationKpiGrid">
         <KpiCard label="עובדים תקינים" value={analysis.okCount} hint="בפועל נמוך או שווה להסכם" />
-        <KpiCard label="עובדים לא תקינים" value={nonCompliantCount} hint="חריגה קלה + חריגה" />
+        <KpiCard label="עובדים לא תקינים" value={nonCompliantCount} hint="מעל ההסכם" />
         <KpiCard label="אחוז עמידה" value={`${complianceRate}%`} hint="מתוך שורות שניתן לבדוק" />
-        <KpiCard label="פער ממוצע בחריגה" value={formatPercent(averagePositiveGap, 4)} hint="מעל ההסכם בלבד" />
-        <KpiCard label="עלות חריגה שנתית משוערת" value={formatCurrency(analysis.totalAnnualGapCost)} />
+        <KpiCard label="פער ממוצע בלא תקין" value={formatPercent(averagePositiveGap, 4)} hint="מעל ההסכם בלבד" />
+        <KpiCard label="עלות לא תקינה שנתית משוערת" value={formatCurrency(analysis.totalAnnualGapCost)} />
         <KpiCard label="שורות חסרות מידע" value={analysis.unknownCount} hint="מועברות לחוצץ שגיאות" />
-        <KpiCard label="חברות עם חריגה" value={companiesWithWarnings} />
+        <KpiCard label="חברות לא תקינות" value={companiesWithWarnings} />
       </div>
 
       <section className="workspaceCard">
@@ -1252,30 +1245,24 @@ function FeesTab({ rows, isAggregateScope = false }) {
           <div className="educationFeeChartWrap" dir="rtl">
             <div className="educationFeeChartLegend">
               <span><i className="ok" /> תקין</span>
-              <span><i className="warning" /> חריגה קלה</span>
-              <span><i className="exception" /> חריגה</span>
+              <span><i className="warning" /> לא תקין</span>
             </div>
 
             <div className="educationFeeChart">
               {companyChart.map((item) => {
                 const okHeight = Math.max(6, Math.round((item.okCount / maxCount) * 180));
-                const warningHeight = Math.max(6, Math.round((item.warningCount / maxCount) * 180));
-                const exceptionHeight = Math.max(6, Math.round(((item.exceptionCount || 0) / maxCount) * 180));
+                const warningHeight = Math.max(6, Math.round(((item.nonCompliantCount || 0) / maxCount) * 180));
 
                 return (
                   <article key={item.issuer} className="educationFeeChartGroup">
-                    <div className="educationFeeBars" aria-label={`${item.issuer}: ${item.okCount} תקין, ${item.warningCount} חריגה קלה, ${item.exceptionCount || 0} חריגה`}>
+                    <div className="educationFeeBars" aria-label={`${item.issuer}: ${item.okCount} תקין, ${item.nonCompliantCount || 0} לא תקין`}>
                       <div className="educationFeeBarColumn">
                         <span>{item.okCount}</span>
                         <i className="ok" style={{ height: `${okHeight}px` }} />
                       </div>
                       <div className="educationFeeBarColumn">
-                        <span>{item.warningCount}</span>
+                        <span>{item.nonCompliantCount || 0}</span>
                         <i className="warning" style={{ height: `${warningHeight}px` }} />
-                      </div>
-                      <div className="educationFeeBarColumn">
-                        <span>{item.exceptionCount || 0}</span>
-                        <i className="exception" style={{ height: `${exceptionHeight}px` }} />
                       </div>
                     </div>
                     <strong title={item.issuer}>{item.issuer}</strong>
@@ -1294,7 +1281,7 @@ function FeesTab({ rows, isAggregateScope = false }) {
           <div>
             <h3>התפלגות דמי ניהול בפועל</h3>
             <p className="hint">
-              Bucket analysis לפי דמי הניהול שנמצאו בקובץ קרנות ההשתלמות. זה עוזר לראות אם רוב העובדים יושבים בטווח נמוך או שיש ריכוז חריג סביב מדרגות גבוהות.
+              Bucket analysis לפי דמי הניהול שנמצאו בקובץ קרנות ההשתלמות. זה עוזר לראות אם רוב העובדים יושבים בטווח נמוך או שיש ריכוז גבוה סביב מדרגות יקרות.
             </p>
           </div>
           <span className="educationStatusPill ok">{analysis.rows.length - analysis.unknownCount} שורות עם דמי ניהול</span>
@@ -1318,7 +1305,7 @@ function FeesTab({ rows, isAggregateScope = false }) {
       <section className="workspaceCard">
         <h3>טבלה מסכמת — סטטוס בדיקה לפי חברת ביטוח</h3>
         <p className="hint">
-          החברות מוצגות בציר האופקי, וסטטוס הבדיקה מוצג בציר האנכי. נוסף גם אחוז חריגה ועלות שנתית משוערת כדי להבין איפה כדאי להתחיל טיפול.
+          החברות מוצגות בציר האופקי, וסטטוס הבדיקה מוצג בציר האנכי. נוסף גם אחוז לא תקין ועלות שנתית משוערת כדי להבין איפה כדאי להתחיל טיפול.
         </p>
         <div className="tableScroll">
           <table className="miniTable productRowsTable">
@@ -1346,7 +1333,7 @@ function FeesTab({ rows, isAggregateScope = false }) {
                 </tr>
               ))}
               <tr>
-                <td><strong>אחוז חריגה</strong></td>
+                <td><strong>אחוז לא תקין</strong></td>
                 {companyChart.map((item) => {
                   const checked = item.okCount + item.warningCount + (item.exceptionCount || 0);
                   const percent = checked ? Math.round((((item.warningCount || 0) + (item.exceptionCount || 0)) / checked) * 100) : 0;
@@ -1357,7 +1344,7 @@ function FeesTab({ rows, isAggregateScope = false }) {
                 </td>
               </tr>
               <tr>
-                <td><strong>עלות חריגה שנתית</strong></td>
+                <td><strong>עלות לא תקינה שנתית</strong></td>
                 {companyChart.map((item) => {
                   const issuerCost = analysis.exceptionAndWarningRows
                     .filter((row) => normalizeText(row.issuerOriginal || row.issuer || row.manager || "לא ידוע") === item.issuer)
@@ -1379,9 +1366,9 @@ function FeesTab({ rows, isAggregateScope = false }) {
       </section>
 
       <section className="workspaceCard">
-        <h3>מוקדי חריגה לטיפול</h3>
+        <h3>מוקדי אי תקינות לטיפול</h3>
         <p className="hint">
-          הטבלה מרכזת רק גופים עם חריגות דמי ניהול, לפי אומדן עלות שנתית. האומדן מחושב כצבירה כפול הפער בין דמי הניהול בפועל לדמי הניהול בהסכם.
+          הטבלה מרכזת רק גופים עם דמי ניהול לא תקינים, לפי אומדן עלות שנתית. האומדן מחושב כצבירה כפול הפער בין דמי הניהול בפועל לדמי הניהול בהסכם.
         </p>
         {exceptionSummary.length ? (
           <div className="tableScroll">
@@ -1390,12 +1377,12 @@ function FeesTab({ rows, isAggregateScope = false }) {
                 <tr>
                   <th>גוף מנהל</th>
                   <th>שורות שנבדקו</th>
-                  <th>חריגות</th>
-                  <th>אחוז חריגה</th>
+                  <th>לא תקינים</th>
+                  <th>אחוז לא תקין</th>
                   <th>פער מקסימלי</th>
-                  <th>חריגות</th>
+                  <th>לא תקינים</th>
                   <th>עלות שנתית משוערת</th>
-                  <th>צבירה בחריגה</th>
+                  <th>צבירה לא תקינה</th>
                 </tr>
               </thead>
               <tbody>
@@ -1415,15 +1402,15 @@ function FeesTab({ rows, isAggregateScope = false }) {
             </table>
           </div>
         ) : (
-          <p className="hint">לא נמצאו חריגות דמי ניהול ביחס להסכם.</p>
+          <p className="hint">לא נמצאו דמי ניהול לא תקינים ביחס להסכם.</p>
         )}
       </section>
 
       {!isAggregateScope && (
       <section className="workspaceCard">
-        <h3>Top חריגות דמי ניהול לעבודה</h3>
+        <h3>Top דמי ניהול לא תקינים לעבודה</h3>
         <p className="hint">
-          מוצגות עד 15 החריגות המשמעותיות ביותר, כדי שהיועץ יוכל להתחיל מהשורות עם ההשפעה הכספית הגבוהה ביותר.
+          מוצגות עד 15 השורות הלא תקינות המשמעותיות ביותר, כדי שהיועץ יוכל להתחיל מהשורות עם ההשפעה הכספית הגבוהה ביותר.
         </p>
         {topWarningRows.length ? (
           <div className="tableScroll">
@@ -1463,7 +1450,7 @@ function FeesTab({ rows, isAggregateScope = false }) {
             </table>
           </div>
         ) : (
-          <p className="hint">אין חריגות להצגה.</p>
+          <p className="hint">אין שורות לא תקינות להצגה.</p>
         )}
       </section>
 
@@ -1521,7 +1508,7 @@ function FeesTab({ rows, isAggregateScope = false }) {
       {isAggregateScope && (
         <section className="workspaceCard">
           <h3>פירוט פרטני מוסתר במבט אגרגטיבי</h3>
-          <p className="hint">בבחירה של כל מנהלי ההסדר מוצגים רק נתונים מסכמים שניתן לאחד ברמת תיק: סטטוס לפי חברה, מוקדי חריגה, עלות חריגה וצבירה. רשימות עובדים, מזהים ושורות פרטניות מוצגות רק לאחר בחירת מנהל הסדר יחיד.</p>
+          <p className="hint">בבחירה של כל מנהלי ההסדר מוצגים רק נתונים מסכמים שניתן לאחד ברמת תיק: סטטוס לפי חברה, מוקדי אי תקינות, עלות לא תקינה וצבירה. רשימות עובדים, מזהים ושורות פרטניות מוצגות רק לאחר בחירת מנהל הסדר יחיד.</p>
         </section>
       )}
     </section>
@@ -1914,7 +1901,7 @@ function ManagersTab({ rows }) {
                 <th>אחוז מהתיק</th>
                 <th>הפקדה / פרמיה אחרונה</th>
                 <th>דמי ניהול ממוצעים</th>
-                <th>חריגות דמי ניהול</th>
+                <th>דמי ניהול לא תקינים</th>
               </tr>
             </thead>
 
@@ -2027,7 +2014,7 @@ function ErrorsTab({ rows, isAggregateScope = false }) {
       <section className="workspaceCard">
         <h3>רשימת עובדים עם שגיאות לפי מס עובד</h3>
         <p className="hint">
-          החוצץ הזה מרכז רק עובדים/שורות שדורשים טיפול: חריגות דמי ניהול, חוסר התאמה להסכם, חסר גיל/מסלול או נתוני בסיס חסרים.
+          החוצץ הזה מרכז רק עובדים/שורות שדורשים טיפול: דמי ניהול לא תקינים, חוסר התאמה להסכם, חסר גיל/מסלול או נתוני בסיס חסרים.
         </p>
 
         {errors.length ? (

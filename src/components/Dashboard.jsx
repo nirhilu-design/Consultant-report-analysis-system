@@ -1566,87 +1566,33 @@ export default function Dashboard({ analysisData }) {
   }
 
   return (
-    <div className="dashboard" dir="rtl">
-      <header className="dashboard-header product-shell-hero pension-hero">
-        <div className="product-hero-title">
-          <span className="product-hero-icon">☂</span>
-          <div>
-            <h1 className="dashboard-title">פנסיה</h1>
-            <p className="dashboard-subtitle">
-              מערכת ניהול ובקרה · {pensionRows?.length || 0} פוליסות
-            </p>
-          </div>
-        </div>
-
-        {summary && (
-          <div className="summary-pills">
-            <span className="pill pill-green">✓ {summary.valid} תקין</span>
-            <span className="pill pill-red">✗ {summary.invalid} לא תקין</span>
-            <span className="pill pill-neutral">
-              — {summary.excluded} תפעול
-            </span>
-
-            {summary.noAgreement > 0 && (
-              <span className="pill pill-warning">
-                ? {summary.noAgreement} ללא הסכם
-              </span>
-            )}
-
-            {summary.tierPotential > 0 && (
-              <span className="pill pill-warning">
-                ⚠ {summary.tierPotential} מודל צבירה
-              </span>
-            )}
-
-            {summary.dataQualityIssues > 0 && (
-              <span className="pill pill-warning">
-                QA {summary.dataQualityIssues} בעיות
-              </span>
-            )}
-          </div>
-        )}
-      </header>
-
-      <GlobalManagerScope
-        managerFilter={managerFilter}
-        onManagerFilterChange={setManagerFilter}
-        managerOptions={managerOptions}
-        scopedCount={previewRows.length}
-        totalCount={baseRows.length}
-      />
-
-
+    <div className="dashboard dashboard-single-product-shell" dir="rtl">
       {activeTab !== "kpi" && (
-        <div className="product-return-row">
-          <button type="button" className="product-return-btn" onClick={() => setActiveTab("kpi")}>
-            <span>‹</span>
-            חזרה למסך KPI ראשי
-          </button>
-        </div>
+        <header className="product-single-bar pension-single-bar">
+          <div className="product-single-title">
+            <span className="product-single-icon">☂</span>
+            <div>
+              <p className="eyebrow">PENSION ANALYSIS</p>
+              <h1>פנסיה</h1>
+              <p>ניתוח מפורט לפי מנהל הסדר, דמי ניהול, מסלולים, צבירות, QA ופעולות.</p>
+            </div>
+          </div>
+
+          <div className="product-single-actions">
+            <GlobalManagerScope
+              managerFilter={managerFilter}
+              onManagerFilterChange={setManagerFilter}
+              managerOptions={managerOptions}
+              scopedCount={previewRows.length}
+              totalCount={baseRows.length}
+            />
+            <button type="button" className="product-return-btn" onClick={() => setActiveTab("kpi")}>
+              <span>‹</span>
+              חזרה למסך KPI ראשי
+            </button>
+          </div>
+        </header>
       )}
-
-      <nav className="tab-bar">
-        {TABS.map((tab) => (
-          <button
-            key={tab.id}
-            className={`tab-btn ${activeTab === tab.id ? "active" : ""}`}
-            onClick={() => setActiveTab(tab.id)}
-          >
-            <span className="tab-icon">{tab.icon}</span>
-            <span>{tab.label}</span>
-
-            {tab.id === "action" && actions.length > 0 && (
-              <span className="tab-badge">{actions.length}</span>
-            )}
-
-            {tab.id === "quality" && scopedDataQuality?.summary?.issueCount > 0 && (
-              <span className="tab-badge">
-                {scopedDataQuality.summary.issueCount}
-              </span>
-            )}
-          </button>
-        ))}
-      </nav>
 
       <main className="dashboard-content">{renderTab()}</main>
     </div>

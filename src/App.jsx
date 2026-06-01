@@ -28,6 +28,7 @@ import {
 } from "./parsing/parseManagerFile.js";
 
 import { parseEducationFundManagerFiles } from "./parsing/parseEducationFundManagerFiles.js";
+import { parseExecutiveInsuranceManagerFiles } from "./parsing/parseExecutiveInsuranceManagerFiles.js";
 
 import {
   PRODUCT_MODES,
@@ -130,7 +131,7 @@ function combineEducationFundSummary(managerResults) {
 }
 
 function getProductsReadyForAnalysis(currentSession) {
-  const productModes = [PRODUCT_MODES.PENSION, PRODUCT_MODES.HISHTALMUT];
+  const productModes = [PRODUCT_MODES.PENSION, PRODUCT_MODES.HISHTALMUT, PRODUCT_MODES.EXECUTIVE_INSURANCE];
 
   return productModes.filter((productMode) => {
     const activeManagers = getActiveManagers(currentSession, productMode);
@@ -143,7 +144,7 @@ function getProductsReadyForAnalysis(currentSession) {
 }
 
 function getProductsWithPartialFiles(currentSession) {
-  const productModes = [PRODUCT_MODES.PENSION, PRODUCT_MODES.HISHTALMUT];
+  const productModes = [PRODUCT_MODES.PENSION, PRODUCT_MODES.HISHTALMUT, PRODUCT_MODES.EXECUTIVE_INSURANCE];
 
   return productModes.filter((productMode) => {
     const activeManagers = getActiveManagers(currentSession, productMode);
@@ -159,6 +160,7 @@ function getDefaultSelectedProduct(productResults, activeProductMode) {
   if (productResults[activeProductMode]) return activeProductMode;
   if (productResults[PRODUCT_MODES.PENSION]) return PRODUCT_MODES.PENSION;
   if (productResults[PRODUCT_MODES.HISHTALMUT]) return PRODUCT_MODES.HISHTALMUT;
+  if (productResults[PRODUCT_MODES.EXECUTIVE_INSURANCE]) return PRODUCT_MODES.EXECUTIVE_INSURANCE;
   return activeProductMode || PRODUCT_MODES.PENSION;
 }
 
@@ -311,6 +313,67 @@ export default function App() {
     };
   }
 
+  async function runExecutiveInsuranceAnalysis(currentSession, diagnostics) {
+    const managersToAnalyze = getActiveManagers(currentSession, PRODUCT_MODES.EXECUTIVE_INSURANCE);
+    const managerResults = [];
+
+    for (let index = 0; index < managersToAnalyze.length; index += 1) {
+      const manager = managersToAnalyze[index];
+      const result = await parseExecutiveInsuranceManagerFiles({
+        dataFile: manager.dataFile,
+        agreementsFile: manager.agreementsFile,
+        manager: { ...manager, index },
+      });
+
+      managerResults.push(result);
+      diagnostics.warnings.push(...asArray(result.warnings));
+    }
+
+    const unifiedRows = managerResults.flatMap((result) => asArray(result.unifiedRows));
+    const rawRows = managerResults.flatMap((result) => asArray(result.rawRows));
+    const agreements = managerResults.flatMap((result) => asArray(result.agreements));
+    const summaries = managerResults.map((result) => result.summary || {});
+    const issuers = [...new Set(summaries.flatMap((summary) => asArray(summary.issuers)))];
+
+    const productSummary = {
+      productType: PRODUCT_MODES.EXECUTIVE_INSURANCE,
+      productLabel: "ביטוח מנהלים",
+      managers: managerResults.length,
+      rawRowCount: rawRows.length,
+      unifiedRowCount: unifiedRows.length,
+      agreementCount: agreements.length,
+      issuerCount: issuers.length,
+      issuers,
+      totalAccumulation: summaries.reduce((sum, summary) => sum + Number(summary.totalAccumulation || 0), 0),
+      totalDeathCover: summaries.reduce((sum, summary) => sum + Number(summary.totalDeathCover || 0), 0),
+      feeOk: summaries.reduce((sum, summary) => sum + Number(summary.feeOk || 0), 0),
+      feeNotOk: summaries.reduce((sum, summary) => sum + Number(summary.feeNotOk || 0), 0),
+      feeWarnings: summaries.reduce((sum, summary) => sum + Number(summary.feeWarnings || 0), 0),
+    };
+
+    diagnostics.counts = {
+      managers: managerResults.length,
+      rawRows: rawRows.length,
+      agreements: agreements.length,
+      unifiedRows: unifiedRows.length,
+    };
+
+    return {
+      productMode: PRODUCT_MODES.EXECUTIVE_INSURANCE,
+      productType: PRODUCT_MODES.EXECUTIVE_INSURANCE,
+      productLabel: "ביטוח מנהלים",
+      unifiedRows,
+      rawRows,
+      agreements,
+      productSummary,
+      executiveInsuranceSummary: productSummary,
+      executiveInsuranceRows: unifiedRows,
+      managerResults,
+      diagnostics,
+      uploadSession: diagnostics.uploadSession,
+    };
+  }
+
   async function handleStartAnalysis() {
     if (isAnalyzing) return;
 
@@ -381,6 +444,29 @@ export default function App() {
         const educationFundResult = await runEducationFundAnalysis(currentSession, diagnostics);
         productResults[PRODUCT_MODES.HISHTALMUT] = educationFundResult;
         productDiagnostics[PRODUCT_MODES.HISHTALMUT] = diagnostics;
+        allWarnings.push(...diagnostics.warnings);
+      }
+
+      if (readyProducts.includes(PRODUCT_MODES.EXECUTIVE_INSURANCE)) {
+        const diagnostics = {
+          productMode: PRODUCT_MODES.EXECUTIVE_INSURANCE,
+          warnings: [],
+          uploadSession,
+          managers: getActiveManagers(currentSession, PRODUCT_MODES.EXECUTIVE_INSURANCE).map((manager) => ({
+            id: manager.id,
+            name: manager.name,
+            files: {
+              dataFile: manager.dataFile?.name || "",
+              agreementsFile: manager.agreementsFile?.name || "",
+              personalDetailsFile: manager.personalDetailsFile?.name || "",
+            },
+          })),
+          counts: {},
+        };
+
+        const executiveInsuranceResult = await runExecutiveInsuranceAnalysis(currentSession, diagnostics);
+        productResults[PRODUCT_MODES.EXECUTIVE_INSURANCE] = executiveInsuranceResult;
+        productDiagnostics[PRODUCT_MODES.EXECUTIVE_INSURANCE] = diagnostics;
         allWarnings.push(...diagnostics.warnings);
       }
 

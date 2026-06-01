@@ -3866,3 +3866,240 @@ body,
   border-color: #f3df9f;
   background: linear-gradient(180deg, #ffffff 0%, #fffaf0 100%);
 }
+
+/* v66 — Executive Insurance product screen */
+.productAnalysisView.executiveInsuranceView {
+  display: grid;
+  gap: 18px;
+  font-family: Calibri, Arial, sans-serif;
+}
+
+.productHero.compactHero {
+  border: 1px solid rgba(23, 54, 93, 0.14);
+  border-radius: 22px;
+  padding: 22px;
+  background: linear-gradient(135deg, rgba(23, 54, 93, 0.08), rgba(191, 155, 48, 0.12));
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.07);
+}
+
+.productHero.compactHero h2 {
+  margin: 4px 0 8px;
+  color: #17365d;
+  font-size: 30px;
+}
+
+.productHero.compactHero p {
+  margin: 0;
+  color: #526070;
+}
+
+.productKpiGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px;
+}
+
+.productKpiGrid.four {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.productKpiCard {
+  border: 1px solid rgba(23, 54, 93, 0.12);
+  border-radius: 20px;
+  padding: 16px;
+  background: #ffffff;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.06);
+  display: grid;
+  gap: 6px;
+  min-height: 108px;
+}
+
+.productKpiCard span {
+  color: #64748b;
+  font-size: 14px;
+}
+
+.productKpiCard strong {
+  color: #17365d;
+  font-size: 26px;
+  line-height: 1.1;
+}
+
+.productKpiCard small {
+  color: #64748b;
+}
+
+.productKpiCard.blue {
+  border-top: 4px solid #17365d;
+}
+
+.productKpiCard.gold {
+  border-top: 4px solid #bf9b30;
+}
+
+.productKpiCard.green {
+  border-top: 4px solid #15803d;
+}
+
+.productKpiCard.red {
+  border-top: 4px solid #b91c1c;
+}
+
+.productTabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 8px;
+  border: 1px solid rgba(23, 54, 93, 0.12);
+  border-radius: 18px;
+  background: #f8fafc;
+}
+
+.productTabs button {
+  border: 0;
+  border-radius: 14px;
+  padding: 10px 18px;
+  background: transparent;
+  color: #17365d;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.productTabs button.active {
+  background: #17365d;
+  color: #ffffff;
+  box-shadow: 0 10px 22px rgba(23, 54, 93, 0.2);
+}
+
+.productAnalysisPanel {
+  border: 1px solid rgba(23, 54, 93, 0.12);
+  border-radius: 22px;
+  padding: 18px;
+  background: #ffffff;
+  box-shadow: 0 16px 38px rgba(15, 23, 42, 0.06);
+  display: grid;
+  gap: 16px;
+}
+
+.productSectionHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.productSectionHeader h3 {
+  margin: 4px 0 6px;
+  color: #17365d;
+  font-size: 23px;
+}
+
+.productSectionHeader p {
+  margin: 0;
+  color: #64748b;
+}
+
+.productTableWrap {
+  overflow-x: auto;
+  border-radius: 16px;
+  border: 1px solid rgba(23, 54, 93, 0.1);
+}
+
+.productTable {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 980px;
+  background: #ffffff;
+}
+
+.productTable th,
+.productTable td {
+  padding: 11px 12px;
+  border-bottom: 1px solid #eef2f7;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.productTable th {
+  background: #f8fafc;
+  color: #17365d;
+  font-weight: 800;
+}
+
+.statusPill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 74px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.statusPill.ok {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.statusPill.bad {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.issuerBarsList {
+  display: grid;
+  gap: 12px;
+}
+
+.issuerBarCard {
+  border: 1px solid rgba(23, 54, 93, 0.1);
+  border-radius: 18px;
+  padding: 14px;
+  background: #fbfdff;
+  display: grid;
+  gap: 10px;
+}
+
+.issuerBarTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  color: #17365d;
+}
+
+.issuerBarTop span,
+.issuerBarCard small {
+  color: #64748b;
+}
+
+.issuerBarTrack {
+  height: 12px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: #e2e8f0;
+}
+
+.issuerBarFill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #17365d, #bf9b30);
+}
+
+@media (max-width: 980px) {
+  .productKpiGrid.four {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .productKpiGrid.four {
+    grid-template-columns: 1fr;
+  }
+
+  .issuerBarTop {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

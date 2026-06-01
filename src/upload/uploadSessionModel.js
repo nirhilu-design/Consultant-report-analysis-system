@@ -7,6 +7,7 @@ export const DEFAULT_MANAGER_ID = "manager_1";
 export const PRODUCT_MODES = {
   PENSION: "pension",
   HISHTALMUT: "hishtalmut",
+  EXECUTIVE_INSURANCE: "executiveInsurance",
 };
 
 export const DEFAULT_PRODUCT_MODE = PRODUCT_MODES.PENSION;
@@ -15,7 +16,9 @@ export const FILE_SLOT_KEYS = ["dataFile", "agreementsFile", "personalDetailsFil
 export const REQUIRED_FILE_SLOT_KEYS = ["dataFile", "agreementsFile"];
 
 export function normalizeProductMode(productMode) {
-  return productMode === PRODUCT_MODES.HISHTALMUT ? PRODUCT_MODES.HISHTALMUT : PRODUCT_MODES.PENSION;
+  if (productMode === PRODUCT_MODES.HISHTALMUT) return PRODUCT_MODES.HISHTALMUT;
+  if (productMode === PRODUCT_MODES.EXECUTIVE_INSURANCE) return PRODUCT_MODES.EXECUTIVE_INSURANCE;
+  return PRODUCT_MODES.PENSION;
 }
 
 export function createEmptyProductFiles() {
@@ -35,6 +38,10 @@ export function createProductsState(existingProducts = {}) {
     [PRODUCT_MODES.HISHTALMUT]: {
       ...createEmptyProductFiles(),
       ...(existingProducts?.[PRODUCT_MODES.HISHTALMUT] || {}),
+    },
+    [PRODUCT_MODES.EXECUTIVE_INSURANCE]: {
+      ...createEmptyProductFiles(),
+      ...(existingProducts?.[PRODUCT_MODES.EXECUTIVE_INSURANCE] || {}),
     },
   };
 }

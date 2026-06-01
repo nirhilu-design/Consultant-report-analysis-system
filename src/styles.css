@@ -4157,3 +4157,36 @@ body,
     text-align: right;
   }
 }
+
+/* v58 product screen corrections */
+.product-return-row {
+  display: flex;
+  justify-content: flex-start;
+  margin: 12px 0 10px;
+}
+
+.product-return-btn {
+  border: 1px solid rgba(37, 99, 235, 0.22);
+  background: linear-gradient(180deg, #ffffff, #f8fbff);
+  color: #12366f;
+  border-radius: 14px;
+  padding: 10px 16px;
+  font-family: Calibri, Arial, sans-serif;
+  font-size: 15px;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 8px 22px rgba(15, 35, 75, 0.08);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.product-return-btn:hover {
+  border-color: rgba(37, 99, 235, 0.45);
+  transform: translateY(-1px);
+}
+
+.product-return-btn span {
+  font-size: 22px;
+  line-height: 1;
+}

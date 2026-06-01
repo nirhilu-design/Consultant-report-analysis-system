@@ -11,15 +11,16 @@
 import React, { useEffect, useMemo, useState } from "react";
 import Dashboard from "./Dashboard.jsx";
 import EducationFundAnalysisView from "./EducationFundAnalysisView.jsx";
+import ExecutiveInsuranceAnalysisView from "./ExecutiveInsuranceAnalysisView.jsx";
 import { PRODUCT_MODES, getProductModeLabel } from "./ProductModeSelector.jsx";
 
 const PRODUCT_LABELS = {
   [PRODUCT_MODES.PENSION]: "פנסיה",
   [PRODUCT_MODES.HISHTALMUT]: "קרן השתלמות",
+  [PRODUCT_MODES.EXECUTIVE_INSURANCE]: "ביטוח מנהלים",
 };
 
 const FUTURE_PRODUCTS = [
-  { key: "executiveInsurance", label: "ביטוח מנהלים", description: "המוצר הבא בתור: שלד טעינה וניתוח ייבנה לאחר אישור מבנה הקבצים", status: "הבא בתור" },
   { key: "gemel", label: "קופות גמל", description: "ניתוח קופות גמל", status: "עתידי" },
   { key: "aca", label: "אכ\"ע", description: "ניתוח כיסוי אובדן כושר עבודה", status: "עתידי" },
   { key: "meetings", label: "פגישות", description: "מעקב פגישות ולקוחות באיחור", status: "עתידי" },
@@ -83,6 +84,15 @@ function getAvailableProducts(analysisData) {
     analysisData?.productSummary?.productType === PRODUCT_MODES.HISHTALMUT
   ) {
     products.push(PRODUCT_MODES.HISHTALMUT);
+  }
+
+  if (
+    productResults[PRODUCT_MODES.EXECUTIVE_INSURANCE] ||
+    analysisData?.executiveInsuranceSummary ||
+    analysisData?.executiveInsuranceRows ||
+    analysisData?.productSummary?.productType === PRODUCT_MODES.EXECUTIVE_INSURANCE
+  ) {
+    products.push(PRODUCT_MODES.EXECUTIVE_INSURANCE);
   }
 
   return products.length ? products : [PRODUCT_MODES.PENSION];
@@ -230,7 +240,7 @@ function groupSum(items, getKey, getValue) {
 
 function buildProductExecutiveSummary(productMode, productResult) {
   const label = PRODUCT_LABELS[productMode] || getProductModeLabel(productMode);
-  const rows = productMode === PRODUCT_MODES.HISHTALMUT ? getEducationRows(productResult) : getPensionRows(productResult);
+  const rows = productMode === PRODUCT_MODES.HISHTALMUT || productMode === PRODUCT_MODES.EXECUTIVE_INSURANCE ? getEducationRows(productResult) : getPensionRows(productResult);
 
   const summary = productResult?.productSummary || productResult?.educationFundSummary || productResult?.pensionSummary || {};
   const diagnosticsCounts = productResult?.diagnostics?.counts || {};
@@ -730,6 +740,8 @@ export default function AnalysisWorkspace({ files, analysisData, onBack }) {
           />
           {selectedProduct === PRODUCT_MODES.PENSION ? (
             <Dashboard files={files} analysisData={pensionAnalysisData} />
+          ) : selectedProduct === PRODUCT_MODES.EXECUTIVE_INSURANCE ? (
+            <ExecutiveInsuranceAnalysisView analysisData={analysisData} />
           ) : (
             <EducationFundAnalysisView analysisData={analysisData} />
           )}

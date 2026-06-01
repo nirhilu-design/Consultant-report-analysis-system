@@ -6,8 +6,8 @@ import * as XLSX from "xlsx";
 
 const PRODUCT_TYPE = "executiveInsurance";
 const PRODUCT_LABEL = "ביטוח מנהלים";
-const DATA_PARSER_VERSION = "executive_insurance_v67";
-const AGREEMENTS_PARSER_VERSION = "executive_insurance_agreements_v67";
+const DATA_PARSER_VERSION = "executive_insurance_v66_1";
+const AGREEMENTS_PARSER_VERSION = "executive_insurance_agreements_v66_1";
 
 const HEADER_ALIASES = {
   employeeCode: ["קוד מזהה של העובד", "קוד עובד", "מספר עובד"],
@@ -71,19 +71,9 @@ function normalizeHeader(value) {
 function normalizeNumber(value) {
   if (value === null || value === undefined || value === "") return null;
   if (typeof value === "number") return Number.isFinite(value) ? value : null;
-
-  const text = String(value).replace(/,/g, "").trim();
-  const cleaned = text.replace(/%/g, "").replace(/[^\d.-]/g, "");
-  if (cleaned) {
-    const parsed = Number(cleaned);
-    if (Number.isFinite(parsed)) return parsed;
-  }
-
-  // Agreement cells sometimes contain text like "0.5% יורד ל 0.2%".
-  // Use the first numeric fee as the conservative agreement ceiling for now.
-  const firstNumber = text.match(/-?\d+(?:\.\d+)?/);
-  if (!firstNumber) return null;
-  const parsed = Number(firstNumber[0]);
+  const cleaned = String(value).replace(/,/g, "").replace(/%/g, "").replace(/[^\d.-]/g, "");
+  if (!cleaned) return null;
+  const parsed = Number(cleaned);
   return Number.isFinite(parsed) ? parsed : null;
 }
 
@@ -128,26 +118,6 @@ function normalizeExecutiveIssuer(value) {
     .replace(/ביטוח/g, "")
     .replace(/\s+/g, " ")
     .trim();
-}
-
-
-function getExecutiveInsurancePeriodByYear(year) {
-  const numericYear = Number(year || 0);
-  if (!numericYear) return "unknown";
-  if (numericYear < 2004) return "before2004";
-  if (numericYear >= 2004 && numericYear < 2013) return "from2004To2013";
-  return "from2013NoCoefficient";
-}
-
-const PERIOD_LABELS = {
-  before2004: "לפני 2004",
-  from2004To2013: "2004-2013",
-  from2013NoCoefficient: "2013 והלאה ללא מקדם",
-  unknown: "לא זוהתה תקופה",
-};
-
-function getExecutiveInsurancePeriodLabel(period) {
-  return PERIOD_LABELS[period] || PERIOD_LABELS.unknown;
 }
 
 function readSheetRows(workbook, sheetName) {
@@ -258,8 +228,6 @@ function parseExecutiveInsurance(workbook) {
       companyName: normalizeExecutiveIssuer(issuerOriginal) || issuerOriginal,
       insuranceStartDate: normalizeDate(startDateRaw),
       insuranceStartYear: getYear(startDateRaw),
-      executiveInsurancePeriod: getExecutiveInsurancePeriodByYear(getYear(startDateRaw)),
-      executiveInsurancePeriodLabel: getExecutiveInsurancePeriodLabel(getExecutiveInsurancePeriodByYear(getYear(startDateRaw))),
       activeStatus: normalizeText(cell(rawRow, headerInfo.map, "activeStatus", 26)),
       policyStatus: normalizeText(cell(rawRow, headerInfo.map, "policyStatus", 41)),
       actualPremiumFeePercent,
@@ -301,68 +269,30 @@ function parseAgreementFee(value) {
 }
 
 function pickAgreementColumns(rows) {
-  const columns = {
-    issuerIndex: 0,
-    disabilityIndex: 1,
-    premiumByPeriod: {
-      before2004: null,
-      from2004To2013: 2,
-      from2013NoCoefficient: 6,
-    },
-    accumulationByPeriod: {
-      before2004: null,
-      from2004To2013: 3,
-      from2013NoCoefficient: 7,
-    },
+  let issuerIndex = 1;
+  let disabilityIndex = 2;
+  const premiumByPeriod = {
+    legacy2004To2012: 3,
+    from2013: 5,
+    default: 7,
+  };
+  const accumulationByPeriod = {
+    legacy2004To2012: 4,
+    from2013: 6,
+    default: 8,
   };
 
-  const headerRows = rows.slice(0, 4);
-
-  headerRows.forEach((row) => {
+  rows.slice(0, 8).forEach((row) => {
     (row || []).forEach((cellValue, index) => {
       const text = normalizeText(cellValue);
-      if (text.includes("חברת ביטוח") || text.includes("יצרן")) columns.issuerIndex = index;
-      if (text.includes("א.כ.ע") || text.includes("אכע")) columns.disabilityIndex = index;
+      if (text.includes("חברת ביטוח")) issuerIndex = index;
+      if (text.includes("א.כ.ע") || text.includes("אכע")) disabilityIndex = index;
     });
   });
 
-  // Detect two-column period blocks. A block is usually a header cell above
-  // "דמי ניהול מפרמיה" and "דמי ניהול מצבירה".
-  headerRows.forEach((row, rowIndex) => {
-    (row || []).forEach((cellValue, index) => {
-      const text = normalizeText(cellValue);
-      const nextText = normalizeText(rows?.[rowIndex + 1]?.[index]);
-      const nextNextText = normalizeText(rows?.[rowIndex + 1]?.[index + 1]);
-      const hasFeePair =
-        (nextText.includes("פרמיה") && nextNextText.includes("צבירה")) ||
-        (text.includes("פרמיה") && normalizeText(row?.[index + 1]).includes("צבירה"));
-
-      if (!hasFeePair) return;
-
-      if (/לפני|עד\s*2003|2003|טרום/.test(text)) {
-        columns.premiumByPeriod.before2004 = index;
-        columns.accumulationByPeriod.before2004 = index + 1;
-      } else if (/2004|2012/.test(text)) {
-        columns.premiumByPeriod.from2004To2013 = index;
-        columns.accumulationByPeriod.from2004To2013 = index + 1;
-      } else if (/2013/.test(text)) {
-        // If the file has two 2013 blocks, use the later one for 2013+ without coefficient.
-        columns.premiumByPeriod.from2013NoCoefficient = index;
-        columns.accumulationByPeriod.from2013NoCoefficient = index + 1;
-      }
-    });
-  });
-
-  // Common uploaded format has three logical blocks but only two named headers:
-  // 2004-2012 at C:D, 2013 at E:F, and another 2013 block at G:H.
-  // Treat the last 2013 block as the no-coefficient period, and keep the first as fallback.
-  if (columns.premiumByPeriod.from2013NoCoefficient === null && rows?.[1]?.[6] !== undefined) {
-    columns.premiumByPeriod.from2013NoCoefficient = 6;
-    columns.accumulationByPeriod.from2013NoCoefficient = 7;
-  }
-
-  return columns;
+  return { issuerIndex, disabilityIndex, premiumByPeriod, accumulationByPeriod };
 }
+
 function parseExecutiveInsuranceAgreements(workbook) {
   const sheetName = workbook?.SheetNames?.[0];
   if (!sheetName) {
@@ -388,17 +318,17 @@ function parseExecutiveInsuranceAgreements(workbook) {
       issuer: normalizeExecutiveIssuer(issuerOriginal) || issuerOriginal,
       disabilityCoverCostPercent: parseAgreementFee(row?.[columns.disabilityIndex]),
       periods: {
-        before2004: {
-          premiumFeePercent: parseAgreementFee(row?.[columns.premiumByPeriod.before2004]),
-          accumulationFeePercent: parseAgreementFee(row?.[columns.accumulationByPeriod.before2004]),
+        legacy2004To2012: {
+          premiumFeePercent: parseAgreementFee(row?.[columns.premiumByPeriod.legacy2004To2012]),
+          accumulationFeePercent: parseAgreementFee(row?.[columns.accumulationByPeriod.legacy2004To2012]),
         },
-        from2004To2013: {
-          premiumFeePercent: parseAgreementFee(row?.[columns.premiumByPeriod.from2004To2013]),
-          accumulationFeePercent: parseAgreementFee(row?.[columns.accumulationByPeriod.from2004To2013]),
+        from2013: {
+          premiumFeePercent: parseAgreementFee(row?.[columns.premiumByPeriod.from2013]),
+          accumulationFeePercent: parseAgreementFee(row?.[columns.accumulationByPeriod.from2013]),
         },
-        from2013NoCoefficient: {
-          premiumFeePercent: parseAgreementFee(row?.[columns.premiumByPeriod.from2013NoCoefficient]),
-          accumulationFeePercent: parseAgreementFee(row?.[columns.accumulationByPeriod.from2013NoCoefficient]),
+        default: {
+          premiumFeePercent: parseAgreementFee(row?.[columns.premiumByPeriod.default]),
+          accumulationFeePercent: parseAgreementFee(row?.[columns.accumulationByPeriod.default]),
         },
       },
     });
@@ -425,15 +355,16 @@ function resolveExecutiveInsuranceAgreement(row, agreements) {
 
   if (!candidates.length) return null;
 
-  const period = getExecutiveInsurancePeriodByYear(year);
+  let period = "default";
+  if (year >= 2004 && year <= 2012) period = "legacy2004To2012";
+  if (year >= 2013) period = "from2013";
 
   const candidate = candidates[0];
-  const periodAgreement = candidate.periods?.[period] || null;
+  const periodAgreement = candidate.periods?.[period] || candidate.periods?.default || null;
 
   return {
     issuer: candidate.issuer,
     period,
-    periodLabel: getExecutiveInsurancePeriodLabel(period),
     premiumFeePercent: periodAgreement?.premiumFeePercent ?? null,
     accumulationFeePercent: periodAgreement?.accumulationFeePercent ?? null,
     disabilityCoverCostPercent: candidate.disabilityCoverCostPercent ?? null,
@@ -446,48 +377,14 @@ function compareFee(actual, allowed) {
   return safeNumber(actual) <= safeNumber(allowed) + 0.0001;
 }
 
-function buildFeeAudit(row, agreement) {
-  if (!agreement) {
-    return {
-      status: "לא תקין",
-      issueCode: "missingAgreement",
-      issue: "לא נמצא הסכם תואם לחברת הביטוח",
-    };
-  }
+function getFeeStatus(row, agreement) {
+  if (!agreement) return "לא תקין";
 
-  const hasAgreementPremium = agreement.premiumFeePercent !== null && agreement.premiumFeePercent !== undefined;
-  const hasAgreementAccumulation = agreement.accumulationFeePercent !== null && agreement.accumulationFeePercent !== undefined;
-  const hasActualPremium = row.actualPremiumFeePercent !== null && row.actualPremiumFeePercent !== undefined;
-  const hasActualAccumulation = row.actualAccumulationFeePercent !== null && row.actualAccumulationFeePercent !== undefined;
+  const premiumOk = compareFee(row.actualPremiumFeePercent, agreement.premiumFeePercent);
+  const accumulationOk = compareFee(row.actualAccumulationFeePercent, agreement.accumulationFeePercent);
 
-  if (!hasAgreementPremium && !hasAgreementAccumulation) {
-    return {
-      status: "לא תקין",
-      issueCode: "missingAgreement",
-      issue: `אין הסכם דמי ניהול לתקופה: ${agreement.periodLabel || "לא ידוע"}`,
-    };
-  }
-
-  if ((!hasActualPremium && hasAgreementPremium) || (!hasActualAccumulation && hasAgreementAccumulation)) {
-    return {
-      status: "לא תקין",
-      issueCode: "missingData",
-      issue: "חסר נתון דמי ניהול בפועל להשוואה",
-    };
-  }
-
-  const premiumOk = hasAgreementPremium ? compareFee(row.actualPremiumFeePercent, agreement.premiumFeePercent) : true;
-  const accumulationOk = hasAgreementAccumulation ? compareFee(row.actualAccumulationFeePercent, agreement.accumulationFeePercent) : true;
-
-  if (premiumOk && accumulationOk) {
-    return { status: "תקין", issueCode: "", issue: "" };
-  }
-
-  return {
-    status: "לא תקין",
-    issueCode: "feeMismatch",
-    issue: "דמי ניהול בפועל גבוהים מההסכם",
-  };
+  if (premiumOk && accumulationOk) return "תקין";
+  return "לא תקין";
 }
 
 function buildSummary(rows, agreements) {
@@ -503,11 +400,6 @@ function buildSummary(rows, agreements) {
     unifiedRowCount: rows.length,
     issuerCount: issuers.length,
     issuers,
-    periodCounts: rows.reduce((acc, row) => {
-      const period = row.executiveInsurancePeriod || "unknown";
-      acc[period] = (acc[period] || 0) + 1;
-      return acc;
-    }, {}),
     agreementCount: agreements.length,
     activePolicyCount: activeRows.length,
     inactivePolicyCount: Math.max(rows.length - activeRows.length, 0),
@@ -534,24 +426,19 @@ export async function parseExecutiveInsuranceManagerFiles({ dataFile, agreements
   const agreements = asArray(parsedAgreements.agreements);
   const rows = asArray(parsedData.rows).map((row) => {
     const agreement = resolveExecutiveInsuranceAgreement(row, agreements);
-    const audit = buildFeeAudit(row, agreement);
-    const period = agreement?.period || row.executiveInsurancePeriod || getExecutiveInsurancePeriodByYear(row.insuranceStartYear);
+    const feeStatus = getFeeStatus(row, agreement);
 
     return {
       ...row,
-      executiveInsurancePeriod: period,
-      executiveInsurancePeriodLabel: getExecutiveInsurancePeriodLabel(period),
       arrangementManagerId: manager?.id || "",
       arrangementManagerName: manager?.name || row.arrangementManagerName || "מנהל הסדר",
       uploadManagerName: manager?.name || "מנהל הסדר",
       agreementPremiumFeePercent: agreement?.premiumFeePercent ?? null,
       agreementAccumulationFeePercent: agreement?.accumulationFeePercent ?? null,
-      agreementPeriod: period,
-      agreementPeriodLabel: getExecutiveInsurancePeriodLabel(period),
-      feeStatus: audit.status,
-      feeStatusLabel: audit.status,
-      feeIssueCode: audit.issueCode,
-      feeIssue: audit.issue,
+      agreementPeriod: agreement?.period || "",
+      feeStatus,
+      feeStatusLabel: feeStatus,
+      feeIssue: feeStatus === "תקין" ? "" : "דמי ניהול בפועל אינם עומדים בהסכם או חסר הסכם/נתון",
     };
   });
 

@@ -1,9 +1,9 @@
 // Path: src/components/ExecutiveInsuranceAnalysisView.jsx
-// v69 — Executive insurance product home adds data-quality/errors control tab
+// v71 — Executive insurance dashboard alignment: focused home, 3-state fees, merged accumulations/issuers, employee-level errors
 // Scope: product page similar to Pension/Education, with focused controls:
 // 1) דמי ניהול with separate summary/detail tables per policy period
-// 2) צבירות with chart + table
-// 3) יצרנים / חברות ביטוח
+// 2) צבירות ויצרנים in one combined analysis tab
+// 3) Employee-level errors / data-quality control
 // Period model: before 2004, 2004-2013, 2013+ without coefficient.
 
 import React, { useMemo, useState } from "react";
@@ -12,7 +12,6 @@ const TABS = {
   HOME: "home",
   FEES: "fees",
   ACCUMULATION: "accumulation",
-  ISSUERS: "issuers",
   ERRORS: "errors",
 };
 
@@ -130,6 +129,49 @@ function getRowsWithIssues(rows) {
 }
 
 
+function getPolicyId(row) {
+  return normalizeText(firstDefined(row?.policyId, row?.policyNumber, row?.mofid, row?.policyNo)) || "—";
+}
+
+function getEmployeeCode(row) {
+  return normalizeText(firstDefined(row?.employeeCode, row?.employeeId, row?.idNumber, row?.memberId)) || "—";
+}
+
+function getEmployeeName(row) {
+  return normalizeText(firstDefined(row?.memberName, row?.employeeName, row?.name)) || "—";
+}
+
+function getUniqueEmployeeCount(rows) {
+  const keys = new Set();
+  rows.forEach((row, index) => {
+    keys.add(normalizeText(firstDefined(row?.employeeCode, row?.idNumber, row?.memberName, row?.policyNumber, index)));
+  });
+  return keys.size;
+}
+
+function isNotCheckable(row) {
+  return (
+    row?.feeIssueCode === "missingAgreement" ||
+    row?.feeIssueCode === "missingData" ||
+    getPeriodKey(row) === "unknown" ||
+    !row?.insuranceStartYear
+  );
+}
+
+function getFeeStatusKind(row) {
+  if (row?.feeStatus === "תקין") return "ok";
+  if (isNotCheckable(row)) return "notCheckable";
+  return "exception";
+}
+
+function getFeeStatusLabel(row) {
+  const kind = getFeeStatusKind(row);
+  if (kind === "ok") return "תקין";
+  if (kind === "notCheckable") return "לא ניתן לבדיקה";
+  return "חריגה";
+}
+
+
 function makeEmptyGroup(label) {
   return {
     label,
@@ -141,8 +183,11 @@ function makeEmptyGroup(label) {
     accumulationFeeCount: 0,
     ok: 0,
     notOk: 0,
+    exception: 0,
+    notCheckable: 0,
     missingAgreement: 0,
     missingData: 0,
+    unknownPeriod: 0,
   };
 }
 
@@ -157,10 +202,18 @@ function addRowToGroup(group, row) {
     group.accumulationFeeSum += toNumber(row.actualAccumulationFeePercent);
     group.accumulationFeeCount += 1;
   }
-  if (row.feeStatus === "תקין") group.ok += 1;
-  else group.notOk += 1;
+  if (row.feeStatus === "תקין") {
+    group.ok += 1;
+  } else if (isNotCheckable(row)) {
+    group.notCheckable += 1;
+    group.notOk += 1;
+  } else {
+    group.exception += 1;
+    group.notOk += 1;
+  }
   if (row.feeIssueCode === "missingAgreement") group.missingAgreement += 1;
   if (row.feeIssueCode === "missingData") group.missingData += 1;
+  if (getPeriodKey(row) === "unknown" || !row.insuranceStartYear) group.unknownPeriod += 1;
 }
 
 function groupBy(rows, getKey, getLabel) {
@@ -228,11 +281,12 @@ function MiniBar({ value, max, label }) {
 
 function ProductHome({ rows, onOpenTab }) {
   const issuers = groupByIssuer(rows);
-  const periods = groupByPeriod(rows);
   const okRows = rows.filter((row) => row.feeStatus === "תקין");
+  const exceptionRows = rows.filter((row) => getFeeStatusKind(row) === "exception");
+  const notCheckableRows = rows.filter((row) => getFeeStatusKind(row) === "notCheckable");
   const issueRows = getRowsWithIssues(rows);
   const totalAccumulation = rows.reduce((sum, row) => sum + getAccumulation(row), 0);
-  const notOkRows = rows.length - okRows.length;
+  const topIssuers = issuers.slice(0, 5);
 
   return (
     <section className="productAnalysisPanel executiveProductHome">
@@ -240,38 +294,34 @@ function ProductHome({ rows, onOpenTab }) {
         <div>
           <p className="eyebrow">Product Home</p>
           <h3>בית מוצר — ביטוח מנהלים</h3>
-          <p>מכאן יוצאים לבקרות. המבנה נשאר זהה לשאר המוצרים: תמונת מצב, ואז בקרות לפי לשוניות.</p>
+          <p>מסך כניסה ממוקד: תמונת מצב קצרה, ניווט לבקרות, ו-preview של חברות הביטוח הגדולות. ניתוחים כבדים נמצאים בלשוניות.</p>
         </div>
       </div>
 
       <div className="productKpiGrid four">
+        <KpiCard label="עובדים" value={fmtNumber(getUniqueEmployeeCount(rows))} subtext="עובדים שזוהו בקובץ" tone="blue" />
         <KpiCard label="פוליסות" value={fmtNumber(rows.length)} subtext="שורות ביטוח מנהלים" tone="blue" />
-        <KpiCard label="חברות ביטוח" value={fmtNumber(issuers.length)} subtext="יצרנים מזוהים" tone="gold" />
-        <KpiCard label="צבירה כוללת" value={fmtMoney(totalAccumulation)} subtext="ערך פדיון כולל" tone="blue" />
-        <KpiCard label="לא תקין בדמי ניהול" value={fmtNumber(notOkRows)} subtext="לבדיקה מול הסכם" tone={notOkRows ? "red" : "green"} />
-        <KpiCard label="פערי מידע" value={fmtNumber(issueRows.length)} subtext="חסר הסכם / חסר נתון / תקופה לא מזוהה" tone={issueRows.length ? "red" : "green"} onClick={() => onOpenTab(TABS.ERRORS)} />
+        <KpiCard label="צבירה כוללת" value={fmtMoney(totalAccumulation)} subtext="ערך פדיון כולל" tone="gold" />
+        <KpiCard label="חברות ביטוח" value={fmtNumber(issuers.length)} subtext="יצרנים מזוהים" tone="blue" />
+        <KpiCard label="חריגה בדמי ניהול" value={fmtNumber(exceptionRows.length)} subtext="פוליסות שאינן עומדות בהסכם" tone={exceptionRows.length ? "red" : "green"} onClick={() => onOpenTab(TABS.FEES)} />
+        <KpiCard label="לא ניתן לבדיקה" value={fmtNumber(notCheckableRows.length)} subtext="חסר הסכם / חסר נתון / תקופה" tone={notCheckableRows.length ? "red" : "green"} onClick={() => onOpenTab(TABS.ERRORS)} />
       </div>
 
       <div className="productControlGrid">
         <button type="button" className="productControlCard" onClick={() => onOpenTab(TABS.FEES)}>
           <span className="productPortalStatus">בקרה</span>
           <strong>דמי ניהול</strong>
-          <small>בדיקה תקין / לא תקין לפי חברת ביטוח ולפי תקופת פוליסה.</small>
+          <small>בדיקה לפי תקופת פוליסה עם שלושה מצבים: תקין, חריגה, ולא ניתן לבדיקה.</small>
         </button>
         <button type="button" className="productControlCard" onClick={() => onOpenTab(TABS.ACCUMULATION)}>
           <span className="productPortalStatus">ניתוח</span>
-          <strong>צבירות</strong>
-          <small>גרף וטבלה מסכמת לפי תקופות וחברות ביטוח.</small>
-        </button>
-        <button type="button" className="productControlCard" onClick={() => onOpenTab(TABS.ISSUERS)}>
-          <span className="productPortalStatus">ניתוח</span>
-          <strong>יצרנים / חברות ביטוח</strong>
-          <small>פילוח פוליסות וצבירה לפי יצרן.</small>
+          <strong>צבירות ויצרנים</strong>
+          <small>צבירה וכמות פוליסות לפי חברת ביטוח, כולל טבלה מסכמת אחת.</small>
         </button>
         <button type="button" className="productControlCard" onClick={() => onOpenTab(TABS.ERRORS)}>
           <span className="productPortalStatus">בקרת מידע</span>
           <strong>שגיאות / פערי מידע</strong>
-          <small>ריכוז פוליסות שחסרה להן תקופה, הסכם או נתון דמי ניהול.</small>
+          <small>רשימת עובדים ופוליסות עם חסר הסכם, חסר נתון או תקופה לא מזוהה.</small>
         </button>
       </div>
 
@@ -279,27 +329,30 @@ function ProductHome({ rows, onOpenTab }) {
         <table className="productTable">
           <thead>
             <tr>
-              <th>תקופת ביטוח מנהלים</th>
+              <th>חמש חברות הביטוח הגדולות</th>
               <th>פוליסות</th>
               <th>צבירה</th>
               <th>תקין</th>
-              <th>לא תקין</th>
-              <th>פרמיה ממוצעת</th>
-              <th>צבירה ממוצעת</th>
+              <th>חריגה</th>
+              <th>לא ניתן לבדיקה</th>
             </tr>
           </thead>
           <tbody>
-            {periods.map((item) => (
+            {topIssuers.map((item) => (
               <tr key={item.label}>
                 <td><strong>{item.label}</strong></td>
                 <td>{fmtNumber(item.count)}</td>
                 <td>{fmtMoney(item.accumulation)}</td>
                 <td>{fmtNumber(item.ok)}</td>
-                <td>{fmtNumber(item.notOk)}</td>
-                <td>{fmtPct(item.premiumFeeCount ? item.premiumFeeSum / item.premiumFeeCount : null)}</td>
-                <td>{fmtPct(item.accumulationFeeCount ? item.accumulationFeeSum / item.accumulationFeeCount : null)}</td>
+                <td>{fmtNumber(item.exception)}</td>
+                <td>{fmtNumber(item.notCheckable)}</td>
               </tr>
             ))}
+            {topIssuers.length === 0 ? (
+              <tr>
+                <td colSpan="6">לא נמצאו נתוני ביטוח מנהלים להצגה.</td>
+              </tr>
+            ) : null}
           </tbody>
         </table>
       </div>
@@ -309,8 +362,9 @@ function ProductHome({ rows, onOpenTab }) {
 
 function PeriodFeeTable({ section }) {
   const periodRows = section.rows;
-  const okRows = periodRows.filter((row) => row.feeStatus === "תקין");
-  const notOkRows = periodRows.filter((row) => row.feeStatus !== "תקין");
+  const okRows = periodRows.filter((row) => getFeeStatusKind(row) === "ok");
+  const exceptionRows = periodRows.filter((row) => getFeeStatusKind(row) === "exception");
+  const notCheckableRows = periodRows.filter((row) => getFeeStatusKind(row) === "notCheckable");
   const issuerSummary = groupByIssuer(periodRows);
   const detailRows = periodRows.slice(0, 80);
 
@@ -324,7 +378,8 @@ function PeriodFeeTable({ section }) {
         </div>
         <div className="periodFeeStats">
           <span className="statusPill ok">תקין: {fmtNumber(okRows.length)}</span>
-          <span className="statusPill bad">לא תקין: {fmtNumber(notOkRows.length)}</span>
+          <span className="statusPill bad">חריגה: {fmtNumber(exceptionRows.length)}</span>
+          <span className="statusPill bad">לא ניתן לבדיקה: {fmtNumber(notCheckableRows.length)}</span>
         </div>
       </div>
 
@@ -335,7 +390,8 @@ function PeriodFeeTable({ section }) {
               <th>חברת ביטוח</th>
               <th>פוליסות</th>
               <th>תקין</th>
-              <th>לא תקין</th>
+              <th>חריגה</th>
+              <th>לא ניתן לבדיקה</th>
               <th>חסר הסכם</th>
               <th>חסר נתון</th>
               <th>צבירה</th>
@@ -349,7 +405,8 @@ function PeriodFeeTable({ section }) {
                 <td><strong>{item.label}</strong></td>
                 <td>{fmtNumber(item.count)}</td>
                 <td>{fmtNumber(item.ok)}</td>
-                <td>{fmtNumber(item.notOk)}</td>
+                <td>{fmtNumber(item.exception)}</td>
+                <td>{fmtNumber(item.notCheckable)}</td>
                 <td>{fmtNumber(item.missingAgreement)}</td>
                 <td>{fmtNumber(item.missingData)}</td>
                 <td>{fmtMoney(item.accumulation)}</td>
@@ -380,7 +437,7 @@ function PeriodFeeTable({ section }) {
           <tbody>
             {detailRows.map((row, index) => (
               <tr key={`${section.key}-${row.policyId || row.policyNumber || index}-${index}`}>
-                <td><span className={`statusPill ${row.feeStatus === "תקין" ? "ok" : "bad"}`}>{row.feeStatus || "לא תקין"}</span></td>
+                <td><span className={`statusPill ${getFeeStatusKind(row) === "ok" ? "ok" : "bad"}`}>{getFeeStatusLabel(row)}</span></td>
                 <td>{getEmployeeLabel(row)}</td>
                 <td>{getIssuer(row)}</td>
                 <td>{row.insuranceStartYear || "—"}</td>
@@ -389,7 +446,7 @@ function PeriodFeeTable({ section }) {
                 <td>{fmtPct(row.actualAccumulationFeePercent)}</td>
                 <td>{fmtPct(row.agreementAccumulationFeePercent)}</td>
                 <td>{fmtMoney(getAccumulation(row))}</td>
-                <td>{row.feeIssue || "—"}</td>
+                <td>{getIssueLabel(row)}</td>
               </tr>
             ))}
           </tbody>
@@ -400,8 +457,10 @@ function PeriodFeeTable({ section }) {
 }
 
 function FeesTab({ rows }) {
-  const okRows = rows.filter((row) => row.feeStatus === "תקין");
-  const notOkRows = rows.filter((row) => row.feeStatus !== "תקין");
+  const okRows = rows.filter((row) => getFeeStatusKind(row) === "ok");
+  const exceptionRows = rows.filter((row) => getFeeStatusKind(row) === "exception");
+  const notCheckableRows = rows.filter((row) => getFeeStatusKind(row) === "notCheckable");
+  const checkableRows = rows.length - notCheckableRows.length;
   const periodSections = getPeriodSections(rows);
 
   return (
@@ -410,15 +469,15 @@ function FeesTab({ rows }) {
         <div>
           <p className="eyebrow">Management Fees Control</p>
           <h3>בקרת דמי ניהול</h3>
-          <p>הבקרה מופרדת לפי תקופות ביטוח מנהלים. לכל תקופה מוצגת טבלת בדיקה עצמאית, כי מבנה דמי הניהול שונה בין התקופות.</p>
+          <p>הבקרה מופרדת לפי תקופות ביטוח מנהלים. פוליסות שהן מתפעל בלבד או שחסר בהן מידע מסומנות כלא ניתן לבדיקה, ולא כחריגה.</p>
         </div>
       </div>
 
       <div className="productKpiGrid four">
         <KpiCard label="תקין" value={fmtNumber(okRows.length)} subtext="שורות שעומדות בהסכם" tone="green" />
-        <KpiCard label="לא תקין" value={fmtNumber(notOkRows.length)} subtext="חריגה / חסר הסכם / חסר נתון" tone="red" />
-        <KpiCard label="אחוז תקינות" value={`${rows.length ? Math.round((okRows.length / rows.length) * 100) : 0}%`} subtext="מתוך כלל הפוליסות" tone="gold" />
-        <KpiCard label="תקופות פעילות" value={fmtNumber(periodSections.length)} subtext="טבלה נפרדת לכל תקופה" tone="blue" />
+        <KpiCard label="חריגה" value={fmtNumber(exceptionRows.length)} subtext="נבדק מול הסכם ונמצאה חריגה" tone={exceptionRows.length ? "red" : "green"} />
+        <KpiCard label="לא ניתן לבדיקה" value={fmtNumber(notCheckableRows.length)} subtext="חסר הסכם / חסר נתון / תקופה" tone={notCheckableRows.length ? "red" : "blue"} />
+        <KpiCard label="אחוז תקינות" value={`${checkableRows ? Math.round((okRows.length / checkableRows) * 100) : 0}%`} subtext="מתוך פוליסות שניתן לבדוק" tone="gold" />
       </div>
 
       <div className="periodFeeGrid">
@@ -432,29 +491,41 @@ function FeesTab({ rows }) {
 
 function AccumulationTab({ rows }) {
   const byIssuer = groupByIssuer(rows);
-  const byPeriod = groupByPeriod(rows);
   const maxIssuerAccumulation = Math.max(...byIssuer.map((item) => item.accumulation), 1);
-  const maxPeriodAccumulation = Math.max(...byPeriod.map((item) => item.accumulation), 1);
+  const maxIssuerCount = Math.max(...byIssuer.map((item) => item.count), 1);
 
   return (
     <section className="productAnalysisPanel">
       <div className="productSectionHeader">
         <div>
-          <p className="eyebrow">Accumulation Analysis</p>
-          <h3>ניתוח צבירות</h3>
-          <p>גרף וטבלה כדי לראות איפה יושבת הצבירה של ביטוחי המנהלים.</p>
+          <p className="eyebrow">Accumulation & Issuers Analysis</p>
+          <h3>צבירות ויצרנים</h3>
+          <p>ניתוח אחד משולב שמציג גם איפה יושבת הצבירה וגם כמה פוליסות קיימות אצל כל חברת ביטוח.</p>
         </div>
       </div>
 
       <div className="issuerBarsList">
         {byIssuer.map((item) => (
-          <article className="issuerBarCard" key={item.label}>
+          <article className="issuerBarCard" key={`accumulation-${item.label}`}>
             <div className="issuerBarTop">
               <strong>{item.label}</strong>
-              <span>{fmtNumber(item.count)} פוליסות · {fmtMoney(item.accumulation)}</span>
+              <span>{fmtMoney(item.accumulation)}</span>
             </div>
-            <MiniBar value={item.accumulation} max={maxIssuerAccumulation} label={item.label} />
-            <small>תקין: {fmtNumber(item.ok)} · לא תקין: {fmtNumber(item.notOk)}</small>
+            <MiniBar value={item.accumulation} max={maxIssuerAccumulation} label={`צבירה ${item.label}`} />
+            <small>{fmtNumber(item.count)} פוליסות · תקין: {fmtNumber(item.ok)} · חריגה: {fmtNumber(item.exception)} · לא ניתן לבדיקה: {fmtNumber(item.notCheckable)}</small>
+          </article>
+        ))}
+      </div>
+
+      <div className="issuerBarsList">
+        {byIssuer.map((item) => (
+          <article className="issuerBarCard" key={`policies-${item.label}`}>
+            <div className="issuerBarTop">
+              <strong>{item.label}</strong>
+              <span>{fmtNumber(item.count)} פוליסות</span>
+            </div>
+            <MiniBar value={item.count} max={maxIssuerCount} label={`פוליסות ${item.label}`} />
+            <small>צבירה ממוצעת לפוליסה: {fmtMoney(item.count ? item.accumulation / item.count : 0)}</small>
           </article>
         ))}
       </div>
@@ -463,135 +534,46 @@ function AccumulationTab({ rows }) {
         <table className="productTable">
           <thead>
             <tr>
-              <th>תקופה</th>
+              <th>חברת ביטוח</th>
+              <th>עובדים</th>
               <th>פוליסות</th>
               <th>צבירה</th>
-              <th>חלק יחסי</th>
+              <th>צבירה ממוצעת לפוליסה</th>
               <th>תקין</th>
-              <th>לא תקין</th>
+              <th>חריגה</th>
+              <th>לא ניתן לבדיקה</th>
             </tr>
           </thead>
           <tbody>
-            {byPeriod.map((item) => {
-              const total = byPeriod.reduce((sum, period) => sum + period.accumulation, 0);
+            {byIssuer.map((item) => {
+              const issuerRows = rows.filter((row) => getIssuer(row) === item.label);
               return (
                 <tr key={item.label}>
                   <td><strong>{item.label}</strong></td>
+                  <td>{fmtNumber(getUniqueEmployeeCount(issuerRows))}</td>
                   <td>{fmtNumber(item.count)}</td>
                   <td>{fmtMoney(item.accumulation)}</td>
-                  <td>
-                    <MiniBar value={item.accumulation} max={maxPeriodAccumulation} label={item.label} />
-                    <small>{fmtPct(total ? (item.accumulation / total) * 100 : 0)}</small>
-                  </td>
+                  <td>{fmtMoney(item.count ? item.accumulation / item.count : 0)}</td>
                   <td>{fmtNumber(item.ok)}</td>
-                  <td>{fmtNumber(item.notOk)}</td>
+                  <td>{fmtNumber(item.exception)}</td>
+                  <td>{fmtNumber(item.notCheckable)}</td>
                 </tr>
               );
             })}
           </tbody>
         </table>
       </div>
-
-      <div className="productTableWrap compactTable">
-        <table className="productTable">
-          <thead>
-            <tr>
-              <th>חברת ביטוח</th>
-              <th>פוליסות</th>
-              <th>צבירה</th>
-              <th>צבירה ממוצעת לפוליסה</th>
-              <th>תקין בדמי ניהול</th>
-              <th>לא תקין בדמי ניהול</th>
-            </tr>
-          </thead>
-          <tbody>
-            {byIssuer.map((item) => (
-              <tr key={item.label}>
-                <td><strong>{item.label}</strong></td>
-                <td>{fmtNumber(item.count)}</td>
-                <td>{fmtMoney(item.accumulation)}</td>
-                <td>{fmtMoney(item.count ? item.accumulation / item.count : 0)}</td>
-                <td>{fmtNumber(item.ok)}</td>
-                <td>{fmtNumber(item.notOk)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
     </section>
   );
 }
-
-function IssuersTab({ rows }) {
-  const issuers = groupByIssuer(rows);
-  const maxCount = Math.max(...issuers.map((item) => item.count), 1);
-
-  return (
-    <section className="productAnalysisPanel">
-      <div className="productSectionHeader">
-        <div>
-          <p className="eyebrow">Insurance Companies</p>
-          <h3>ניתוח לפי יצרנים / חברות ביטוח</h3>
-          <p>חלוקה של פוליסות, צבירה וסטטוס דמי ניהול לפי חברת הביטוח.</p>
-        </div>
-      </div>
-
-      <div className="issuerBarsList">
-        {issuers.map((item) => (
-          <article className="issuerBarCard" key={item.label}>
-            <div className="issuerBarTop">
-              <strong>{item.label}</strong>
-              <span>{fmtNumber(item.count)} פוליסות · {fmtMoney(item.accumulation)}</span>
-            </div>
-            <MiniBar value={item.count} max={maxCount} label={item.label} />
-            <small>תקין: {fmtNumber(item.ok)} · לא תקין: {fmtNumber(item.notOk)}</small>
-          </article>
-        ))}
-      </div>
-
-      <div className="productTableWrap compactTable">
-        <table className="productTable">
-          <thead>
-            <tr>
-              <th>חברת ביטוח</th>
-              <th>פוליסות</th>
-              <th>צבירה</th>
-              <th>צבירה ממוצעת</th>
-              <th>תקין</th>
-              <th>לא תקין</th>
-              <th>דמי ניהול מפרמיה ממוצע</th>
-              <th>דמי ניהול מצבירה ממוצע</th>
-            </tr>
-          </thead>
-          <tbody>
-            {issuers.map((item) => (
-              <tr key={item.label}>
-                <td><strong>{item.label}</strong></td>
-                <td>{fmtNumber(item.count)}</td>
-                <td>{fmtMoney(item.accumulation)}</td>
-                <td>{fmtMoney(item.count ? item.accumulation / item.count : 0)}</td>
-                <td>{fmtNumber(item.ok)}</td>
-                <td>{fmtNumber(item.notOk)}</td>
-                <td>{fmtPct(item.premiumFeeCount ? item.premiumFeeSum / item.premiumFeeCount : null)}</td>
-                <td>{fmtPct(item.accumulationFeeCount ? item.accumulationFeeSum / item.accumulationFeeCount : null)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  );
-}
-
 
 function ErrorsTab({ rows }) {
   const issueRows = getRowsWithIssues(rows);
-  const byPeriod = groupByPeriod(issueRows);
-  const byIssuer = groupByIssuer(issueRows);
   const missingAgreement = issueRows.filter((row) => row.feeIssueCode === "missingAgreement").length;
   const missingData = issueRows.filter((row) => row.feeIssueCode === "missingData").length;
   const unknownPeriod = issueRows.filter((row) => getPeriodKey(row) === "unknown" || !row.insuranceStartYear).length;
-  const detailRows = issueRows.slice(0, 120);
+  const feeExceptions = issueRows.filter((row) => getFeeStatusKind(row) === "exception").length;
+  const detailRows = issueRows.slice(0, 160);
 
   return (
     <section className="productAnalysisPanel executiveErrorsTab">
@@ -599,15 +581,16 @@ function ErrorsTab({ rows }) {
         <div>
           <p className="eyebrow">Data Quality Control</p>
           <h3>שגיאות / פערי מידע</h3>
-          <p>ריכוז הפוליסות שלא ניתן לאשר בצורה נקייה: חסר הסכם, חסר נתון בדוח היועץ, או תקופת פוליסה שלא זוהתה.</p>
+          <p>רשימת עובדים ופוליסות שלא ניתן לאשר בצורה נקייה. המטרה כאן היא תיקון מידע, לא Dashboard נוסף.</p>
         </div>
       </div>
 
       <div className="productKpiGrid four">
-        <KpiCard label="פערים לבדיקה" value={fmtNumber(issueRows.length)} subtext="פוליסות עם בעיה" tone={issueRows.length ? "red" : "green"} />
+        <KpiCard label="עובדים עם שגיאה" value={fmtNumber(getUniqueEmployeeCount(issueRows))} subtext="עובדים שמופיעים ברשימת הפערים" tone={issueRows.length ? "red" : "green"} />
         <KpiCard label="חסר הסכם" value={fmtNumber(missingAgreement)} subtext="אין התאמה להסכם" tone={missingAgreement ? "red" : "green"} />
         <KpiCard label="חסר נתון" value={fmtNumber(missingData)} subtext="דמי ניהול חסרים" tone={missingData ? "red" : "green"} />
-        <KpiCard label="תקופה לא מזוהה" value={fmtNumber(unknownPeriod)} subtext="שנת תחילה / מקדם" tone={unknownPeriod ? "red" : "green"} />
+        <KpiCard label="תקופה לא מזוהה" value={fmtNumber(unknownPeriod)} subtext="שנת תחילה / שיוך תקופה" tone={unknownPeriod ? "red" : "green"} />
+        <KpiCard label="חריגה בדמי ניהול" value={fmtNumber(feeExceptions)} subtext="נבדק ונמצא לא תואם" tone={feeExceptions ? "red" : "green"} />
       </div>
 
       {issueRows.length === 0 ? (
@@ -616,92 +599,34 @@ function ErrorsTab({ rows }) {
           <small>כל הפוליסות שזוהו עברו שיוך תקופה ובדיקת דמי ניהול תקינה.</small>
         </div>
       ) : (
-        <>
-          <div className="productTableWrap compactTable">
-            <table className="productTable">
-              <thead>
-                <tr>
-                  <th>תקופה</th>
-                  <th>פוליסות עם פער</th>
-                  <th>חסר הסכם</th>
-                  <th>חסר נתון</th>
-                  <th>צבירה מושפעת</th>
+        <div className="productTableWrap">
+          <table className="productTable">
+            <thead>
+              <tr>
+                <th>מס עובד</th>
+                <th>שם עובד</th>
+                <th>חברת ביטוח</th>
+                <th>פוליסה</th>
+                <th>תקופה</th>
+                <th>סטטוס</th>
+                <th>סיבת שגיאה</th>
+              </tr>
+            </thead>
+            <tbody>
+              {detailRows.map((row, index) => (
+                <tr key={`${row.policyId || row.policyNumber || row.employeeCode || index}-${index}`}>
+                  <td>{getEmployeeCode(row)}</td>
+                  <td>{getEmployeeName(row)}</td>
+                  <td>{getIssuer(row)}</td>
+                  <td>{getPolicyId(row)}</td>
+                  <td>{getPeriodLabel(row)}</td>
+                  <td><span className={`statusPill ${getFeeStatusKind(row) === "ok" ? "ok" : "bad"}`}>{getFeeStatusLabel(row)}</span></td>
+                  <td>{getIssueLabel(row)}</td>
                 </tr>
-              </thead>
-              <tbody>
-                {byPeriod.map((item) => (
-                  <tr key={item.label}>
-                    <td><strong>{item.label}</strong></td>
-                    <td>{fmtNumber(item.count)}</td>
-                    <td>{fmtNumber(item.missingAgreement)}</td>
-                    <td>{fmtNumber(item.missingData)}</td>
-                    <td>{fmtMoney(item.accumulation)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="productTableWrap compactTable">
-            <table className="productTable">
-              <thead>
-                <tr>
-                  <th>חברת ביטוח</th>
-                  <th>פוליסות עם פער</th>
-                  <th>חסר הסכם</th>
-                  <th>חסר נתון</th>
-                  <th>צבירה מושפעת</th>
-                </tr>
-              </thead>
-              <tbody>
-                {byIssuer.map((item) => (
-                  <tr key={item.label}>
-                    <td><strong>{item.label}</strong></td>
-                    <td>{fmtNumber(item.count)}</td>
-                    <td>{fmtNumber(item.missingAgreement)}</td>
-                    <td>{fmtNumber(item.missingData)}</td>
-                    <td>{fmtMoney(item.accumulation)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="productTableWrap">
-            <table className="productTable">
-              <thead>
-                <tr>
-                  <th>עובד / פוליסה</th>
-                  <th>חברת ביטוח</th>
-                  <th>תקופה</th>
-                  <th>שנת תחילה</th>
-                  <th>סטטוס דמי ניהול</th>
-                  <th>פרמיה בפועל</th>
-                  <th>פרמיה הסכם</th>
-                  <th>צבירה בפועל</th>
-                  <th>צבירה הסכם</th>
-                  <th>סיבת הפער</th>
-                </tr>
-              </thead>
-              <tbody>
-                {detailRows.map((row, index) => (
-                  <tr key={`${row.policyId || row.policyNumber || row.employeeCode || index}-${index}`}>
-                    <td>{getEmployeeLabel(row)}</td>
-                    <td>{getIssuer(row)}</td>
-                    <td>{getPeriodLabel(row)}</td>
-                    <td>{row.insuranceStartYear || "—"}</td>
-                    <td><span className={`statusPill ${row.feeStatus === "תקין" ? "ok" : "bad"}`}>{row.feeStatus || "לא תקין"}</span></td>
-                    <td>{fmtPct(row.actualPremiumFeePercent)}</td>
-                    <td>{fmtPct(row.agreementPremiumFeePercent)}</td>
-                    <td>{fmtPct(row.actualAccumulationFeePercent)}</td>
-                    <td>{fmtPct(row.agreementAccumulationFeePercent)}</td>
-                    <td>{getIssueLabel(row)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </section>
   );
@@ -712,7 +637,6 @@ export default function ExecutiveInsuranceAnalysisView({ analysisData }) {
   const [activeTab, setActiveTab] = useState(TABS.HOME);
 
   const issuers = groupByIssuer(rows);
-  const periods = groupByPeriod(rows);
   const okRows = rows.filter((row) => row.feeStatus === "תקין");
   const issueRows = getRowsWithIssues(rows);
   const totalAccumulation = rows.reduce((sum, row) => sum + getAccumulation(row), 0);
@@ -723,14 +647,13 @@ export default function ExecutiveInsuranceAnalysisView({ analysisData }) {
         <div>
           <p className="eyebrow">Product Analysis</p>
           <h2>ביטוח מנהלים</h2>
-          <p>מסך מוצר מלא: בית מוצר, דמי ניהול, צבירות ויצרנים. דמי הניהול מחולקים לפי תקופות פוליסה.</p>
+          <p>בית מוצר, בקרת דמי ניהול, ניתוח צבירות ויצרנים ובקרת שגיאות. דמי הניהול מחולקים לפי תקופות פוליסה.</p>
         </div>
       </header>
 
       <div className="productKpiGrid four">
         <KpiCard label="פוליסות" value={fmtNumber(rows.length)} subtext="שורות שזוהו בדוח היועץ" tone="blue" />
         <KpiCard label="חברות ביטוח" value={fmtNumber(issuers.length)} subtext="יצרנים שונים" tone="gold" />
-        <KpiCard label="תקופות" value={fmtNumber(periods.length)} subtext="לפני 2004 / 2004-2013 / 2013+" tone="blue" />
         <KpiCard label="תקינות דמי ניהול" value={`${rows.length ? Math.round((okRows.length / rows.length) * 100) : 0}%`} subtext={fmtMoney(totalAccumulation)} tone="green" />
         <KpiCard label="פערי מידע" value={fmtNumber(issueRows.length)} subtext="חסר הסכם / נתון / תקופה" tone={issueRows.length ? "red" : "green"} />
       </div>
@@ -738,15 +661,13 @@ export default function ExecutiveInsuranceAnalysisView({ analysisData }) {
       <nav className="productTabs" aria-label="ביטוח מנהלים ניתוחים">
         <button type="button" className={activeTab === TABS.HOME ? "active" : ""} onClick={() => setActiveTab(TABS.HOME)}>בית מוצר</button>
         <button type="button" className={activeTab === TABS.FEES ? "active" : ""} onClick={() => setActiveTab(TABS.FEES)}>דמי ניהול</button>
-        <button type="button" className={activeTab === TABS.ACCUMULATION ? "active" : ""} onClick={() => setActiveTab(TABS.ACCUMULATION)}>צבירות</button>
-        <button type="button" className={activeTab === TABS.ISSUERS ? "active" : ""} onClick={() => setActiveTab(TABS.ISSUERS)}>יצרנים</button>
+        <button type="button" className={activeTab === TABS.ACCUMULATION ? "active" : ""} onClick={() => setActiveTab(TABS.ACCUMULATION)}>צבירות ויצרנים</button>
         <button type="button" className={activeTab === TABS.ERRORS ? "active" : ""} onClick={() => setActiveTab(TABS.ERRORS)}>שגיאות</button>
       </nav>
 
       {activeTab === TABS.HOME ? <ProductHome rows={rows} onOpenTab={setActiveTab} /> : null}
       {activeTab === TABS.FEES ? <FeesTab rows={rows} /> : null}
       {activeTab === TABS.ACCUMULATION ? <AccumulationTab rows={rows} /> : null}
-      {activeTab === TABS.ISSUERS ? <IssuersTab rows={rows} /> : null}
       {activeTab === TABS.ERRORS ? <ErrorsTab rows={rows} /> : null}
     </section>
   );

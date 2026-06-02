@@ -1518,7 +1518,7 @@ const TABS = [
 
 // ─── Main Dashboard ───────────────────────────────────────────────────────────
 
-export default function Dashboard({ analysisData }) {
+export default function Dashboard({ analysisData, onBackToProductPortal, onBackToUpload }) {
   const [activeTab, setActiveTab] = useState("kpi");
   const [managerFilter, setManagerFilter] = useState("all");
 
@@ -1643,33 +1643,53 @@ export default function Dashboard({ analysisData }) {
           </div>
         </div>
 
-        {summary && (
-          <div className="summary-pills">
-            <span className="pill pill-green">✓ {summary.valid} תקין</span>
-            <span className="pill pill-red">✗ {summary.invalid} לא תקין</span>
-            <span className="pill pill-neutral">
-              — {summary.excluded} תפעול
-            </span>
-
-            {summary.noAgreement > 0 && (
-              <span className="pill pill-warning">
-                ? {summary.noAgreement} ללא הסכם
+        <div className="productHeaderSideStack">
+          {summary && (
+            <div className="summary-pills">
+              <span className="pill pill-green">✓ {summary.valid} תקין</span>
+              <span className="pill pill-red">✗ {summary.invalid} לא תקין</span>
+              <span className="pill pill-neutral">
+                — {summary.excluded} תפעול
               </span>
+
+              {summary.noAgreement > 0 && (
+                <span className="pill pill-warning">
+                  ? {summary.noAgreement} ללא הסכם
+                </span>
+              )}
+
+              {summary.tierPotential > 0 && (
+                <span className="pill pill-warning">
+                  ⚠ {summary.tierPotential} מודל צבירה
+                </span>
+              )}
+
+              {summary.dataQualityIssues > 0 && (
+                <span className="pill pill-warning">
+                  QA {summary.dataQualityIssues} בעיות
+                </span>
+              )}
+            </div>
+          )}
+
+          <div className="productReturnActions">
+            {activeTab !== "kpi" && (
+              <button type="button" className="secondaryButton mini" onClick={() => setActiveTab("kpi")}>
+                חזרה לבית מוצר
+              </button>
             )}
-
-            {summary.tierPotential > 0 && (
-              <span className="pill pill-warning">
-                ⚠ {summary.tierPotential} מודל צבירה
-              </span>
+            {onBackToProductPortal && (
+              <button type="button" className="secondaryButton mini" onClick={onBackToProductPortal}>
+                חזרה ל-Dashboard ראשי
+              </button>
             )}
-
-            {summary.dataQualityIssues > 0 && (
-              <span className="pill pill-warning">
-                QA {summary.dataQualityIssues} בעיות
-              </span>
+            {onBackToUpload && (
+              <button type="button" className="secondaryButton mini ghost" onClick={onBackToUpload}>
+                חזרה להעלאה
+              </button>
             )}
           </div>
-        )}
+        </div>
       </header>
 
       <GlobalManagerScope

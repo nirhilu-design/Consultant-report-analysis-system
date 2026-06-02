@@ -50,10 +50,12 @@ function getIssuerOriginal(row) {
 
   return normalizeText(
     firstNonEmpty(
+      row.issuerOriginal,
       row.originalManager,
       row.manager,
       row.issuer,
       row.company,
+      row.fundName,
       getByKeys(raw, [
         "קרן פנסיה",
         "חברת ביטוח",
@@ -275,20 +277,29 @@ function getArrangementAgentStatus(row) {
   );
 }
 
-function isVeteranPensionFund(row) {
+function getPensionFundType(row) {
+  if (row?.pensionFundType) return normalizeText(row.pensionFundType);
+
   const raw = getRaw(row);
   const text = normalizeText(
     [
       row.planType,
       row.fundName,
       row.issuerOriginal,
+      row.manager,
       getByKeys(raw, ["סוג תוכנית פנסיה", "סוג תוכנית", "סוג תכנית", "שם קרן הפנסיה", "קרן פנסיה"]),
     ]
       .filter(Boolean)
       .join(" ")
   );
 
-  return text.includes("ותיק") || text.includes("ותיקה");
+  if (text.includes("ותיק") || text.includes("ותיקה") || text.includes("ישן") || text.includes("זיקנה") || text.includes("זקנה")) return "ותיקה";
+  if (text.includes("כללית") || text.includes("משלימ") || text.includes("משלימה")) return "כללית";
+  return "מקיפה";
+}
+
+function isVeteranPensionFund(row) {
+  return row?.isVeteranPensionFund === true || getPensionFundType(row) === "ותיקה";
 }
 
 function personalByClientId(personalRows = []) {
@@ -396,11 +407,12 @@ export function buildBaseUnifiedRows({
 
     const serviceStatus = getServiceStatus(sourceRow);
     const arrangementAgentStatus = getArrangementAgentStatus(sourceRow);
+    const pensionFundType = productType === PRODUCT_TYPES.PENSION ? getPensionFundType(sourceRow) : "לא רלוונטי";
     const veteranPensionFund = productType === PRODUCT_TYPES.PENSION && isVeteranPensionFund(sourceRow);
     const raw = getRaw(sourceRow);
     const sourceAuditStatus = normalizeText(getByKeys(raw, ["סטטוס", "סטטוס2"]));
 
-    // V81 Flow עסקי בקרן פנסיה:
+    // V83 Flow עסקי בקרן פנסיה:
     // 1. אם בעמודה "האם מנהל ההסדר סוכן בפוליסה" מופיע "לא" => תפעול בלבד, ללא בדיקת דמי ניהול.
     // 2. אם מופיע "כן" => ממשיכים לבדיקת סוג קרן; ותיקה מוחרגת, מקיפה/כללית נבדקות מול הסכם.
     // חשוב: לא משתמשים בעמודות סטטוס כלליות, ולא מסיקים מתפעל מדמי ניהול.
@@ -468,6 +480,8 @@ export function buildBaseUnifiedRows({
 
       policyNumber: getPolicyNumber(sourceRow),
       fundName: getFundName(sourceRow),
+      pensionFundType,
+      isVeteranPensionFund: veteranPensionFund,
 
       insuranceTrack: config.hasInsuranceTrack
         ? getInsuranceTrack(sourceRow)

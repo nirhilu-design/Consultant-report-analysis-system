@@ -160,9 +160,9 @@ export function buildKpi(rows = []) {
     validRows: valid.length,
     invalidRows: invalid.length,
     excludedRows: excluded.length,
-    noAgreementRows: noAgreement.length,
+    noAgreementRows: 0,
     tierPotentialRows: tier.length,
-    actionItems: invalid.length + tier.length + noAgreement.length,
+    actionItems: invalid.length + tier.length,
     complianceRate: audited.length ? valid.length / audited.length : 0,
     totalAccumulation: audited.reduce((sum, row) => sum + toSafeNumber(row.accumulation), 0),
     uniqueClients: countUnique(audited, getClientKey),
@@ -533,10 +533,10 @@ export function buildActionCenter(rows = []) {
     .filter(
       (row) =>
         !isExcluded(row) &&
-        (isInvalid(row) || row.tierPotentialNotUsed || (rowNeedsAgreement(row) && !hasAnyAgreement(row)))
+        (isInvalid(row) || row.tierPotentialNotUsed)
     )
     .map((row) => {
-      const missingAgreement = rowNeedsAgreement(row) && !hasAnyAgreement(row);
+      const missingAgreement = false;
 
       return {
         employeeCode: row.employeeCode || "",

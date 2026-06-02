@@ -692,7 +692,7 @@ function ErrorsTab({ rows }) {
   );
 }
 
-export default function ExecutiveInsuranceAnalysisView({ analysisData }) {
+export default function ExecutiveInsuranceAnalysisView({ analysisData, onBackToProductPortal, onBackToUpload }) {
   const rows = useMemo(() => dedupeRows(getExecutiveRows(analysisData)), [analysisData]);
   const [activeTab, setActiveTab] = useState(TABS.HOME);
 
@@ -708,6 +708,24 @@ export default function ExecutiveInsuranceAnalysisView({ analysisData }) {
           <p className="eyebrow">Product Analysis</p>
           <h2>ביטוח מנהלים</h2>
           <p>בית מוצר, בקרת דמי ניהול לפי דוח הסכמים ומתפעל בלבד, ניתוח צבירות ויצרנים ובקרת שגיאות.</p>
+        </div>
+
+        <div className="productReturnActions">
+          {activeTab !== TABS.HOME && (
+            <button type="button" className="secondaryButton mini" onClick={() => setActiveTab(TABS.HOME)}>
+              חזרה לבית מוצר
+            </button>
+          )}
+          {onBackToProductPortal && (
+            <button type="button" className="secondaryButton mini" onClick={onBackToProductPortal}>
+              חזרה ל-Dashboard ראשי
+            </button>
+          )}
+          {onBackToUpload && (
+            <button type="button" className="secondaryButton mini ghost" onClick={onBackToUpload}>
+              חזרה להעלאה
+            </button>
+          )}
         </div>
       </header>
 

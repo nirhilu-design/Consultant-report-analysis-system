@@ -15,13 +15,15 @@ import {
 //
 // סדר בדיקה:
 //   1. תפעול בלבד / ללא שיווק → excluded
-//   2. הסכם פנימי מתוך דוח היועץ → INLINE_AGREEMENT
-//   3. קרנות ברירת מחדל → DEFAULT_PENSION_FUND
-//      כלל עסקי:
-//        - ברירת מחדל רגילה: עד 1% מהפקדה ועד 0.22% מצבירה
-//        - מור: עד 1% מהפקדה ועד 0.15% מצבירה
-//   4. קובץ הסכמים חיצוני → EXTERNAL_AGREEMENT
-//   5. כלל בסיס fallback → BASELINE
+//   2. קרן פנסיה ותיקה → excluded / לא נבדקת
+//   3. הסכם פנימי מתוך דוח היועץ → INLINE_AGREEMENT
+//      התאמה מלאה = תקין; אם אין התאמה מלאה מחשבים ציון אפקטיבי:
+//      צבירה + (הפקדה / 2), ומשווים קובץ מול הסכם.
+//   4. קרנות ברירת מחדל → DEFAULT_PENSION_FUND
+//      מור / אלטשולר שחם / אינפיניטי / איילון בלבד.
+//      שילובים תקינים: 0.22%+1%, 0.01%+1.45%, ובמור גם 0.15%+1%.
+//   5. קובץ הסכמים חיצוני → EXTERNAL_AGREEMENT
+//   6. ללא מידע / ללא הסכם בקרן פנסיה → תפעול בלבד
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const AUDIT_STATUS = SCHEMA_AUDIT_STATUS;
@@ -48,15 +50,23 @@ const BASELINE = {
   accumulationFee: 0.5,
 };
 
-const DEFAULT_PENSION_FUND_LIMITS = {
-  depositFee: 1.0,
-  accumulationFee: 0.22,
-};
+const DEFAULT_PENSION_FUND_ALLOWED_COMBINATIONS = [
+  { depositFee: 1.0, accumulationFee: 0.22, label: "קרן ברירת מחדל 0.22% מצבירה ו-1% מהפקדה" },
+  { depositFee: 1.45, accumulationFee: 0.01, label: "קרן ברירת מחדל 0.01% מצבירה ו-1.45% מהפקדה" },
+];
 
-const MOR_DEFAULT_PENSION_FUND_LIMITS = {
-  depositFee: 1.0,
-  accumulationFee: 0.15,
-};
+const MOR_DEFAULT_PENSION_FUND_ALLOWED_COMBINATIONS = [
+  ...DEFAULT_PENSION_FUND_ALLOWED_COMBINATIONS,
+  { depositFee: 1.0, accumulationFee: 0.15, label: "חריג מור 0.15% מצבירה ו-1% מהפקדה" },
+];
+
+const DEFAULT_PENSION_FUND_ISSUER_NAMES = [
+  "מור",
+  "אלטשולר",
+  "שחם",
+  "אינפיניטי",
+  "איילון",
+];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -130,14 +140,74 @@ function includesAny(text, words = []) {
   return words.some((word) => text.includes(word));
 }
 
-function feeOk(actual, approved) {
+function sameFee(actual, approved) {
   const actualNum = toNumber(actual);
   const approvedNum = toNumber(approved);
 
-  if (actualNum === null) return true;
-  if (approvedNum === null) return true;
+  if (actualNum === null || approvedNum === null) return false;
 
-  return actualNum <= approvedNum + 0.00001;
+  return Math.abs(actualNum - approvedNum) <= 0.00001;
+}
+
+function effectiveFeeScore({ depositFee, accumulationFee }) {
+  const depositNum = toNumber(depositFee);
+  const accumulationNum = toNumber(accumulationFee);
+
+  if (depositNum === null || accumulationNum === null) return null;
+
+  return Number((accumulationNum + depositNum / 2).toFixed(6));
+}
+
+function evaluateFeeComparison(row, approvedDepositFee, approvedAccumulationFee) {
+  const actualDepositFee = productSupports(row, "hasDepositFee") ? toNumber(row.depositFee) : 0;
+  const actualAccumulationFee = productSupports(row, "hasAccumulationFee") ? toNumber(row.accumulationFee) : 0;
+  const agreementDepositFee = productSupports(row, "hasDepositFee") ? toNumber(approvedDepositFee) : 0;
+  const agreementAccumulationFee = productSupports(row, "hasAccumulationFee") ? toNumber(approvedAccumulationFee) : 0;
+
+  if (actualDepositFee === null || actualAccumulationFee === null) {
+    return {
+      canCheck: false,
+      reason: "אין מידע דמי ניהול בקובץ — סומן כתפעול בלבד",
+    };
+  }
+
+  if (agreementDepositFee === null || agreementAccumulationFee === null) {
+    return {
+      canCheck: false,
+      reason: "אין מידע דמי ניהול בהסכם — סומן כתפעול בלבד",
+    };
+  }
+
+  const exactMatch =
+    sameFee(actualDepositFee, agreementDepositFee) &&
+    sameFee(actualAccumulationFee, agreementAccumulationFee);
+
+  const actualEffectiveScore = effectiveFeeScore({
+    depositFee: actualDepositFee,
+    accumulationFee: actualAccumulationFee,
+  });
+  const agreementEffectiveScore = effectiveFeeScore({
+    depositFee: agreementDepositFee,
+    accumulationFee: agreementAccumulationFee,
+  });
+
+  const economicPass =
+    actualEffectiveScore !== null &&
+    agreementEffectiveScore !== null &&
+    actualEffectiveScore <= agreementEffectiveScore + 0.00001;
+
+  return {
+    canCheck: true,
+    pass: exactMatch || economicPass,
+    exactMatch,
+    economicPass,
+    actualDepositFee,
+    actualAccumulationFee,
+    agreementDepositFee,
+    agreementAccumulationFee,
+    actualEffectiveScore,
+    agreementEffectiveScore,
+  };
 }
 
 function feeMismatch(actual, approved) {
@@ -169,6 +239,55 @@ function isOperationOnly(row) {
   );
 }
 
+function pensionProductText(row) {
+  return normalizeText(
+    [
+      row.fundName,
+      row.issuerOriginal,
+      row.issuerCanonical,
+      row.policyNumber,
+      row.sourceSheetName,
+      row.raw?.["שם קרן הפנסיה"],
+      row.raw?.["שם קופה"],
+      row.raw?.["שם מוצר"],
+      row.raw?.["שם תוכנית"],
+      row.raw?.["סוג מוצר"],
+      row.raw?.["סוג קרן"],
+    ]
+      .filter(Boolean)
+      .join(" ")
+  );
+}
+
+function isPensionProduct(row) {
+  return getProductType(row) === PRODUCT_TYPES.PENSION;
+}
+
+function isOldPensionFund(row) {
+  return isPensionProduct(row) && /פנסיה ותיקה|קרן ותיקה|ותיקה|ותיקות/.test(pensionProductText(row));
+}
+
+function buildExcludedResult(reason, matchResult = "EXCLUDED_OPERATION_ONLY") {
+  return {
+    auditStatus: AUDIT_STATUS.EXCLUDED,
+    auditStatusHe: AUDIT_STATUS_HE.excluded,
+    auditMatchResult: matchResult,
+    auditMatchModelName: "תפעול בלבד",
+    auditMatchRuleType: "EXCLUDED",
+    auditReason: reason,
+    auditReferenceDepositFee: null,
+    auditReferenceAccumulationFee: null,
+    agreementIssuerFound: false,
+    issueCategory: ISSUE_CATEGORY.NONE,
+    requiredAction: "",
+    priority: PRIORITY.NONE,
+    hasTierModel: false,
+    eligibleForTier: false,
+    inTierModel: false,
+    tierPotentialNotUsed: false,
+  };
+}
+
 function isOptionEligible(option, accumulation) {
   if (!option) return false;
 
@@ -194,54 +313,39 @@ function getOptionsForIssuer(row, agreementOptionsByIssuer = {}) {
   );
 }
 
-function getDefaultPensionFundLimits(row) {
-  const text = issuerText(row);
-
-  if (includesAny(text, ["מור"])) {
-    return MOR_DEFAULT_PENSION_FUND_LIMITS;
-  }
-
-  return DEFAULT_PENSION_FUND_LIMITS;
+function getDefaultPensionFundCombinations(row) {
+  return includesAny(issuerText(row), ["מור"])
+    ? MOR_DEFAULT_PENSION_FUND_ALLOWED_COMBINATIONS
+    : DEFAULT_PENSION_FUND_ALLOWED_COMBINATIONS;
 }
 
 function isDefaultPensionFundCandidate(row) {
-  const text = issuerText(row);
+  if (!isPensionProduct(row) || isOldPensionFund(row)) return false;
 
-  // כלל רחב וזהיר:
-  // אם מדובר בקרן פנסיה ויש דמי ניהול בגבולות ברירת מחדל,
-  // אין לסמן חריגה גם אם קובץ ההסכמים מציג מודל אחר.
-  return (
-    getProductType(row) === PRODUCT_TYPES.PENSION ||
-    text.includes("פנסיה") ||
-    text.includes("מקפת") ||
-    text.includes("מבטחים") ||
-    text.includes("מור")
-  );
+  const text = issuerText(row);
+  return includesAny(text, DEFAULT_PENSION_FUND_ISSUER_NAMES);
 }
 
 function evaluateDefaultPensionFundRule(row) {
   if (!isDefaultPensionFundCandidate(row)) return null;
 
-  const limits = getDefaultPensionFundLimits(row);
+  const combinations = getDefaultPensionFundCombinations(row);
+  const matchedCombination = combinations.find((option) =>
+    sameFee(row.depositFee, option.depositFee) &&
+    sameFee(row.accumulationFee, option.accumulationFee)
+  );
 
-  const depositOk = feeOk(row.depositFee, limits.depositFee);
-  const accumulationOk = feeOk(row.accumulationFee, limits.accumulationFee);
-
-  if (!depositOk || !accumulationOk) return null;
+  if (!matchedCombination) return null;
 
   return {
     auditStatus: AUDIT_STATUS.VALID,
     auditStatusHe: AUDIT_STATUS_HE.valid,
     auditMatchResult: "MATCH_DEFAULT_PENSION_FUND",
-    auditMatchModelName: includesAny(issuerText(row), ["מור"])
-      ? "קרן ברירת מחדל — מור"
-      : "קרן ברירת מחדל",
+    auditMatchModelName: matchedCombination.label,
     auditMatchRuleType: "DEFAULT_PENSION_FUND",
-    auditReason: includesAny(issuerText(row), ["מור"])
-      ? "דמי הניהול עומדים בתקרת קרן ברירת מחדל של מור: עד 1% מהפקדה ועד 0.15% מצבירה"
-      : "דמי הניהול עומדים בתקרת קרן ברירת מחדל: עד 1% מהפקדה ועד 0.22% מצבירה",
-    auditReferenceDepositFee: limits.depositFee,
-    auditReferenceAccumulationFee: limits.accumulationFee,
+    auditReason: `קרן פנסיה ברירת מחדל — דמי הניהול תואמים לשילוב המאושר: ${matchedCombination.label}`,
+    auditReferenceDepositFee: matchedCombination.depositFee,
+    auditReferenceAccumulationFee: matchedCombination.accumulationFee,
     agreementIssuerFound: true,
     issueCategory: ISSUE_CATEGORY.NONE,
     requiredAction: "",
@@ -262,13 +366,18 @@ function evaluateInlineAgreement(row) {
     ? row.accumulationFeeAgreement
     : null;
 
-  const depositOk = productSupports(row, "hasDepositFee")
-    ? feeOk(row.depositFee, approvedDepositFee)
-    : true;
-  const accumulationOk = productSupports(row, "hasAccumulationFee")
-    ? feeOk(row.accumulationFee, approvedAccumulationFee)
-    : true;
-  const pass = depositOk && accumulationOk;
+  const comparison = evaluateFeeComparison(row, approvedDepositFee, approvedAccumulationFee);
+
+  if (!comparison.canCheck) {
+    return buildExcludedResult(comparison.reason, "EXCLUDED_MISSING_FEE_DATA");
+  }
+
+  const pass = comparison.pass;
+  const reason = comparison.exactMatch
+    ? "דמי הניהול באקסל זהים לדמי הניהול בהסכם מנהל ההסדר"
+    : pass
+      ? `דמי הניהול אינם זהים, אך הציון האפקטיבי בקובץ נמוך/שווה להסכם: קובץ ${comparison.actualEffectiveScore} מול הסכם ${comparison.agreementEffectiveScore}`
+      : `דמי הניהול גבוהים מההסכם לפי ציון אפקטיבי: קובץ ${comparison.actualEffectiveScore} מול הסכם ${comparison.agreementEffectiveScore}`;
 
   return {
     auditStatus: pass ? AUDIT_STATUS.VALID : AUDIT_STATUS.INVALID,
@@ -276,9 +385,7 @@ function evaluateInlineAgreement(row) {
     auditMatchResult: pass ? "MATCH_INLINE_AGREEMENT" : "FAIL_INLINE_AGREEMENT",
     auditMatchModelName: "הסכם מנהל הסדר",
     auditMatchRuleType: "INLINE_AGREEMENT",
-    auditReason: pass
-      ? "דמי הניהול עומדים בהסכם מנהל ההסדר מתוך דוח היועץ"
-      : `חריגה מול הסכם מנהל ההסדר: הפקדה ${row.depositFee ?? "—"}% מול מאושר ${approvedDepositFee ?? "—"}% | צבירה ${row.accumulationFee ?? "—"}% מול מאושר ${approvedAccumulationFee ?? "—"}%`,
+    auditReason: reason,
     auditReferenceDepositFee: approvedDepositFee,
     auditReferenceAccumulationFee: approvedAccumulationFee,
     agreementIssuerFound: true,
@@ -297,33 +404,35 @@ function evaluateExternalAgreement(row, options = []) {
     isOptionEligible(option, row.accumulation)
   );
 
-  const fullMatch = eligibleOptions.find((option) => {
-    const depositOk = productSupports(row, "hasDepositFee")
-      ? feeOk(row.depositFee, option.depositFee)
-      : true;
-    const accumulationOk = productSupports(row, "hasAccumulationFee")
-      ? feeOk(row.accumulationFee, option.accumulationFee)
-      : true;
-    return depositOk && accumulationOk;
-  });
+  const evaluatedOptions = eligibleOptions
+    .map((option) => ({
+      option,
+      comparison: evaluateFeeComparison(row, option.depositFee, option.accumulationFee),
+    }))
+    .filter((item) => item.comparison.canCheck);
+
+  const fullMatch = evaluatedOptions.find((item) => item.comparison.pass);
 
   if (fullMatch) {
+    const { option, comparison } = fullMatch;
     return {
       auditStatus: AUDIT_STATUS.VALID,
       auditStatusHe: AUDIT_STATUS_HE.valid,
-      auditMatchResult: `MATCH_${fullMatch.optionName || "EXTERNAL_AGREEMENT"}`,
-      auditMatchModelName: fullMatch.optionName || "הסכם חיצוני",
-      auditMatchRuleType: fullMatch.conditionType || "EXTERNAL_AGREEMENT",
-      auditReason: `דמי הניהול עומדים ב${fullMatch.optionName || "הסכם החיצוני"}`,
-      auditReferenceDepositFee: fullMatch.depositFee ?? null,
-      auditReferenceAccumulationFee: fullMatch.accumulationFee ?? null,
+      auditMatchResult: `MATCH_${option.optionName || "EXTERNAL_AGREEMENT"}`,
+      auditMatchModelName: option.optionName || "הסכם חיצוני",
+      auditMatchRuleType: option.conditionType || "EXTERNAL_AGREEMENT",
+      auditReason: comparison.exactMatch
+        ? `דמי הניהול באקסל זהים ל${option.optionName || "הסכם החיצוני"}`
+        : `דמי הניהול נמוכים/שווים להסכם לפי ציון אפקטיבי: קובץ ${comparison.actualEffectiveScore} מול הסכם ${comparison.agreementEffectiveScore}`,
+      auditReferenceDepositFee: option.depositFee ?? null,
+      auditReferenceAccumulationFee: option.accumulationFee ?? null,
       agreementIssuerFound: true,
       issueCategory: ISSUE_CATEGORY.NONE,
       requiredAction: "",
       priority: PRIORITY.NONE,
       hasTierModel: options.some((o) => o.conditionType === "MIN_ACCUMULATION"),
       eligibleForTier: eligibleOptions.some((o) => o.conditionType === "MIN_ACCUMULATION"),
-      inTierModel: fullMatch.conditionType === "MIN_ACCUMULATION",
+      inTierModel: option.conditionType === "MIN_ACCUMULATION",
       tierPotentialNotUsed: false,
     };
   }
@@ -339,6 +448,15 @@ function evaluateExternalAgreement(row, options = []) {
     options[0];
 
   const bestReference = eligibleTier || defaultOption;
+  const bestComparison = evaluateFeeComparison(
+    row,
+    bestReference?.depositFee,
+    bestReference?.accumulationFee
+  );
+
+  if (!bestComparison.canCheck) {
+    return buildExcludedResult(bestComparison.reason, "EXCLUDED_MISSING_FEE_DATA");
+  }
 
   const hasTierModel = tierOptions.length > 0;
   const eligibleForTier = Boolean(eligibleTier);
@@ -360,8 +478,8 @@ function evaluateExternalAgreement(row, options = []) {
     auditMatchModelName: bestReference?.optionName || "הסכם חיצוני",
     auditMatchRuleType: bestReference?.conditionType || "EXTERNAL_AGREEMENT",
     auditReason: tierPotentialNotUsed
-      ? `זכאי למודל צבירה גבוה אך אינו עומד בדמי הניהול של המודל: הפקדה ${row.depositFee ?? "—"}% מול ${eligibleTier.depositFee ?? "—"}% | צבירה ${row.accumulationFee ?? "—"}% מול ${eligibleTier.accumulationFee ?? "—"}%`
-      : `דמי הניהול אינם עומדים בהסכם: הפקדה ${row.depositFee ?? "—"}% מול ${bestReference?.depositFee ?? "—"}% | צבירה ${row.accumulationFee ?? "—"}% מול ${bestReference?.accumulationFee ?? "—"}%`,
+      ? `זכאי למודל צבירה גבוה אך אינו עומד בדמי הניהול של המודל לפי ציון אפקטיבי: קובץ ${bestComparison.actualEffectiveScore} מול הסכם ${bestComparison.agreementEffectiveScore}`
+      : `דמי הניהול גבוהים מההסכם לפי ציון אפקטיבי: קובץ ${bestComparison.actualEffectiveScore} מול הסכם ${bestComparison.agreementEffectiveScore}`,
     auditReferenceDepositFee: bestReference?.depositFee ?? null,
     auditReferenceAccumulationFee: bestReference?.accumulationFee ?? null,
     agreementIssuerFound: true,
@@ -382,6 +500,10 @@ function evaluateExternalAgreement(row, options = []) {
 // ─── Baseline fallback ────────────────────────────────────────────────────────
 
 function evaluateBaseline(row) {
+  if (isPensionProduct(row)) {
+    return buildExcludedResult("לא נמצא הסכם / אין מידע הסכם לבדיקת קרן פנסיה — סומן כתפעול בלבד", "EXCLUDED_NO_AGREEMENT");
+  }
+
   const baseline = getBaseline(row);
   const depositOk = productSupports(row, "hasDepositFee")
     ? feeOk(row.depositFee, baseline.depositFee)
@@ -419,22 +541,14 @@ export function evaluateUnifiedRow(row, agreementOptionsByIssuer = {}) {
   if (isOperationOnly(row)) {
     return {
       ...row,
-      auditStatus: AUDIT_STATUS.EXCLUDED,
-      auditStatusHe: AUDIT_STATUS_HE.excluded,
-      auditMatchResult: "EXCLUDED_OPERATION_ONLY",
-      auditMatchModelName: "תפעול בלבד",
-      auditMatchRuleType: "EXCLUDED",
-      auditReason: "תפעול בלבד / ללא שיווק — הוחרג מבדיקת דמי ניהול",
-      auditReferenceDepositFee: null,
-      auditReferenceAccumulationFee: null,
-      agreementIssuerFound: false,
-      issueCategory: ISSUE_CATEGORY.NONE,
-      requiredAction: "",
-      priority: PRIORITY.NONE,
-      hasTierModel: false,
-      eligibleForTier: false,
-      inTierModel: false,
-      tierPotentialNotUsed: false,
+      ...buildExcludedResult("תפעול בלבד / ללא שיווק — הוחרג מבדיקת דמי ניהול"),
+    };
+  }
+
+  if (isOldPensionFund(row)) {
+    return {
+      ...row,
+      ...buildExcludedResult("קרן פנסיה ותיקה — לא נכללת בבדיקת דמי ניהול", "EXCLUDED_OLD_PENSION_FUND"),
     };
   }
 

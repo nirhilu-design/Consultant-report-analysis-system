@@ -14,7 +14,7 @@ import {
 // AUDIT ENGINE — מנוע בדיקת דמי ניהול
 //
 // סדר בדיקה:
-//   1. תפעול בלבד / ללא שיווק → excluded
+//   1. תפעול בלבד לפי העמודה "האם מנהל ההסדר סוכן בפוליסה" = לא → excluded
 //   2. הסכם פנימי מתוך דוח היועץ → INLINE_AGREEMENT
 //   3. קרנות ברירת מחדל → DEFAULT_PENSION_FUND
 //      כלל עסקי:
@@ -189,10 +189,21 @@ function hasFeesInfo(row) {
   return isPresent(row.depositFee) || isPresent(row.accumulationFee);
 }
 
+function isArrangementAgentNo(value) {
+  const text = normalizeText(value).toLowerCase();
+  return text === "לא" || text === "no" || text === "false" || text === "0";
+}
+
 function isOperationOnly(row) {
-  // V80: בבקרת דמי ניהול אין להסיק "מתפעל בלבד" מעמודות סטטוס כלליות.
-  // הדגל מגיע מה-parser/unified לפי העמודה המדויקת "האם מנהל ההסדר סוכן בפוליסה" או מקרן ותיקה.
-  return Boolean(row.isOperationOnly) || Boolean(row.isExcludedFromFeeAudit);
+  // V81: קדימות מוחלטת לעמודת "האם מנהל ההסדר סוכן בפוליסה".
+  // אם הערך הוא "לא" — השורה היא תפעול בלבד ולא עוברת לבדיקת דמי ניהול.
+  // לא משתמשים בעמודות סטטוס כלליות ולא מסיקים תפעול מדמי ניהול.
+  return (
+    Boolean(row.isOperationOnly) ||
+    Boolean(row.isExcludedFromFeeAudit) ||
+    isArrangementAgentNo(row.arrangementAgentStatus) ||
+    isArrangementAgentNo(row.isArrangementAgent)
+  );
 }
 
 function isOptionEligible(option, accumulation) {
@@ -477,15 +488,17 @@ function evaluateBaseline(row) {
 export function evaluateUnifiedRow(row, agreementOptionsByIssuer = {}) {
   row = safeRow(row);
   agreementOptionsByIssuer = agreementOptionsByIssuer && typeof agreementOptionsByIssuer === "object" ? agreementOptionsByIssuer : {};
-  if (!isPensionFeeAuditEligible(row)) {
+  // V81: קודם מתפעל בלבד, ורק אחר כך בדיקת סוג קרן פנסיה.
+  // כל "לא" בעמודת האם מנהל ההסדר סוכן בפוליסה עוצר את ה-flow ומסומן כתפעול בלבד.
+  if (isOperationOnly(row)) {
     return {
       ...row,
       auditStatus: AUDIT_STATUS.EXCLUDED,
       auditStatusHe: AUDIT_STATUS_HE.excluded,
-      auditMatchResult: "EXCLUDED_VETERAN_PENSION",
-      auditMatchModelName: "קרן פנסיה ותיקה",
+      auditMatchResult: "EXCLUDED_OPERATION_ONLY",
+      auditMatchModelName: "תפעול בלבד",
       auditMatchRuleType: "EXCLUDED",
-      auditReason: "קרן פנסיה ותיקה — לא נכללת בבדיקת דמי ניהול",
+      auditReason: "תפעול בלבד — בעמודת האם מנהל ההסדר סוכן בפוליסה מופיע לא",
       auditReferenceDepositFee: null,
       auditReferenceAccumulationFee: null,
       agreementIssuerFound: false,
@@ -499,15 +512,15 @@ export function evaluateUnifiedRow(row, agreementOptionsByIssuer = {}) {
     };
   }
 
-  if (isOperationOnly(row)) {
+  if (!isPensionFeeAuditEligible(row)) {
     return {
       ...row,
       auditStatus: AUDIT_STATUS.EXCLUDED,
       auditStatusHe: AUDIT_STATUS_HE.excluded,
-      auditMatchResult: "EXCLUDED_OPERATION_ONLY",
-      auditMatchModelName: "תפעול בלבד",
+      auditMatchResult: "EXCLUDED_VETERAN_PENSION",
+      auditMatchModelName: "קרן פנסיה ותיקה",
       auditMatchRuleType: "EXCLUDED",
-      auditReason: "תפעול בלבד / ללא שיווק — הוחרג מבדיקת דמי ניהול",
+      auditReason: "קרן פנסיה ותיקה — לא נכללת בבדיקת דמי ניהול",
       auditReferenceDepositFee: null,
       auditReferenceAccumulationFee: null,
       agreementIssuerFound: false,

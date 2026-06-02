@@ -96,6 +96,9 @@ function getServiceStatus(row) {
         "סטטוס לקוח",
         "סוג שירות",
         "סטטוס טיפול",
+        "האם מנהל ההסדר  סוכן בפוליסה",
+        "האם מנהל ההסדר סוכן בפוליסה",
+        "בטיפול סוכן",
       ])
     )
   );
@@ -243,7 +246,47 @@ function getAccumulationFee(row) {
 }
 
 function isOperationOnly(serviceStatus) {
-  return /תפעול בלבד|ללא שיווק/.test(normalizeText(serviceStatus));
+  const text = normalizeText(serviceStatus).toLowerCase();
+  return /תפעול בלבד|ללא שיווק/.test(text) || text === "לא" || text === "no" || text === "false" || text === "0";
+}
+
+function isArrangementAgentNo(value) {
+  const text = normalizeText(value).toLowerCase();
+  return text === "לא" || text === "no" || text === "false" || text === "0";
+}
+
+function getArrangementAgentStatus(row) {
+  const raw = getRaw(row);
+
+  return normalizeText(
+    firstNonEmpty(
+      row.isArrangementAgent,
+      getByKeys(raw, [
+        "האם מנהל ההסדר  סוכן בפוליסה",
+        "האם מנהל ההסדר סוכן בפוליסה",
+        "האם מנהל הסדר סוכן בפוליסה",
+        "מנהל ההסדר סוכן בפוליסה",
+        "בטיפול סוכן",
+        "האם בטיפול סוכן",
+      ])
+    )
+  );
+}
+
+function isVeteranPensionFund(row) {
+  const raw = getRaw(row);
+  const text = normalizeText(
+    [
+      row.planType,
+      row.fundName,
+      row.issuerOriginal,
+      getByKeys(raw, ["סוג תוכנית פנסיה", "סוג תוכנית", "סוג תכנית", "שם קרן הפנסיה", "קרן פנסיה"]),
+    ]
+      .filter(Boolean)
+      .join(" ")
+  );
+
+  return text.includes("ותיק") || text.includes("ותיקה");
 }
 
 function personalByClientId(personalRows = []) {
@@ -350,12 +393,19 @@ export function buildBaseUnifiedRows({
     const issuerCanonical = canonicalIssuer(issuerOriginal, aliasLookup);
 
     const serviceStatus = getServiceStatus(sourceRow);
+    const arrangementAgentStatus = getArrangementAgentStatus(sourceRow);
+    const veteranPensionFund = productType === PRODUCT_TYPES.PENSION && isVeteranPensionFund(sourceRow);
     const raw = getRaw(sourceRow);
     const sourceAuditStatus = normalizeText(getByKeys(raw, ["סטטוס", "סטטוס2"]));
 
+    // V80: בקרן פנסיה "מתפעל בלבד" לא נקבע לפי עמודת סטטוס או לפי דמי ניהול.
+    // הקביעה נעשית לפי העמודה המדויקת "האם מנהל ההסדר  סוכן בפוליסה":
+    // אם הערך "לא" => תפעול בלבד. קרן ותיקה מוחרגת תמיד.
+    const operationOnlyByArrangementAgent = isArrangementAgentNo(arrangementAgentStatus);
+
     const excluded =
       config.excludeOperationOnlyFromFeeAudit &&
-      (isOperationOnly(serviceStatus) || isOperationOnly(sourceAuditStatus));
+      (operationOnlyByArrangementAgent || veteranPensionFund);
 
     const accumulation = getAccumulation(sourceRow);
 
@@ -382,6 +432,7 @@ export function buildBaseUnifiedRows({
       personalMatched: Boolean(sourceRow.personalMatched || personal.personalDetailsFound),
 
       serviceStatus,
+      arrangementAgentStatus,
       sourceAuditStatus,
       age: personal.age,
       ageBucket: ageBucket(personal.age),
@@ -439,13 +490,15 @@ export function buildBaseUnifiedRows({
 
       depositFeeAgreement: normalizePercent(sourceRow.depositFeeAgreement),
       accumulationFeeAgreement: normalizePercent(sourceRow.accumulationFeeAgreement),
-      isOperationOnly: Boolean(sourceRow.isOperationOnly || excluded),
-      isExcludedFromFeeAudit: excluded || Boolean(sourceRow.isOperationOnly),
+      isOperationOnly: Boolean(excluded),
+      isExcludedFromFeeAudit: Boolean(excluded),
 
-      auditStatus: (excluded || sourceRow.isOperationOnly) ? "excluded" : "",
-      auditStatusHe: (excluded || sourceRow.isOperationOnly) ? "הוחרג" : "",
-      auditReason: (excluded || sourceRow.isOperationOnly)
-        ? "תפעול בלבד / ללא שיווק — הוחרג מבדיקת דמי ניהול"
+      auditStatus: excluded ? "excluded" : "",
+      auditStatusHe: excluded ? "תפעול בלבד" : "",
+      auditReason: excluded
+        ? (veteranPensionFund
+            ? "קרן פנסיה ותיקה — לא נכללת בבדיקת דמי ניהול"
+            : "מתפעל בלבד — בעמודת האם מנהל ההסדר סוכן בפוליסה מופיע לא")
         : "",
 
       raw: sourceRow,

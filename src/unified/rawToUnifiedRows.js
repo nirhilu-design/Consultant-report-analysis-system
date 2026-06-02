@@ -96,9 +96,6 @@ function getServiceStatus(row) {
         "סטטוס לקוח",
         "סוג שירות",
         "סטטוס טיפול",
-        "האם מנהל ההסדר  סוכן בפוליסה",
-        "האם מנהל ההסדר סוכן בפוליסה",
-        "בטיפול סוכן",
       ])
     )
   );
@@ -264,6 +261,7 @@ function getArrangementAgentStatus(row) {
 
   return normalizeText(
     firstNonEmpty(
+      row.isArrangementAgentRaw,
       row.isArrangementAgent,
       getByKeys(raw, [
         "האם מנהל ההסדר  סוכן בפוליסה",
@@ -496,11 +494,11 @@ export function buildBaseUnifiedRows({
 
       depositFeeAgreement: normalizePercent(sourceRow.depositFeeAgreement),
       accumulationFeeAgreement: normalizePercent(sourceRow.accumulationFeeAgreement),
-      isOperationOnly: Boolean(excluded),
+      isOperationOnly: Boolean(operationOnlyByArrangementAgent),
       isExcludedFromFeeAudit: Boolean(excluded),
 
       auditStatus: excluded ? "excluded" : "",
-      auditStatusHe: excluded ? "תפעול בלבד" : "",
+      auditStatusHe: operationOnlyByArrangementAgent ? "תפעול בלבד" : (veteranPensionFund ? "לא נכלל בבקרה" : ""),
       auditReason: excluded
         ? (operationOnlyByArrangementAgent
             ? "תפעול בלבד — בעמודת האם מנהל ההסדר סוכן בפוליסה מופיע לא"

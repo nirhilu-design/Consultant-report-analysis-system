@@ -195,13 +195,13 @@ function isArrangementAgentNo(value) {
 }
 
 function isOperationOnly(row) {
-  // V81: קדימות מוחלטת לעמודת "האם מנהל ההסדר סוכן בפוליסה".
+  // V82: קדימות מוחלטת לעמודת "האם מנהל ההסדר סוכן בפוליסה".
   // אם הערך הוא "לא" — השורה היא תפעול בלבד ולא עוברת לבדיקת דמי ניהול.
   // לא משתמשים בעמודות סטטוס כלליות ולא מסיקים תפעול מדמי ניהול.
   return (
     Boolean(row.isOperationOnly) ||
-    Boolean(row.isExcludedFromFeeAudit) ||
     isArrangementAgentNo(row.arrangementAgentStatus) ||
+    isArrangementAgentNo(row.isArrangementAgentRaw) ||
     isArrangementAgentNo(row.isArrangementAgent)
   );
 }
@@ -488,7 +488,7 @@ function evaluateBaseline(row) {
 export function evaluateUnifiedRow(row, agreementOptionsByIssuer = {}) {
   row = safeRow(row);
   agreementOptionsByIssuer = agreementOptionsByIssuer && typeof agreementOptionsByIssuer === "object" ? agreementOptionsByIssuer : {};
-  // V81: קודם מתפעל בלבד, ורק אחר כך בדיקת סוג קרן פנסיה.
+  // V82: קודם מתפעל בלבד, ורק אחר כך בדיקת סוג קרן פנסיה.
   // כל "לא" בעמודת האם מנהל ההסדר סוכן בפוליסה עוצר את ה-flow ומסומן כתפעול בלבד.
   if (isOperationOnly(row)) {
     return {

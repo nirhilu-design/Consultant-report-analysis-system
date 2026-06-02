@@ -255,6 +255,10 @@ function isArrangementAgentNo(value) {
   return text === "לא" || text === "no" || text === "false" || text === "0";
 }
 
+function isSourceOperationOnly(row) {
+  return Boolean(row?.isOperationOnly) || isArrangementAgentNo(row?.isArrangementAgent);
+}
+
 function getArrangementAgentStatus(row) {
   const raw = getRaw(row);
 
@@ -398,10 +402,12 @@ export function buildBaseUnifiedRows({
     const raw = getRaw(sourceRow);
     const sourceAuditStatus = normalizeText(getByKeys(raw, ["סטטוס", "סטטוס2"]));
 
-    // V80: בקרן פנסיה "מתפעל בלבד" לא נקבע לפי עמודת סטטוס או לפי דמי ניהול.
-    // הקביעה נעשית לפי העמודה המדויקת "האם מנהל ההסדר  סוכן בפוליסה":
-    // אם הערך "לא" => תפעול בלבד. קרן ותיקה מוחרגת תמיד.
-    const operationOnlyByArrangementAgent = isArrangementAgentNo(arrangementAgentStatus);
+    // V81 Flow עסקי בקרן פנסיה:
+    // 1. אם בעמודה "האם מנהל ההסדר סוכן בפוליסה" מופיע "לא" => תפעול בלבד, ללא בדיקת דמי ניהול.
+    // 2. אם מופיע "כן" => ממשיכים לבדיקת סוג קרן; ותיקה מוחרגת, מקיפה/כללית נבדקות מול הסכם.
+    // חשוב: לא משתמשים בעמודות סטטוס כלליות, ולא מסיקים מתפעל מדמי ניהול.
+    const operationOnlyByArrangementAgent =
+      isSourceOperationOnly(sourceRow) || isArrangementAgentNo(arrangementAgentStatus);
 
     const excluded =
       config.excludeOperationOnlyFromFeeAudit &&
@@ -496,9 +502,9 @@ export function buildBaseUnifiedRows({
       auditStatus: excluded ? "excluded" : "",
       auditStatusHe: excluded ? "תפעול בלבד" : "",
       auditReason: excluded
-        ? (veteranPensionFund
-            ? "קרן פנסיה ותיקה — לא נכללת בבדיקת דמי ניהול"
-            : "מתפעל בלבד — בעמודת האם מנהל ההסדר סוכן בפוליסה מופיע לא")
+        ? (operationOnlyByArrangementAgent
+            ? "תפעול בלבד — בעמודת האם מנהל ההסדר סוכן בפוליסה מופיע לא"
+            : "קרן פנסיה ותיקה — לא נכללת בבדיקת דמי ניהול")
         : "",
 
       raw: sourceRow,

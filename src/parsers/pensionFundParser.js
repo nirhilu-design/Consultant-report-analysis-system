@@ -310,6 +310,36 @@ function normalizeHeader(value) {
     .trim();
 }
 
+function isArrangementAgentHeader(value) {
+  const text = normalizeHeader(value);
+  if (!text) return false;
+
+  const exactHeaders = HEADER_ALIASES.isArrangementAgent.map((alias) => normalizeHeader(alias));
+  if (exactHeaders.includes(text)) return true;
+
+  // V82: זיהוי קשיח של התא שבתמונה: "האם מנהל ההסדר סוכן בפוליסה".
+  // הכותרת לפעמים מגיעה עם ירידות שורה / רווח כפול, לכן בודקים את רכיבי הכותרת,
+  // אבל לא מסתפקים במילה "סוכן" כדי לא ליפול על "שם מנהל הסדר".
+  const requiredTokens = ["האם", "מנהל", "סוכן", "בפוליסה"];
+  return requiredTokens.every((token) => text.includes(token));
+}
+
+function findArrangementAgentHeader(rows) {
+  const maxRowsToScan = Math.min(rows.length, 20);
+
+  for (let rowIndex = 0; rowIndex < maxRowsToScan; rowIndex += 1) {
+    const row = rows[rowIndex];
+    if (!Array.isArray(row)) continue;
+
+    const columnIndex = row.findIndex((cell) => isArrangementAgentHeader(cell));
+    if (columnIndex >= 0) {
+      return { rowIndex, columnIndex, headerText: normalizeText(row[columnIndex]) };
+    }
+  }
+
+  return null;
+}
+
 function normalizeNumber(value) {
   if (value === null || value === undefined || value === "") return null;
   if (typeof value === "number") return Number.isFinite(value) ? value : null;
@@ -385,8 +415,8 @@ function buildHeaderIndex(headerRow) {
       return;
     }
 
-    // V81: עמודת "האם מנהל ההסדר סוכן בפוליסה" רגישה עסקית.
-    // לא עושים לה fuzzy match כדי שלא תיתפס בטעות עמודת "שם מנהל הסדר" או עמודת סטטוס אחרת.
+    // V82: עמודת "האם מנהל ההסדר סוכן בפוליסה" רגישה עסקית.
+    // לא עושים לה fuzzy match כללי; הזיהוי הקשיח נעשה ב-findArrangementAgentHeader.
     if (field === "isArrangementAgent") return;
 
     const fuzzyIndex = normalizedCells.findIndex((cell) => {
@@ -401,6 +431,8 @@ function buildHeaderIndex(headerRow) {
 }
 
 function detectHeaderInfo(rows) {
+  const arrangementAgentHeader = findArrangementAgentHeader(rows);
+
   const candidates = rows.slice(0, 10).map((row, index) => ({
     index,
     map: buildHeaderIndex(row),
@@ -415,8 +447,23 @@ function detectHeaderInfo(rows) {
     }))
     .sort((a, b) => b.score - a.score)[0];
 
-  if (best?.score >= 2) return best;
-  return { index: 0, map: {} };
+  const headerInfo = best?.score >= 2 ? best : { index: 0, map: {} };
+
+  if (arrangementAgentHeader) {
+    headerInfo.map = {
+      ...(headerInfo.map || {}),
+      isArrangementAgent: arrangementAgentHeader.columnIndex,
+    };
+    headerInfo.arrangementAgentHeader = arrangementAgentHeader;
+
+    // אם הכותרת העסקית נמצאה בשורה מאוחרת יותר מזיהוי הכותרות הכללי,
+    // מתחילים את הנתונים מתחת לשורת הכותרות האמיתית.
+    if (arrangementAgentHeader.rowIndex > headerInfo.index) {
+      headerInfo.index = arrangementAgentHeader.rowIndex;
+    }
+  }
+
+  return headerInfo;
 }
 
 function getField(row, indexMap, field) {
@@ -425,6 +472,10 @@ function getField(row, indexMap, field) {
     const dynamicValue = getCell(row, dynamicIndex);
     if (dynamicValue !== null && dynamicValue !== undefined && normalizeText(dynamicValue) !== "") return dynamicValue;
   }
+
+  // V82: אסור לנחש את עמודת "האם מנהל ההסדר סוכן בפוליסה" לפי מיקום fallback.
+  // אם התא המדויק לא נמצא בשורת הכותרות, מחזירים null ולא מסיקים מתפעל מעמודות אחרות.
+  if (field === "isArrangementAgent") return null;
 
   return getCell(row, COL[field]);
 }
@@ -451,7 +502,7 @@ function isNegativeAgentValue(value) {
 }
 
 function isOperationOnly(row, indexMap) {
-  // V81: מתפעל בלבד נקבע אך ורק לפי העמודה:
+  // V82: מתפעל בלבד נקבע אך ורק לפי העמודה:
   // "האם מנהל ההסדר  סוכן בפוליסה".
   // אם הערך בעמודה הוא "לא" המשמעות היא שהמוצר בתפעול בלבד.
   // לא משתמשים בעמודות סטטוס / דמי ניהול כדי למנוע ערבוב בין סטטוס פוליסה לבין סטטוס טיפול סוכן.
@@ -508,7 +559,7 @@ export function parsePensionFund(workbook) {
       allRows.push({
         sheetName,
         sourceRowIndex: headerInfo.index + idx + 2,
-        parserVersion: "stability_07_v81",
+        parserVersion: "stability_08_v82",
         parserWarnings,
         employeeCode: getEmployeeCode(row, indexMap),
 
@@ -524,6 +575,9 @@ export function parsePensionFund(workbook) {
         auditStatus: normalizeText(getField(row, indexMap, "auditStatus")),
         isOperationOnly: operationOnly,
         isArrangementAgent: normalizeText(getField(row, indexMap, "isArrangementAgent")),
+        isArrangementAgentRaw: normalizeText(getField(row, indexMap, "isArrangementAgent")),
+        isArrangementAgentColumnIndex: indexMap?.isArrangementAgent ?? null,
+        isArrangementAgentHeaderText: headerInfo.arrangementAgentHeader?.headerText || "",
 
         investmentTrackRewards: normalizeText(getField(row, indexMap, "investmentTrackNameR")),
         investmentTrackCompensation: normalizeText(getField(row, indexMap, "investmentTrackNameC")),
@@ -550,9 +604,14 @@ export function parsePensionFund(workbook) {
   });
 
   console.log("parsePensionFund:", {
-    version: "stability_07_v81",
+    version: "stability_08_v82",
     total: allRows.length,
     operationOnly: allRows.filter((r) => r.isOperationOnly).length,
+    arrangementAgentValues: allRows.reduce((acc, row) => {
+      const key = row.isArrangementAgent || "ריק";
+      acc[key] = (acc[key] || 0) + 1;
+      return acc;
+    }, {}),
     withFees: allRows.filter((r) => r.depositFee !== null || r.accumulationFee !== null).length,
     withAccum: allRows.filter((r) => r.accumulation !== null).length,
     warnings: [...new Set(parserWarnings)],

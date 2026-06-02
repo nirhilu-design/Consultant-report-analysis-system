@@ -53,11 +53,8 @@ function isExcluded(row) {
   return getAuditStatus(row) === AUDIT_STATUS.EXCLUDED;
 }
 
-function isVeteranPensionFeeAuditRow(row) {
-  return (
-    row?.auditMatchResult === "EXCLUDED_VETERAN_PENSION" ||
-    row?.isVeteranPensionFund === true
-  );
+function isNoAgreement(row) {
+  return getAuditStatus(row) === AUDIT_STATUS.NO_AGREEMENT;
 }
 
 function isValid(row) {
@@ -154,18 +151,20 @@ export function buildDrilldownKey({ statusKey = "", issuer = "" } = {}) {
 export function buildKpi(rows = []) {
   rows = safeRows(rows);
 
-  const audited = rows.filter((row) => !isExcluded(row));
+  const audited = rows.filter((row) => !isExcluded(row) && !isNoAgreement(row));
   const valid = audited.filter(isValid);
   const invalid = audited.filter(isInvalid);
   const excluded = rows.filter(isExcluded);
   const tier = rows.filter((row) => row.tierPotentialNotUsed);
+  const noAgreement = rows.filter(isNoAgreement);
+
   return {
     totalRows: rows.length,
     auditedRows: audited.length,
     validRows: valid.length,
     invalidRows: invalid.length,
     excludedRows: excluded.length,
-    noAgreementRows: 0,
+    noAgreementRows: noAgreement.length,
     tierPotentialRows: tier.length,
     actionItems: invalid.length + tier.length,
     complianceRate: audited.length ? valid.length / audited.length : 0,
@@ -206,6 +205,14 @@ export function buildBrokerDistribution(rows = []) {
 
 // ─── Management Fees Audit ────────────────────────────────────────────────────
 
+function isVeteranFeeExclusion(row) {
+  return (
+    row?.auditMatchResult === "EXCLUDED_VETERAN_PENSION" ||
+    row?.auditMatchModelName === "קרן פנסיה ותיקה" ||
+    row?.isVeteranPensionFund === true
+  );
+}
+
 function initCounter(keys) {
   return Object.fromEntries(keys.map((key) => [key, 0]));
 }
@@ -227,12 +234,11 @@ function addDrilldown(drilldown, statusKey, issuer, row) {
 export function buildManagementFeesAudit(rows = []) {
   rows = safeRows(rows);
 
-  // V87: ותיקה / ישנה / זקנה מוחרגת לחלוטין מטבלת בקרת דמי ניהול.
-  // תפעול בלבד לפי "סוכן בפוליסה = לא" עדיין מוצג כמידע תפעולי,
-  // אבל קרן ותיקה אינה חלק ממדגם בקרת דמי הניהול ולכן לא מייצרת עמודת יצרן.
-  const feeAuditRows = rows.filter((row) => !isVeteranPensionFeeAuditRow(row));
+  // קרן פנסיה ותיקה / ישנה / זקנה מוחרגת מהבקרה העסקית ולא אמורה לפתוח עמודת יצרן.
+  // לעומת זאת, תפעול בלבד אמיתי לפי עמודת סוכן בפוליסה נשאר מוצג בשורת "תפעול בלבד".
+  const visibleRows = rows.filter((row) => !isVeteranFeeExclusion(row));
 
-  const issuers = [...new Set(feeAuditRows.map((row) => row.issuerCanonical || row.issuerOriginal || UNKNOWN))]
+  const issuers = [...new Set(visibleRows.map((row) => row.issuerCanonical || row.issuerOriginal || UNKNOWN))]
     .filter(Boolean)
     .sort((a, b) => a.localeCompare(b, "he"));
 
@@ -240,15 +246,15 @@ export function buildManagementFeesAudit(rows = []) {
     valid: initCounter(issuers),
     invalid: initCounter(issuers),
     excluded: initCounter(issuers),
+    noAgreement: initCounter(issuers),
     tier: initCounter(issuers),
     total: initCounter(issuers),
     compliance: initCounter(issuers),
   };
 
   const drilldown = {};
-  const unknownStatusRows = [];
 
-  for (const row of feeAuditRows) {
+  for (const row of visibleRows) {
     const issuer = row.issuerCanonical || row.issuerOriginal || UNKNOWN;
 
     if (isExcluded(row)) {
@@ -258,62 +264,73 @@ export function buildManagementFeesAudit(rows = []) {
       continue;
     }
 
+    if (isNoAgreement(row)) {
+      counts.noAgreement[issuer] += 1;
+      addDrilldown(drilldown, "noAgreement", issuer, row);
+      addDrilldown(drilldown, "NO_AGREEMENT", issuer, row);
+      continue;
+    }
+
     if (isValid(row)) {
-      counts.valid[issuer] += 1;
       counts.total[issuer] += 1;
+      counts.valid[issuer] += 1;
       addDrilldown(drilldown, "total", issuer, row);
       addDrilldown(drilldown, "valid", issuer, row);
       addDrilldown(drilldown, row.auditMatchRuleType || row.auditMatchResult || "VALID", issuer, row);
-    } else if (isInvalid(row)) {
-      counts.invalid[issuer] += 1;
+      continue;
+    }
+
+    if (isInvalid(row)) {
       counts.total[issuer] += 1;
+      counts.invalid[issuer] += 1;
       addDrilldown(drilldown, "total", issuer, row);
       addDrilldown(drilldown, "invalid", issuer, row);
       addDrilldown(drilldown, "INVALID", issuer, row);
-    } else {
-      unknownStatusRows.push(row);
-      addDrilldown(drilldown, "UNKNOWN_AUDIT_STATUS", issuer, row);
+      continue;
     }
 
-    if (row.tierPotentialNotUsed) {
-      counts.tier[issuer] += 1;
-      addDrilldown(drilldown, "tier", issuer, row);
-      addDrilldown(drilldown, "TIER", issuer, row);
-    }
+    console.error("UNKNOWN AUDIT STATUS", {
+      auditStatus: row?.auditStatus,
+      issuer,
+      row,
+    });
   }
 
-  let validTotal = 0;
-  let invalidTotal = 0;
-  let excludedTotal = 0;
+  let validQa = 0;
+  let invalidQa = 0;
+  let excludedQa = 0;
+  let noAgreementQa = 0;
 
   for (const issuer of issuers) {
     const total = counts.total[issuer];
     counts.compliance[issuer] = total > 0 ? counts.valid[issuer] / total : null;
-    validTotal += counts.valid[issuer];
-    invalidTotal += counts.invalid[issuer];
-    excludedTotal += counts.excluded[issuer];
+
+    validQa += counts.valid[issuer];
+    invalidQa += counts.invalid[issuer];
+    excludedQa += counts.excluded[issuer];
+    noAgreementQa += counts.noAgreement[issuer];
   }
 
-  const counted = validTotal + invalidTotal + excludedTotal;
-  if (counted !== feeAuditRows.length || unknownStatusRows.length) {
+  const counted = validQa + invalidQa + excludedQa + noAgreementQa;
+
+  if (counted !== visibleRows.length) {
     console.error("AUDIT COUNT MISMATCH", {
-      sourceRows: rows.length,
-      feeAuditRows: feeAuditRows.length,
+      rows: visibleRows.length,
       counted,
-      valid: validTotal,
-      invalid: invalidTotal,
-      excluded: excludedTotal,
-      veteranExcluded: rows.length - feeAuditRows.length,
-      unknownStatusRows: unknownStatusRows.length,
+      valid: validQa,
+      invalid: invalidQa,
+      excluded: excludedQa,
+      noAgreement: noAgreementQa,
     });
   }
 
   const labels = [
     { key: "valid", label: "תקין" },
     { key: "invalid", label: "לא תקין" },
+    { key: "noAgreement", label: "אין הסכם" },
     { key: "excluded", label: "תפעול בלבד" },
     { key: "tier", label: "פוטנציאל מודל צבירה" },
-    { key: "total", label: 'סה"כ נבדקו' },
+    { key: "total", label: "סה\"כ נבדקו" },
     { key: "compliance", label: "% עמידה" },
   ];
 
@@ -325,17 +342,9 @@ export function buildManagementFeesAudit(rows = []) {
       ...counts[key],
     })),
     drilldown,
-    qa: {
-      sourceRows: rows.length,
-      feeAuditRows: feeAuditRows.length,
-      valid: validTotal,
-      invalid: invalidTotal,
-      excluded: excludedTotal,
-      veteranExcluded: rows.length - feeAuditRows.length,
-      unknownStatusRows: unknownStatusRows.length,
-    },
   };
 }
+
 // ─── Insurance Track × Marital Status ────────────────────────────────────────
 
 export function buildInsuranceTrackMarital(rows = []) {
@@ -563,10 +572,10 @@ export function buildActionCenter(rows = []) {
     .filter(
       (row) =>
         !isExcluded(row) &&
-        (isInvalid(row) || row.tierPotentialNotUsed)
+        (isInvalid(row) || isNoAgreement(row) || row.tierPotentialNotUsed)
     )
     .map((row) => {
-      const missingAgreement = false;
+      const missingAgreement = isNoAgreement(row);
 
       return {
         employeeCode: row.employeeCode || "",

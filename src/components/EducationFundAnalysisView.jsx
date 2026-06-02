@@ -2069,7 +2069,7 @@ function ErrorsTab({ rows, isAggregateScope = false }) {
   );
 }
 
-export default function EducationFundAnalysisView({ analysisData }) {
+export default function EducationFundAnalysisView({ analysisData, onBackToProductPortal, onBackToUpload }) {
   const { rows, summary, warnings } = getEducationFundData(analysisData);
   const [activeTab, setActiveTab] = useState("kpi");
   const [selectedManagerKey, setSelectedManagerKey] = useState("all");
@@ -2116,12 +2116,32 @@ export default function EducationFundAnalysisView({ analysisData }) {
           </div>
         </div>
 
-        <div className="summary-pills">
-          <span className="pill pill-green">✓ {formatNumber(educationDataset.validCount)} תקין</span>
-          <span className="pill pill-red">✗ {formatNumber(educationDataset.invalidCount)} לא תקין</span>
-          {warnings.length > 0 && (
-            <span className="pill pill-warning">QA {formatNumber(warnings.length)} אזהרות</span>
-          )}
+        <div className="productHeaderSideStack">
+          <div className="summary-pills">
+            <span className="pill pill-green">✓ {formatNumber(educationDataset.validCount)} תקין</span>
+            <span className="pill pill-red">✗ {formatNumber(educationDataset.invalidCount)} לא תקין</span>
+            {warnings.length > 0 && (
+              <span className="pill pill-warning">QA {formatNumber(warnings.length)} אזהרות</span>
+            )}
+          </div>
+
+          <div className="productReturnActions">
+            {activeTab !== "kpi" && (
+              <button type="button" className="secondaryButton mini" onClick={() => setActiveTab("kpi")}>
+                חזרה לבית מוצר
+              </button>
+            )}
+            {onBackToProductPortal && (
+              <button type="button" className="secondaryButton mini" onClick={onBackToProductPortal}>
+                חזרה ל-Dashboard ראשי
+              </button>
+            )}
+            {onBackToUpload && (
+              <button type="button" className="secondaryButton mini ghost" onClick={onBackToUpload}>
+                חזרה להעלאה
+              </button>
+            )}
+          </div>
         </div>
       </header>
 

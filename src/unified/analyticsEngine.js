@@ -28,10 +28,6 @@ function toSafeNumber(value) {
   return Number.isFinite(num) ? num : 0;
 }
 
-function isPresent(value) {
-  return value !== null && value !== undefined && value !== "";
-}
-
 function normalizeText(value, fallback = "") {
   const text = String(value ?? "")
     .replace(/\s+/g, " ")
@@ -50,7 +46,7 @@ function getAuditStatus(row) {
 }
 
 function isExcluded(row) {
-  return getAuditStatus(row) === AUDIT_STATUS.EXCLUDED || row?.isExcludedFromFeeAudit === true;
+  return getAuditStatus(row) === AUDIT_STATUS.EXCLUDED;
 }
 
 function isValid(row) {
@@ -88,19 +84,6 @@ function accumulationBucket(value) {
   if (num < 300_000) return "100K-300K";
   if (num < 500_000) return "300K-500K";
   return "500K+";
-}
-
-function hasAnyAgreement(row) {
-  return Boolean(
-    row.agreementIssuerFound ||
-      row.auditMatchRuleType === "INLINE_AGREEMENT" ||
-      row.auditMatchResult === "MATCH_INLINE_AGREEMENT" ||
-      row.auditMatchResult === "FAIL_INLINE_AGREEMENT" ||
-      isPresent(row.depositFeeAgreement) ||
-      isPresent(row.accumulationFeeAgreement) ||
-      isPresent(row.auditReferenceDepositFee) ||
-      isPresent(row.auditReferenceAccumulationFee)
-  );
 }
 
 function hasTierModel(row) {
@@ -147,13 +130,11 @@ export function buildDrilldownKey({ statusKey = "", issuer = "" } = {}) {
 export function buildKpi(rows = []) {
   rows = safeRows(rows);
 
-  const audited = rows.filter((row) => !isExcluded(row));
-  const valid = audited.filter(isValid);
-  const invalid = audited.filter(isInvalid);
+  const valid = rows.filter(isValid);
+  const invalid = rows.filter(isInvalid);
   const excluded = rows.filter(isExcluded);
-  const tier = rows.filter((row) => row.tierPotentialNotUsed);
-  const noAgreement = audited.filter((row) => !hasAnyAgreement(row));
-
+  const audited = [...valid, ...invalid];
+  const tier = audited.filter((row) => row.tierPotentialNotUsed);
   return {
     totalRows: rows.length,
     auditedRows: audited.length,
@@ -201,11 +182,6 @@ export function buildBrokerDistribution(rows = []) {
 
 // ─── Management Fees Audit ────────────────────────────────────────────────────
 
-function rowNeedsAgreement(row) {
-  const config = getProductConfig(getProductType(row));
-  return Boolean(config.hasDepositFee || config.hasAccumulationFee);
-}
-
 function initCounter(keys) {
   return Object.fromEntries(keys.map((key) => [key, 0]));
 }
@@ -235,54 +211,88 @@ export function buildManagementFeesAudit(rows = []) {
     valid: initCounter(issuers),
     invalid: initCounter(issuers),
     excluded: initCounter(issuers),
-    noAgreement: initCounter(issuers),
     tier: initCounter(issuers),
     total: initCounter(issuers),
     compliance: initCounter(issuers),
   };
 
   const drilldown = {};
+  const qa = {
+    valid: 0,
+    invalid: 0,
+    excluded: 0,
+    unknown: 0,
+  };
 
   for (const row of rows) {
     const issuer = row.issuerCanonical || row.issuerOriginal || UNKNOWN;
 
     if (isExcluded(row)) {
+      qa.excluded += 1;
       counts.excluded[issuer] += 1;
       addDrilldown(drilldown, "excluded", issuer, row);
       addDrilldown(drilldown, "EXCLUDED", issuer, row);
       continue;
     }
 
-    counts.total[issuer] += 1;
-    addDrilldown(drilldown, "total", issuer, row);
-
     if (isValid(row)) {
+      qa.valid += 1;
+      counts.total[issuer] += 1;
       counts.valid[issuer] += 1;
+      addDrilldown(drilldown, "total", issuer, row);
       addDrilldown(drilldown, "valid", issuer, row);
       addDrilldown(drilldown, row.auditMatchRuleType || row.auditMatchResult || "VALID", issuer, row);
+      if (row.tierPotentialNotUsed) {
+        counts.tier[issuer] += 1;
+        addDrilldown(drilldown, "tier", issuer, row);
+        addDrilldown(drilldown, "TIER", issuer, row);
+      }
+      continue;
     }
 
     if (isInvalid(row)) {
+      qa.invalid += 1;
+      counts.total[issuer] += 1;
       counts.invalid[issuer] += 1;
+      addDrilldown(drilldown, "total", issuer, row);
       addDrilldown(drilldown, "invalid", issuer, row);
       addDrilldown(drilldown, "INVALID", issuer, row);
+      if (row.tierPotentialNotUsed) {
+        counts.tier[issuer] += 1;
+        addDrilldown(drilldown, "tier", issuer, row);
+        addDrilldown(drilldown, "TIER", issuer, row);
+      }
+      continue;
     }
 
-    if (rowNeedsAgreement(row) && !hasAnyAgreement(row)) {
-      counts.noAgreement[issuer] += 1;
-      addDrilldown(drilldown, "noAgreement", issuer, row);
-      addDrilldown(drilldown, "MISSING_AGREEMENT", issuer, row);
-    }
+    qa.unknown += 1;
+    addDrilldown(drilldown, "UNKNOWN_AUDIT_STATUS", issuer, row);
 
-    if (row.tierPotentialNotUsed) {
-      counts.tier[issuer] += 1;
-      addDrilldown(drilldown, "tier", issuer, row);
-      addDrilldown(drilldown, "TIER", issuer, row);
+    if (typeof console !== "undefined" && typeof console.error === "function") {
+      console.error("UNKNOWN AUDIT STATUS", {
+        auditStatus: getAuditStatus(row),
+        issuer,
+        row,
+      });
     }
   }
 
+  const counted = qa.valid + qa.invalid + qa.excluded;
+
+  if ((counted !== rows.length || qa.unknown > 0) && typeof console !== "undefined" && typeof console.error === "function") {
+    console.error("AUDIT COUNT MISMATCH", {
+      rows: rows.length,
+      counted,
+      valid: qa.valid,
+      invalid: qa.invalid,
+      excluded: qa.excluded,
+      unknown: qa.unknown,
+    });
+  }
+
   for (const issuer of issuers) {
-    const total = counts.total[issuer];
+    const total = counts.valid[issuer] + counts.invalid[issuer];
+    counts.total[issuer] = total;
     counts.compliance[issuer] = total > 0 ? counts.valid[issuer] / total : null;
   }
 

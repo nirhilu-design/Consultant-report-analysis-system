@@ -1566,21 +1566,15 @@ export default function Dashboard({ analysisData, onBackToProductPortal, onBackT
   }, [scopedRows]);
 
   const isAllManagers = managerFilter === "all";
-  // V87: מסך השיקוף תמיד מציג audit שנבנה מחדש מתוך unifiedRows המסוננות.
-  // לא מסתמכים קודם על managementFeesAudit שמגיע מ-analysisData, כי הוא עלול להיות legacy/stale
-  // ולהציג טבלה שלא משקפת את auditEngine + analyticsEngine הנוכחיים.
-  const feesAudit = pickManagementFeesAudit(
-    scopedAnalytics.managementFeesAudit,
-    scopedAnalytics.managementAudit,
-    managementFeesAudit,
-    managementAudit
-  );
-  const actions = isAllManagers ? scopedAnalytics.actionCenter || actionCenter || [] : scopedAnalytics.actionCenter || [];
+  // V88: דמי ניהול ו-Action Center מוצגים תמיד מתוך analytics מחושב מחדש על unifiedRows.
+  // כך המסך לא נשען על objects ישנים שנשמרו ב-summary לפני שינויי auditEngine.
+  const feesAudit = pickManagementFeesAudit(scopedAnalytics.managementFeesAudit, scopedAnalytics.managementAudit);
+  const actions = scopedAnalytics.actionCenter || [];
   const summary = pensionSummary?.summary;
   const previewRows = scopedRows;
   const scopedDataQuality = filterDataQualityByRows(dataQuality, scopedRows, managerFilter);
 
-  const displayKpi = isAllManagers ? kpi : scopedAnalytics.kpi;
+  const displayKpi = scopedAnalytics.kpi;
   const displayInsuranceTrackMarital = isAllManagers
     ? insuranceTrackMarital
     : scopedAnalytics.insuranceTrackMarital;

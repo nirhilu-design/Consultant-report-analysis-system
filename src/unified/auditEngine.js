@@ -15,13 +15,11 @@ import {
 //
 // סדר בדיקה:
 //   1. תפעול בלבד לפי העמודה "האם מנהל ההסדר סוכן בפוליסה" = לא → excluded
-//   2. הסכם פנימי מתוך דוח היועץ → INLINE_AGREEMENT
-//   3. קרנות ברירת מחדל → DEFAULT_PENSION_FUND
-//      כלל עסקי:
-//        - ברירת מחדל רגילה: עד 1% מהפקדה ועד 0.22% מצבירה
-//        - מור: עד 1% מהפקדה ועד 0.15% מצבירה
-//   4. קובץ הסכמים חיצוני → EXTERNAL_AGREEMENT
-//   5. כלל בסיס fallback → BASELINE
+//   2. קרן פנסיה ותיקה / ישנה / זיקנה → excluded
+//   3. קרנות ברירת מחדל → בדיקה מול המודלים המאושרים
+//   4. קובץ הסכמים חיצוני → מקור ההשוואה המרכזי
+//   5. הסכם פנימי מתוך דוח היועץ → fallback
+//   6. אין מידע הסכם → תפעול בלבד, ללא קטגוריית "ללא הסכם" במסך
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const AUDIT_STATUS = SCHEMA_AUDIT_STATUS;
@@ -246,10 +244,17 @@ function isDefaultPensionIssuer(row) {
 function isPensionFeeAuditEligible(row) {
   if (getProductType(row) !== PRODUCT_TYPES.PENSION) return true;
 
-  const text = normalizeText([row.planType, row.fundName, row.issuerOriginal, row.issuerCanonical].filter(Boolean).join(" "));
+  const text = normalizeText([
+    row.pensionFundType,
+    row.planType,
+    row.fundName,
+    row.issuerOriginal,
+    row.issuerCanonical,
+  ].filter(Boolean).join(" "));
 
-  // כלל עסקי: בודקים מקיפה וכללית, לא בודקים קרן פנסיה ותיקה.
-  if (text.includes("ותיק") || text.includes("ותיקה")) return false;
+  // כלל עסקי V83: בודקים מקיפה וכללית; לא בודקים קרן פנסיה ותיקה / ישנה / זיקנה.
+  if (row.isVeteranPensionFund) return false;
+  if (text.includes("ותיק") || text.includes("ותיקה") || text.includes("ישן") || text.includes("זיקנה") || text.includes("זקנה")) return false;
 
   return true;
 }
@@ -543,36 +548,17 @@ export function evaluateUnifiedRow(row, agreementOptionsByIssuer = {}) {
     ),
   };
 
-  // חשוב:
-  // כלל ברירת המחדל צריך למנוע false positive גם אם ההסכם הפנימי/חיצוני מחמיר יותר.
-  // לכן בודקים אותו לפני סימון invalid סופי.
-  const inlineResult = evaluateInlineAgreement(row);
+  // V83 Flow סופי:
+  // א. קרנות ברירת מחדל: אם עומד באחד המודלים המאושרים — תקין.
+  // ב. אחרת, בודקים קודם מול קובץ ההסכמים החיצוני.
+  // ג. אם אין הסכם חיצוני, בודקים מול הסכם פנימי מהדוח.
+  // ד. אם אין מידע לבדיקה — תפעול בלבד, בלי שורת "ללא הסכם" במסך.
   const defaultFundResult = evaluateDefaultPensionFundRule(row);
-
-  if (inlineResult?.auditStatus === AUDIT_STATUS.VALID) {
-    return {
-      ...row,
-      ...inlineResult,
-      ...externalTierMetadata,
-      inTierModel: false,
-      tierPotentialNotUsed: false,
-    };
-  }
 
   if (defaultFundResult) {
     return {
       ...row,
       ...defaultFundResult,
-      ...externalTierMetadata,
-      inTierModel: false,
-      tierPotentialNotUsed: false,
-    };
-  }
-
-  if (inlineResult) {
-    return {
-      ...row,
-      ...inlineResult,
       ...externalTierMetadata,
       inTierModel: false,
       tierPotentialNotUsed: false,
@@ -585,6 +571,18 @@ export function evaluateUnifiedRow(row, agreementOptionsByIssuer = {}) {
     return {
       ...row,
       ...externalResult,
+    };
+  }
+
+  const inlineResult = evaluateInlineAgreement(row);
+
+  if (inlineResult) {
+    return {
+      ...row,
+      ...inlineResult,
+      ...externalTierMetadata,
+      inTierModel: false,
+      tierPotentialNotUsed: false,
     };
   }
 

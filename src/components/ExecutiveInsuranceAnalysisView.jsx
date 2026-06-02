@@ -311,11 +311,25 @@ function getPeriodSections(rows) {
     .filter((section) => section.rows.length > 0);
 }
 
+function getKpiIcon(tone, label) {
+  if (/עובד|חברות|יצרן/.test(label)) return "👥";
+  if (/פוליס/.test(label)) return "📄";
+  if (/צבירה|הסכמות|כסף/.test(label)) return "₪";
+  if (/תקין|תקינות/.test(label)) return "✓";
+  if (/חריגה|שגיאה|פער|לא ניתן/.test(label)) return "!";
+  if (/מתפעל|דמי ניהול/.test(label)) return "%";
+  if (tone === "gold") return "₪";
+  if (tone === "green") return "✓";
+  if (tone === "red") return "!";
+  return "⌕";
+}
+
 function KpiCard({ label, value, subtext, tone = "blue", onClick }) {
   const Tag = onClick ? "button" : "article";
   return (
-    <Tag type={onClick ? "button" : undefined} className={`productKpiCard ${tone} ${onClick ? "clickable" : ""}`} onClick={onClick}>
-      <span>{label}</span>
+    <Tag type={onClick ? "button" : undefined} className={`productKpiCard executiveKpiCard ${tone} ${onClick ? "clickable" : ""}`} onClick={onClick}>
+      <span className="productKpiIcon" aria-hidden="true">{getKpiIcon(tone, label)}</span>
+      <span className="productKpiLabel">{label}</span>
       <strong>{value}</strong>
       {subtext && <small>{subtext}</small>}
     </Tag>
@@ -339,6 +353,8 @@ function ProductHome({ rows, onOpenTab }) {
   const notCheckableRows = rows.filter((row) => getFeeStatusKind(row) === "notCheckable");
   const issueRows = getRowsWithIssues(rows);
   const totalAccumulation = rows.reduce((sum, row) => sum + getAccumulation(row), 0);
+  const checkableRowsCount = okRows.length + exceptionRows.length;
+  const feeHealthPct = checkableRowsCount ? Math.round((okRows.length / checkableRowsCount) * 100) : 0;
   const topIssuers = issuers.slice(0, 5);
 
   return (
@@ -358,6 +374,7 @@ function ProductHome({ rows, onOpenTab }) {
         <KpiCard label="חברות ביטוח" value={fmtNumber(issuers.length)} subtext="יצרנים מזוהים" tone="blue" />
         <KpiCard label="חריגה בדמי ניהול" value={fmtNumber(exceptionRows.length)} subtext="פוליסות שאינן עומדות בהסכם" tone={exceptionRows.length ? "red" : "green"} onClick={() => onOpenTab(TABS.FEES)} />
         <KpiCard label="מתפעל בלבד" value={fmtNumber(operatorOnlyRows.length)} subtext="מזוהה לפי דוח הסכמים" tone={operatorOnlyRows.length ? "blue" : "green"} />
+        <KpiCard label="תקינות דמי ניהול" value={`${feeHealthPct}%`} subtext="מתוך פוליסות שניתן לבדוק" tone="green" onClick={() => onOpenTab(TABS.FEES)} />
         <KpiCard label="לא ניתן לבדיקה" value={fmtNumber(notCheckableRows.length)} subtext="חסר הסכם / חסר נתון / תקופה" tone={notCheckableRows.length ? "red" : "green"} onClick={() => onOpenTab(TABS.ERRORS)} />
       </div>
 

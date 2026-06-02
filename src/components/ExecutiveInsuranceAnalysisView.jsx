@@ -1,5 +1,5 @@
 // Path: src/components/ExecutiveInsuranceAnalysisView.jsx
-// v71 — Executive insurance dashboard alignment: focused home, 3-state fees, merged accumulations/issuers, employee-level errors
+// v76 — Executive insurance KPI alignment to Pension / Education product card structure
 // Scope: product page similar to Pension/Education, with focused controls:
 // 1) דמי ניהול with separate summary/detail tables per policy period
 // 2) צבירות ויצרנים in one combined analysis tab
@@ -326,12 +326,18 @@ function getKpiIcon(tone, label) {
 
 function KpiCard({ label, value, subtext, tone = "blue", onClick }) {
   const Tag = onClick ? "button" : "article";
+  const normalizedTone = tone === "gold" ? "warning" : tone;
+
   return (
-    <Tag type={onClick ? "button" : undefined} className={`productKpiCard executiveKpiCard ${tone} ${onClick ? "clickable" : ""}`} onClick={onClick}>
-      <span className="productKpiIcon" aria-hidden="true">{getKpiIcon(tone, label)}</span>
-      <span className="productKpiLabel">{label}</span>
-      <strong>{value}</strong>
-      {subtext && <small>{subtext}</small>}
+    <Tag
+      type={onClick ? "button" : undefined}
+      className={`educationKpiCard product-kpi-card card-${normalizedTone} ${onClick ? "clickable" : ""}`}
+      onClick={onClick}
+    >
+      <span className="product-kpi-icon" aria-hidden="true">{getKpiIcon(tone, label)}</span>
+      <span className="kpi-label">{label}</span>
+      <strong className="kpi-value">{value}</strong>
+      <small>{subtext || "לעיון בפרטים ←"}</small>
     </Tag>
   );
 }
@@ -367,7 +373,7 @@ function ProductHome({ rows, onOpenTab }) {
         </div>
       </div>
 
-      <div className="productKpiGrid four">
+      <div className="educationTopKpiGrid unified-product-kpi-grid">
         <KpiCard label="עובדים" value={fmtNumber(getUniqueEmployeeCount(rows))} subtext="עובדים שזוהו בקובץ" tone="blue" />
         <KpiCard label="פוליסות" value={fmtNumber(rows.length)} subtext="שורות ביטוח מנהלים" tone="blue" />
         <KpiCard label="צבירה כוללת" value={fmtMoney(totalAccumulation)} subtext="ערך פדיון כולל" tone="gold" />
@@ -549,7 +555,7 @@ function FeesTab({ rows }) {
         </div>
       </div>
 
-      <div className="productKpiGrid four">
+      <div className="educationTopKpiGrid unified-product-kpi-grid">
         <KpiCard label="תקין" value={fmtNumber(okRows.length)} subtext="שורות שעומדות בהסכם" tone="green" />
         <KpiCard label="חריגה" value={fmtNumber(exceptionRows.length)} subtext="נבדק מול הסכם ונמצאה חריגה" tone={exceptionRows.length ? "red" : "green"} />
         <KpiCard label="מתפעל בלבד" value={fmtNumber(operatorOnlyRows.length)} subtext="אין דמי ניהול לבדיקה בדוח ההסכמים" tone={operatorOnlyRows.length ? "blue" : "green"} />
@@ -662,7 +668,7 @@ function ErrorsTab({ rows }) {
         </div>
       </div>
 
-      <div className="productKpiGrid four">
+      <div className="educationTopKpiGrid unified-product-kpi-grid">
         <KpiCard label="עובדים עם שגיאה" value={fmtNumber(getUniqueEmployeeCount(issueRows))} subtext="עובדים שמופיעים ברשימת הפערים" tone={issueRows.length ? "red" : "green"} />
         <KpiCard label="חסר הסכם" value={fmtNumber(missingAgreement)} subtext="אין התאמה להסכם" tone={missingAgreement ? "red" : "green"} />
         <KpiCard label="חסר נתון" value={fmtNumber(missingData)} subtext="דמי ניהול חסרים" tone={missingData ? "red" : "green"} />
@@ -746,7 +752,7 @@ export default function ExecutiveInsuranceAnalysisView({ analysisData, onBackToP
         </div>
       </header>
 
-      <div className="productKpiGrid four">
+      <div className="educationTopKpiGrid unified-product-kpi-grid">
         <KpiCard label="פוליסות" value={fmtNumber(rows.length)} subtext="שורות שזוהו בדוח היועץ" tone="blue" />
         <KpiCard label="חברות ביטוח" value={fmtNumber(issuers.length)} subtext="יצרנים שונים" tone="gold" />
         <KpiCard label="תקינות דמי ניהול" value={`${rows.length ? Math.round((okRows.length / rows.length) * 100) : 0}%`} subtext={fmtMoney(totalAccumulation)} tone="green" />

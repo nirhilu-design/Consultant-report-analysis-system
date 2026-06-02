@@ -796,11 +796,24 @@ export default function AnalysisWorkspace({ files, analysisData, onBack }) {
             onBackHome={() => setViewMode("portal")}
           />
           {selectedProduct === PRODUCT_MODES.PENSION ? (
-            <Dashboard files={files} analysisData={pensionAnalysisData} />
+            <Dashboard
+              files={files}
+              analysisData={pensionAnalysisData}
+              onBackToProductPortal={() => setViewMode("portal")}
+              onBackToUpload={onBack}
+            />
           ) : selectedProduct === PRODUCT_MODES.EXECUTIVE_INSURANCE ? (
-            <ExecutiveInsuranceAnalysisView analysisData={analysisData} />
+            <ExecutiveInsuranceAnalysisView
+              analysisData={analysisData}
+              onBackToProductPortal={() => setViewMode("portal")}
+              onBackToUpload={onBack}
+            />
           ) : (
-            <EducationFundAnalysisView analysisData={analysisData} />
+            <EducationFundAnalysisView
+              analysisData={analysisData}
+              onBackToProductPortal={() => setViewMode("portal")}
+              onBackToUpload={onBack}
+            />
           )}
         </div>
       )}

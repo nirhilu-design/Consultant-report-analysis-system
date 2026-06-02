@@ -290,7 +290,6 @@ export function buildManagementFeesAudit(rows = []) {
     { key: "valid", label: "תקין" },
     { key: "invalid", label: "לא תקין" },
     { key: "excluded", label: "תפעול בלבד" },
-    { key: "noAgreement", label: "ללא הסכם" },
     { key: "tier", label: "פוטנציאל מודל צבירה" },
     { key: "total", label: "סה\"כ נבדקו" },
     { key: "compliance", label: "% עמידה" },

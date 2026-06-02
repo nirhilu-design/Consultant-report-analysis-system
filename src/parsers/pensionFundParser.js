@@ -385,7 +385,7 @@ function buildHeaderIndex(headerRow) {
       return;
     }
 
-    // V80: עמודת "האם מנהל ההסדר סוכן בפוליסה" רגישה עסקית.
+    // V81: עמודת "האם מנהל ההסדר סוכן בפוליסה" רגישה עסקית.
     // לא עושים לה fuzzy match כדי שלא תיתפס בטעות עמודת "שם מנהל הסדר" או עמודת סטטוס אחרת.
     if (field === "isArrangementAgent") return;
 
@@ -451,7 +451,7 @@ function isNegativeAgentValue(value) {
 }
 
 function isOperationOnly(row, indexMap) {
-  // V80: מתפעל בלבד נקבע אך ורק לפי העמודה:
+  // V81: מתפעל בלבד נקבע אך ורק לפי העמודה:
   // "האם מנהל ההסדר  סוכן בפוליסה".
   // אם הערך בעמודה הוא "לא" המשמעות היא שהמוצר בתפעול בלבד.
   // לא משתמשים בעמודות סטטוס / דמי ניהול כדי למנוע ערבוב בין סטטוס פוליסה לבין סטטוס טיפול סוכן.
@@ -508,7 +508,7 @@ export function parsePensionFund(workbook) {
       allRows.push({
         sheetName,
         sourceRowIndex: headerInfo.index + idx + 2,
-        parserVersion: "stability_07_v80",
+        parserVersion: "stability_07_v81",
         parserWarnings,
         employeeCode: getEmployeeCode(row, indexMap),
 
@@ -550,7 +550,7 @@ export function parsePensionFund(workbook) {
   });
 
   console.log("parsePensionFund:", {
-    version: "stability_07_v80",
+    version: "stability_07_v81",
     total: allRows.length,
     operationOnly: allRows.filter((r) => r.isOperationOnly).length,
     withFees: allRows.filter((r) => r.depositFee !== null || r.accumulationFee !== null).length,

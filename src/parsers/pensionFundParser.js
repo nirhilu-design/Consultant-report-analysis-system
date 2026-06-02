@@ -510,6 +510,50 @@ function isOperationOnly(row, indexMap) {
   return isNegativeAgentValue(arrangementAgent);
 }
 
+
+function getPensionFundProfile({ issuerOriginal, fundName, planType } = {}) {
+  const text = normalizeText([issuerOriginal, fundName, planType].filter(Boolean).join(" "));
+
+  if (!text) {
+    return {
+      pensionFundType: "לא צוין",
+      isVeteranPensionFund: false,
+      isFeeAuditEligible: true,
+    };
+  }
+
+  // כלל עסקי V83: בודקים מקיפה וכללית; לא בודקים ותיקה/ישן.
+  // דוגמאות מהקובץ: "גלעד ישן" ו"תשורה זיקנה" לא נכנסות לבקרת דמי ניהול.
+  const isVeteran =
+    text.includes("ותיק") ||
+    text.includes("ותיקה") ||
+    text.includes("ישן") ||
+    text.includes("זיקנה") ||
+    text.includes("זקנה");
+
+  if (isVeteran) {
+    return {
+      pensionFundType: "ותיקה",
+      isVeteranPensionFund: true,
+      isFeeAuditEligible: false,
+    };
+  }
+
+  if (text.includes("כללית") || text.includes("משלימ") || text.includes("משלימה")) {
+    return {
+      pensionFundType: "כללית",
+      isVeteranPensionFund: false,
+      isFeeAuditEligible: true,
+    };
+  }
+
+  return {
+    pensionFundType: "מקיפה",
+    isVeteranPensionFund: false,
+    isFeeAuditEligible: true,
+  };
+}
+
 function getEmployeeCode(row, indexMap) {
   const raw = getField(row, indexMap, "employeeCode");
   if (raw === null || raw === undefined) return "";
@@ -555,20 +599,31 @@ export function parsePensionFund(workbook) {
       if (!isDataRow(row, indexMap)) return;
 
       const operationOnly = isOperationOnly(row, indexMap);
+      const issuerOriginal = normalizeText(getField(row, indexMap, "issuer"));
+      const fundName = normalizeText(getField(row, indexMap, "fundName"));
+      const planType = normalizeText(getField(row, indexMap, "planType"));
+      const pensionFundProfile = getPensionFundProfile({
+        issuerOriginal,
+        fundName,
+        planType,
+      });
 
       allRows.push({
         sheetName,
         sourceRowIndex: headerInfo.index + idx + 2,
-        parserVersion: "stability_08_v82",
+        parserVersion: "stability_09_v83",
         parserWarnings,
         employeeCode: getEmployeeCode(row, indexMap),
 
-        issuerOriginal: normalizeText(getField(row, indexMap, "issuer")),
-        manager: normalizeText(getField(row, indexMap, "issuer")),
+        issuerOriginal,
+        manager: issuerOriginal,
 
         policyNumber: normalizeText(getField(row, indexMap, "policyNumber")),
-        fundName: normalizeText(getField(row, indexMap, "fundName")),
-        planType: normalizeText(getField(row, indexMap, "planType")),
+        fundName,
+        planType,
+        pensionFundType: pensionFundProfile.pensionFundType,
+        isVeteranPensionFund: pensionFundProfile.isVeteranPensionFund,
+        isFeeAuditEligible: pensionFundProfile.isFeeAuditEligible,
 
         marketingStatus: normalizeText(getField(row, indexMap, "marketingStatus")),
         policyStatus: normalizeText(getField(row, indexMap, "policyStatus")),
@@ -604,7 +659,7 @@ export function parsePensionFund(workbook) {
   });
 
   console.log("parsePensionFund:", {
-    version: "stability_08_v82",
+    version: "stability_09_v83",
     total: allRows.length,
     operationOnly: allRows.filter((r) => r.isOperationOnly).length,
     arrangementAgentValues: allRows.reduce((acc, row) => {

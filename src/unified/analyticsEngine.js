@@ -28,6 +28,10 @@ function toSafeNumber(value) {
   return Number.isFinite(num) ? num : 0;
 }
 
+function isPresent(value) {
+  return value !== null && value !== undefined && value !== "";
+}
+
 function normalizeText(value, fallback = "") {
   const text = String(value ?? "")
     .replace(/\s+/g, " ")
@@ -47,6 +51,13 @@ function getAuditStatus(row) {
 
 function isExcluded(row) {
   return getAuditStatus(row) === AUDIT_STATUS.EXCLUDED;
+}
+
+function isVeteranPensionFeeAuditRow(row) {
+  return (
+    row?.auditMatchResult === "EXCLUDED_VETERAN_PENSION" ||
+    row?.isVeteranPensionFund === true
+  );
 }
 
 function isValid(row) {
@@ -84,6 +95,19 @@ function accumulationBucket(value) {
   if (num < 300_000) return "100K-300K";
   if (num < 500_000) return "300K-500K";
   return "500K+";
+}
+
+function hasAnyAgreement(row) {
+  return Boolean(
+    row.agreementIssuerFound ||
+      row.auditMatchRuleType === "INLINE_AGREEMENT" ||
+      row.auditMatchResult === "MATCH_INLINE_AGREEMENT" ||
+      row.auditMatchResult === "FAIL_INLINE_AGREEMENT" ||
+      isPresent(row.depositFeeAgreement) ||
+      isPresent(row.accumulationFeeAgreement) ||
+      isPresent(row.auditReferenceDepositFee) ||
+      isPresent(row.auditReferenceAccumulationFee)
+  );
 }
 
 function hasTierModel(row) {
@@ -130,11 +154,11 @@ export function buildDrilldownKey({ statusKey = "", issuer = "" } = {}) {
 export function buildKpi(rows = []) {
   rows = safeRows(rows);
 
-  const valid = rows.filter(isValid);
-  const invalid = rows.filter(isInvalid);
+  const audited = rows.filter((row) => !isExcluded(row));
+  const valid = audited.filter(isValid);
+  const invalid = audited.filter(isInvalid);
   const excluded = rows.filter(isExcluded);
-  const audited = [...valid, ...invalid];
-  const tier = audited.filter((row) => row.tierPotentialNotUsed);
+  const tier = rows.filter((row) => row.tierPotentialNotUsed);
   return {
     totalRows: rows.length,
     auditedRows: audited.length,
@@ -203,7 +227,12 @@ function addDrilldown(drilldown, statusKey, issuer, row) {
 export function buildManagementFeesAudit(rows = []) {
   rows = safeRows(rows);
 
-  const issuers = [...new Set(rows.map((row) => row.issuerCanonical || row.issuerOriginal || UNKNOWN))]
+  // V87: ותיקה / ישנה / זקנה מוחרגת לחלוטין מטבלת בקרת דמי ניהול.
+  // תפעול בלבד לפי "סוכן בפוליסה = לא" עדיין מוצג כמידע תפעולי,
+  // אבל קרן ותיקה אינה חלק ממדגם בקרת דמי הניהול ולכן לא מייצרת עמודת יצרן.
+  const feeAuditRows = rows.filter((row) => !isVeteranPensionFeeAuditRow(row));
+
+  const issuers = [...new Set(feeAuditRows.map((row) => row.issuerCanonical || row.issuerOriginal || UNKNOWN))]
     .filter(Boolean)
     .sort((a, b) => a.localeCompare(b, "he"));
 
@@ -217,18 +246,12 @@ export function buildManagementFeesAudit(rows = []) {
   };
 
   const drilldown = {};
-  const qa = {
-    valid: 0,
-    invalid: 0,
-    excluded: 0,
-    unknown: 0,
-  };
+  const unknownStatusRows = [];
 
-  for (const row of rows) {
+  for (const row of feeAuditRows) {
     const issuer = row.issuerCanonical || row.issuerOriginal || UNKNOWN;
 
     if (isExcluded(row)) {
-      qa.excluded += 1;
       counts.excluded[issuer] += 1;
       addDrilldown(drilldown, "excluded", issuer, row);
       addDrilldown(drilldown, "EXCLUDED", issuer, row);
@@ -236,64 +259,53 @@ export function buildManagementFeesAudit(rows = []) {
     }
 
     if (isValid(row)) {
-      qa.valid += 1;
-      counts.total[issuer] += 1;
       counts.valid[issuer] += 1;
+      counts.total[issuer] += 1;
       addDrilldown(drilldown, "total", issuer, row);
       addDrilldown(drilldown, "valid", issuer, row);
       addDrilldown(drilldown, row.auditMatchRuleType || row.auditMatchResult || "VALID", issuer, row);
-      if (row.tierPotentialNotUsed) {
-        counts.tier[issuer] += 1;
-        addDrilldown(drilldown, "tier", issuer, row);
-        addDrilldown(drilldown, "TIER", issuer, row);
-      }
-      continue;
-    }
-
-    if (isInvalid(row)) {
-      qa.invalid += 1;
-      counts.total[issuer] += 1;
+    } else if (isInvalid(row)) {
       counts.invalid[issuer] += 1;
+      counts.total[issuer] += 1;
       addDrilldown(drilldown, "total", issuer, row);
       addDrilldown(drilldown, "invalid", issuer, row);
       addDrilldown(drilldown, "INVALID", issuer, row);
-      if (row.tierPotentialNotUsed) {
-        counts.tier[issuer] += 1;
-        addDrilldown(drilldown, "tier", issuer, row);
-        addDrilldown(drilldown, "TIER", issuer, row);
-      }
-      continue;
+    } else {
+      unknownStatusRows.push(row);
+      addDrilldown(drilldown, "UNKNOWN_AUDIT_STATUS", issuer, row);
     }
 
-    qa.unknown += 1;
-    addDrilldown(drilldown, "UNKNOWN_AUDIT_STATUS", issuer, row);
-
-    if (typeof console !== "undefined" && typeof console.error === "function") {
-      console.error("UNKNOWN AUDIT STATUS", {
-        auditStatus: getAuditStatus(row),
-        issuer,
-        row,
-      });
+    if (row.tierPotentialNotUsed) {
+      counts.tier[issuer] += 1;
+      addDrilldown(drilldown, "tier", issuer, row);
+      addDrilldown(drilldown, "TIER", issuer, row);
     }
   }
 
-  const counted = qa.valid + qa.invalid + qa.excluded;
-
-  if ((counted !== rows.length || qa.unknown > 0) && typeof console !== "undefined" && typeof console.error === "function") {
-    console.error("AUDIT COUNT MISMATCH", {
-      rows: rows.length,
-      counted,
-      valid: qa.valid,
-      invalid: qa.invalid,
-      excluded: qa.excluded,
-      unknown: qa.unknown,
-    });
-  }
+  let validTotal = 0;
+  let invalidTotal = 0;
+  let excludedTotal = 0;
 
   for (const issuer of issuers) {
-    const total = counts.valid[issuer] + counts.invalid[issuer];
-    counts.total[issuer] = total;
+    const total = counts.total[issuer];
     counts.compliance[issuer] = total > 0 ? counts.valid[issuer] / total : null;
+    validTotal += counts.valid[issuer];
+    invalidTotal += counts.invalid[issuer];
+    excludedTotal += counts.excluded[issuer];
+  }
+
+  const counted = validTotal + invalidTotal + excludedTotal;
+  if (counted !== feeAuditRows.length || unknownStatusRows.length) {
+    console.error("AUDIT COUNT MISMATCH", {
+      sourceRows: rows.length,
+      feeAuditRows: feeAuditRows.length,
+      counted,
+      valid: validTotal,
+      invalid: invalidTotal,
+      excluded: excludedTotal,
+      veteranExcluded: rows.length - feeAuditRows.length,
+      unknownStatusRows: unknownStatusRows.length,
+    });
   }
 
   const labels = [
@@ -301,7 +313,7 @@ export function buildManagementFeesAudit(rows = []) {
     { key: "invalid", label: "לא תקין" },
     { key: "excluded", label: "תפעול בלבד" },
     { key: "tier", label: "פוטנציאל מודל צבירה" },
-    { key: "total", label: "סה\"כ נבדקו" },
+    { key: "total", label: 'סה"כ נבדקו' },
     { key: "compliance", label: "% עמידה" },
   ];
 
@@ -313,9 +325,17 @@ export function buildManagementFeesAudit(rows = []) {
       ...counts[key],
     })),
     drilldown,
+    qa: {
+      sourceRows: rows.length,
+      feeAuditRows: feeAuditRows.length,
+      valid: validTotal,
+      invalid: invalidTotal,
+      excluded: excludedTotal,
+      veteranExcluded: rows.length - feeAuditRows.length,
+      unknownStatusRows: unknownStatusRows.length,
+    },
   };
 }
-
 // ─── Insurance Track × Marital Status ────────────────────────────────────────
 
 export function buildInsuranceTrackMarital(rows = []) {

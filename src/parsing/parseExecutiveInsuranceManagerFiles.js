@@ -7,7 +7,7 @@ import * as XLSX from "xlsx";
 const PRODUCT_TYPE = "executiveInsurance";
 const PRODUCT_LABEL = "ביטוח מנהלים";
 const DATA_PARSER_VERSION = "executive_insurance_v66_1";
-const AGREEMENTS_PARSER_VERSION = "executive_insurance_agreements_v66_1";
+const AGREEMENTS_PARSER_VERSION = "executive_insurance_agreements_v77";
 
 const HEADER_ALIASES = {
   employeeCode: ["קוד מזהה של העובד", "קוד עובד", "מספר עובד"],
@@ -263,32 +263,119 @@ function isNoAgreement(value) {
   return !text || /אין\s*הסכם/.test(text);
 }
 
+function isOperatorOnlyAgreementValue(value) {
+  const text = normalizeText(value);
+  return (
+    !text ||
+    /^[-–—]+$/.test(text) ||
+    /^\*+$/.test(text) ||
+    /אין\s*הסכם/.test(text) ||
+    /מתפעל|תפעול|ללא\s*דמי\s*ניהול/.test(text)
+  );
+}
+
+function extractPercentCandidates(value) {
+  if (value === null || value === undefined || value === "") return [];
+  if (typeof value === "number") {
+    const normalized = normalizeFeePercent(value);
+    return normalized === null ? [] : [normalized];
+  }
+
+  const text = normalizeText(value);
+  if (!text) return [];
+
+  const percentMatches = [...text.matchAll(/(\d+(?:[.,]\d+)?)\s*%/g)]
+    .map((match) => Number(String(match[1]).replace(",", ".")))
+    .filter((number) => Number.isFinite(number) && Math.abs(number) <= 20);
+
+  if (percentMatches.length) return percentMatches;
+
+  const normalized = normalizeFeePercent(text);
+  return normalized === null ? [] : [normalized];
+}
+
 function parseAgreementFee(value) {
-  if (isNoAgreement(value)) return null;
-  return normalizeFeePercent(value);
+  if (isOperatorOnlyAgreementValue(value)) return null;
+  const candidates = extractPercentCandidates(value);
+  if (!candidates.length) return null;
+
+  // When the agreement cell contains wording such as "1.25% יורד ל-1.06%",
+  // the allowed ceiling for a compliance check is the highest explicit percent in that cell.
+  // Large currency thresholds that appear without a percent sign are ignored.
+  return Number(Math.max(...candidates).toFixed(4));
+}
+
+function getExecutivePeriodKeyFromYear(year) {
+  const parsedYear = Number(year || 0);
+  if (!parsedYear) return "unknown";
+  if (parsedYear < 2004) return "before2004";
+  if (parsedYear >= 2004 && parsedYear <= 2012) return "from2004To2013";
+  return "from2013NoCoefficient";
+}
+
+function toAgreementPeriodKey(executivePeriodKey) {
+  if (executivePeriodKey === "from2004To2013") return "legacy2004To2012";
+  if (executivePeriodKey === "from2013NoCoefficient") return "from2013";
+  return null;
+}
+
+function hasFeeValue(value) {
+  return value !== null && value !== undefined && value !== "";
+}
+
+function isOperatorOnlyAgreementPeriod(periodAgreement) {
+  if (!periodAgreement) return false;
+  return !hasFeeValue(periodAgreement.premiumFeePercent) && !hasFeeValue(periodAgreement.accumulationFeePercent);
 }
 
 function pickAgreementColumns(rows) {
-  let issuerIndex = 1;
-  let disabilityIndex = 2;
+  let issuerIndex = 0;
+  let disabilityIndex = 5;
   const premiumByPeriod = {
-    legacy2004To2012: 3,
-    from2013: 5,
-    default: 7,
+    legacy2004To2012: 1,
+    from2013: 3,
   };
   const accumulationByPeriod = {
-    legacy2004To2012: 4,
-    from2013: 6,
-    default: 8,
+    legacy2004To2012: 2,
+    from2013: 4,
   };
 
-  rows.slice(0, 8).forEach((row) => {
+  const headerRows = rows.slice(0, 8);
+
+  headerRows.forEach((row) => {
     (row || []).forEach((cellValue, index) => {
-      const text = normalizeText(cellValue);
-      if (text.includes("חברת ביטוח")) issuerIndex = index;
-      if (text.includes("א.כ.ע") || text.includes("אכע")) disabilityIndex = index;
+      const textValue = normalizeText(cellValue);
+      if (textValue.includes("חברת ביטוח")) issuerIndex = index;
+      if (/אובדן|א\.כ\.ע|אכע/.test(textValue)) disabilityIndex = index;
     });
   });
+
+  function findPeriodStart(pattern, fallbackIndex) {
+    for (const row of headerRows) {
+      const found = (row || []).findIndex((cellValue) => pattern.test(normalizeText(cellValue)));
+      if (found >= 0) return found;
+    }
+    return fallbackIndex;
+  }
+
+  function findSubColumn(startIndex, keywords, fallbackIndex) {
+    const candidates = [startIndex, startIndex + 1, startIndex + 2].filter((index) => index >= 0);
+    for (const row of headerRows) {
+      for (const index of candidates) {
+        const textValue = normalizeText(row?.[index]);
+        if (keywords.some((keyword) => textValue.includes(keyword))) return index;
+      }
+    }
+    return fallbackIndex;
+  }
+
+  const legacyStart = findPeriodStart(/2004.*2012|2012.*2004/, 1);
+  const from2013Start = findPeriodStart(/2013|לאחר\s*2013|החל\s*2013/, 3);
+
+  premiumByPeriod.legacy2004To2012 = findSubColumn(legacyStart, ["הפקדה", "פרמיה"], legacyStart);
+  accumulationByPeriod.legacy2004To2012 = findSubColumn(legacyStart, ["צבירה"], legacyStart + 1);
+  premiumByPeriod.from2013 = findSubColumn(from2013Start, ["הפקדה", "פרמיה"], from2013Start);
+  accumulationByPeriod.from2013 = findSubColumn(from2013Start, ["צבירה"], from2013Start + 1);
 
   return { issuerIndex, disabilityIndex, premiumByPeriod, accumulationByPeriod };
 }
@@ -311,6 +398,25 @@ function parseExecutiveInsuranceAgreements(workbook) {
     const issuerOriginal = normalizeText(row?.[columns.issuerIndex]);
     if (!issuerOriginal || issuerOriginal.includes("חברת ביטוח")) return;
 
+    const legacyPremiumRaw = row?.[columns.premiumByPeriod.legacy2004To2012];
+    const legacyAccumulationRaw = row?.[columns.accumulationByPeriod.legacy2004To2012];
+    const from2013PremiumRaw = row?.[columns.premiumByPeriod.from2013];
+    const from2013AccumulationRaw = row?.[columns.accumulationByPeriod.from2013];
+
+    const legacyPeriod = {
+      premiumFeePercent: parseAgreementFee(legacyPremiumRaw),
+      accumulationFeePercent: parseAgreementFee(legacyAccumulationRaw),
+      rawPremiumAgreement: normalizeText(legacyPremiumRaw),
+      rawAccumulationAgreement: normalizeText(legacyAccumulationRaw),
+    };
+
+    const from2013Period = {
+      premiumFeePercent: parseAgreementFee(from2013PremiumRaw),
+      accumulationFeePercent: parseAgreementFee(from2013AccumulationRaw),
+      rawPremiumAgreement: normalizeText(from2013PremiumRaw),
+      rawAccumulationAgreement: normalizeText(from2013AccumulationRaw),
+    };
+
     agreements.push({
       productType: PRODUCT_TYPE,
       sourceRowNumber: index + 3,
@@ -319,16 +425,12 @@ function parseExecutiveInsuranceAgreements(workbook) {
       disabilityCoverCostPercent: parseAgreementFee(row?.[columns.disabilityIndex]),
       periods: {
         legacy2004To2012: {
-          premiumFeePercent: parseAgreementFee(row?.[columns.premiumByPeriod.legacy2004To2012]),
-          accumulationFeePercent: parseAgreementFee(row?.[columns.accumulationByPeriod.legacy2004To2012]),
+          ...legacyPeriod,
+          operatorOnly: isOperatorOnlyAgreementPeriod(legacyPeriod),
         },
         from2013: {
-          premiumFeePercent: parseAgreementFee(row?.[columns.premiumByPeriod.from2013]),
-          accumulationFeePercent: parseAgreementFee(row?.[columns.accumulationByPeriod.from2013]),
-        },
-        default: {
-          premiumFeePercent: parseAgreementFee(row?.[columns.premiumByPeriod.default]),
-          accumulationFeePercent: parseAgreementFee(row?.[columns.accumulationByPeriod.default]),
+          ...from2013Period,
+          operatorOnly: isOperatorOnlyAgreementPeriod(from2013Period),
         },
       },
     });
@@ -341,50 +443,155 @@ function parseExecutiveInsuranceAgreements(workbook) {
       parserVersion: AGREEMENTS_PARSER_VERSION,
       sheetName,
       agreementCount: agreements.length,
+      columns,
     },
   };
 }
 
 function resolveExecutiveInsuranceAgreement(row, agreements) {
   const issuer = normalizeExecutiveIssuer(row?.issuerOriginal || row?.issuer || row?.companyName);
-  const year = Number(row?.insuranceStartYear || 0);
+  const executivePeriod = getExecutivePeriodKeyFromYear(row?.insuranceStartYear);
+  const agreementPeriod = toAgreementPeriodKey(executivePeriod);
+
+  if (!agreementPeriod) {
+    return {
+      issuer: null,
+      executivePeriod,
+      period: "",
+      premiumFeePercent: null,
+      accumulationFeePercent: null,
+      disabilityCoverCostPercent: null,
+      issueCode: executivePeriod === "unknown" ? "unknownPeriod" : "missingAgreement",
+      issue: executivePeriod === "unknown" ? "לא זוהתה תקופת פוליסה" : "אין הסכם דמי ניהול לתקופת הפוליסה בדוח ההסכמים",
+      agreementMatched: false,
+      operatorOnly: false,
+    };
+  }
+
   const candidates = (agreements || []).filter((agreement) => {
     const agreementIssuer = normalizeExecutiveIssuer(agreement.issuerOriginal || agreement.issuer);
     return issuer && agreementIssuer && (issuer === agreementIssuer || issuer.includes(agreementIssuer) || agreementIssuer.includes(issuer));
   });
 
-  if (!candidates.length) return null;
-
-  let period = "default";
-  if (year >= 2004 && year <= 2012) period = "legacy2004To2012";
-  if (year >= 2013) period = "from2013";
+  if (!candidates.length) {
+    return {
+      issuer: null,
+      executivePeriod,
+      period: agreementPeriod,
+      premiumFeePercent: null,
+      accumulationFeePercent: null,
+      disabilityCoverCostPercent: null,
+      issueCode: "missingAgreement",
+      issue: "לא נמצא הסכם מתאים לחברת הביטוח בדוח ההסכמים",
+      agreementMatched: false,
+      operatorOnly: false,
+    };
+  }
 
   const candidate = candidates[0];
-  const periodAgreement = candidate.periods?.[period] || candidate.periods?.default || null;
+  const periodAgreement = candidate.periods?.[agreementPeriod] || null;
+
+  if (!periodAgreement) {
+    return {
+      issuer: candidate.issuer,
+      executivePeriod,
+      period: agreementPeriod,
+      premiumFeePercent: null,
+      accumulationFeePercent: null,
+      disabilityCoverCostPercent: candidate.disabilityCoverCostPercent ?? null,
+      issueCode: "missingAgreement",
+      issue: "לא נמצא הסכם מתאים לתקופת הפוליסה בדוח ההסכמים",
+      agreementMatched: true,
+      operatorOnly: false,
+    };
+  }
+
+  const operatorOnly = isOperatorOnlyAgreementPeriod(periodAgreement);
 
   return {
     issuer: candidate.issuer,
-    period,
-    premiumFeePercent: periodAgreement?.premiumFeePercent ?? null,
-    accumulationFeePercent: periodAgreement?.accumulationFeePercent ?? null,
+    executivePeriod,
+    period: agreementPeriod,
+    premiumFeePercent: periodAgreement.premiumFeePercent ?? null,
+    accumulationFeePercent: periodAgreement.accumulationFeePercent ?? null,
     disabilityCoverCostPercent: candidate.disabilityCoverCostPercent ?? null,
+    rawPremiumAgreement: periodAgreement.rawPremiumAgreement || "",
+    rawAccumulationAgreement: periodAgreement.rawAccumulationAgreement || "",
+    issueCode: operatorOnly ? "operatorOnly" : "",
+    issue: operatorOnly ? "מתפעל בלבד לפי דוח ההסכמים — אין דמי ניהול לבדיקה" : "",
+    agreementMatched: true,
+    operatorOnly,
   };
 }
 
 function compareFee(actual, allowed) {
-  if (actual === null || actual === undefined) return false;
-  if (allowed === null || allowed === undefined) return false;
+  if (!hasFeeValue(actual)) return false;
+  if (!hasFeeValue(allowed)) return true;
   return safeNumber(actual) <= safeNumber(allowed) + 0.0001;
 }
 
-function getFeeStatus(row, agreement) {
-  if (!agreement) return "לא תקין";
+function getFeeEvaluation(row, agreement) {
+  if (!agreement || !agreement.agreementMatched) {
+    return {
+      feeStatus: "לא ניתן לבדיקה",
+      feeIssueCode: agreement?.issueCode || "missingAgreement",
+      feeIssue: agreement?.issue || "לא נמצא הסכם מתאים בדוח ההסכמים",
+    };
+  }
 
-  const premiumOk = compareFee(row.actualPremiumFeePercent, agreement.premiumFeePercent);
-  const accumulationOk = compareFee(row.actualAccumulationFeePercent, agreement.accumulationFeePercent);
+  if (agreement.operatorOnly) {
+    return {
+      feeStatus: "מתפעל בלבד",
+      feeIssueCode: "operatorOnly",
+      feeIssue: "מתפעל בלבד לפי דוח ההסכמים — אין דמי ניהול לבדיקה",
+      agreementType: "מתפעל בלבד",
+      operatorStatus: "מתפעל בלבד",
+    };
+  }
 
-  if (premiumOk && accumulationOk) return "תקין";
-  return "לא תקין";
+  const checks = [];
+
+  if (hasFeeValue(agreement.premiumFeePercent)) {
+    if (!hasFeeValue(row.actualPremiumFeePercent)) {
+      return {
+        feeStatus: "לא ניתן לבדיקה",
+        feeIssueCode: "missingData",
+        feeIssue: "חסר דמי ניהול מפרמיה בדוח היועץ",
+      };
+    }
+    checks.push(compareFee(row.actualPremiumFeePercent, agreement.premiumFeePercent));
+  }
+
+  if (hasFeeValue(agreement.accumulationFeePercent)) {
+    if (!hasFeeValue(row.actualAccumulationFeePercent)) {
+      return {
+        feeStatus: "לא ניתן לבדיקה",
+        feeIssueCode: "missingData",
+        feeIssue: "חסר דמי ניהול מצבירה בדוח היועץ",
+      };
+    }
+    checks.push(compareFee(row.actualAccumulationFeePercent, agreement.accumulationFeePercent));
+  }
+
+  if (!checks.length) {
+    return {
+      feeStatus: "מתפעל בלבד",
+      feeIssueCode: "operatorOnly",
+      feeIssue: "מתפעל בלבד לפי דוח ההסכמים — אין דמי ניהול לבדיקה",
+      agreementType: "מתפעל בלבד",
+      operatorStatus: "מתפעל בלבד",
+    };
+  }
+
+  if (checks.every(Boolean)) {
+    return { feeStatus: "תקין", feeIssueCode: "", feeIssue: "" };
+  }
+
+  return {
+    feeStatus: "חריגה",
+    feeIssueCode: "feeException",
+    feeIssue: "דמי הניהול בפועל גבוהים מדוח ההסכמים",
+  };
 }
 
 function buildSummary(rows, agreements) {
@@ -426,19 +633,29 @@ export async function parseExecutiveInsuranceManagerFiles({ dataFile, agreements
   const agreements = asArray(parsedAgreements.agreements);
   const rows = asArray(parsedData.rows).map((row) => {
     const agreement = resolveExecutiveInsuranceAgreement(row, agreements);
-    const feeStatus = getFeeStatus(row, agreement);
+    const feeEvaluation = getFeeEvaluation(row, agreement);
 
     return {
       ...row,
       arrangementManagerId: manager?.id || "",
       arrangementManagerName: manager?.name || row.arrangementManagerName || "מנהל הסדר",
       uploadManagerName: manager?.name || "מנהל הסדר",
+      executiveInsurancePeriod: agreement?.executivePeriod || getExecutivePeriodKeyFromYear(row.insuranceStartYear),
+      agreementIssuer: agreement?.issuer || "",
+      matchedAgreementIssuer: agreement?.issuer || "",
       agreementPremiumFeePercent: agreement?.premiumFeePercent ?? null,
       agreementAccumulationFeePercent: agreement?.accumulationFeePercent ?? null,
-      agreementPeriod: agreement?.period || "",
-      feeStatus,
-      feeStatusLabel: feeStatus,
-      feeIssue: feeStatus === "תקין" ? "" : "דמי ניהול בפועל אינם עומדים בהסכם או חסר הסכם/נתון",
+      agreementPremiumRaw: agreement?.rawPremiumAgreement || "",
+      agreementAccumulationRaw: agreement?.rawAccumulationAgreement || "",
+      agreementPeriod: agreement?.agreementMatched ? agreement?.executivePeriod || "" : "",
+      agreementPeriodInternal: agreement?.period || "",
+      agreementMatched: Boolean(agreement?.agreementMatched),
+      agreementType: feeEvaluation.agreementType || (agreement?.operatorOnly ? "מתפעל בלבד" : "דמי ניהול"),
+      operatorStatus: feeEvaluation.operatorStatus || (agreement?.operatorOnly ? "מתפעל בלבד" : ""),
+      feeStatus: feeEvaluation.feeStatus,
+      feeStatusLabel: feeEvaluation.feeStatus,
+      feeIssueCode: feeEvaluation.feeIssueCode,
+      feeIssue: feeEvaluation.feeIssue,
     };
   });
 

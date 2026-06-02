@@ -21,12 +21,14 @@ export const AUDIT_STATUS = {
   VALID: "valid",
   INVALID: "invalid",
   EXCLUDED: "excluded",
+  NO_AGREEMENT: "noAgreement",
 };
 
 export const AUDIT_STATUS_HE = {
   VALID: "תקין",
   INVALID: "חריג",
   EXCLUDED: "הוחרג",
+  NO_AGREEMENT: "אין הסכם",
 };
 
 export const ISSUE_CATEGORY = {

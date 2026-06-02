@@ -360,8 +360,24 @@ function PensionAnalysisHub({ kpi, managerBreakdown = [], activeTab, onNavigate 
 
 // ─── Management Fees ──────────────────────────────────────────────────────────
 
+function isAuditTable(value) {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      Array.isArray(value.issuers) &&
+      Array.isArray(value.rows)
+  );
+}
+
+function pickManagementFeesAudit(...candidates) {
+  return candidates.find(isAuditTable) || null;
+}
+
 function ManagementFeesTab({ audit }) {
-  if (!audit?.issuers?.length) return <EmptyState />;
+  if (!isAuditTable(audit) || !audit.issuers.length || !audit.rows.length) {
+    return <EmptyState text="אין נתוני בקרת דמי ניהול להצגה" />;
+  }
 
   const { issuers, rows } = audit;
 
@@ -1551,8 +1567,8 @@ export default function Dashboard({ analysisData, onBackToProductPortal, onBackT
 
   const isAllManagers = managerFilter === "all";
   const feesAudit = isAllManagers
-    ? managementAudit || managementFeesAudit
-    : scopedAnalytics.managementAudit || scopedAnalytics.managementFeesAudit;
+    ? pickManagementFeesAudit(managementFeesAudit, managementAudit, scopedAnalytics.managementFeesAudit, scopedAnalytics.managementAudit)
+    : pickManagementFeesAudit(scopedAnalytics.managementFeesAudit, scopedAnalytics.managementAudit);
   const actions = isAllManagers ? actionCenter || [] : scopedAnalytics.actionCenter || [];
   const summary = pensionSummary?.summary;
   const previewRows = scopedRows;

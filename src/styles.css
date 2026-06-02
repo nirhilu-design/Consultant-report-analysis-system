@@ -4437,3 +4437,54 @@ body,
     grid-template-columns: 1fr;
   }
 }
+
+
+/* V74 - persistent product navigation inside analysis screens */
+.productHeaderSideStack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.productReturnActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+}
+
+.secondaryButton.mini {
+  min-height: 34px;
+  padding: 7px 12px;
+  font-size: 13px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.secondaryButton.ghost {
+  background: rgba(255, 255, 255, 0.72);
+  border-color: rgba(37, 99, 235, 0.18);
+  color: #475569;
+}
+
+.productModeBody > .productDetailHeader {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  backdrop-filter: blur(14px);
+}
+
+@media (max-width: 900px) {
+  .productHeaderSideStack,
+  .productReturnActions {
+    align-items: stretch;
+    justify-content: stretch;
+    width: 100%;
+  }
+
+  .productReturnActions .secondaryButton {
+    flex: 1 1 140px;
+  }
+}

@@ -253,6 +253,15 @@ const HEADER_ALIASES = {
     "שכר קובע",
     "שכר לביטוח",
   ],
+
+  isArrangementAgent: [
+    "האם מנהל ההסדר  סוכן בפוליסה",
+    "האם מנהל ההסדר סוכן בפוליסה",
+    "האם מנהל הסדר סוכן בפוליסה",
+    "מנהל ההסדר סוכן בפוליסה",
+    "בטיפול סוכן",
+    "האם בטיפול סוכן",
+  ],
   arrangementManager: [
     "מנהל הסדר",
     "מנהל ההסדר",
@@ -376,6 +385,10 @@ function buildHeaderIndex(headerRow) {
       return;
     }
 
+    // V80: עמודת "האם מנהל ההסדר סוכן בפוליסה" רגישה עסקית.
+    // לא עושים לה fuzzy match כדי שלא תיתפס בטעות עמודת "שם מנהל הסדר" או עמודת סטטוס אחרת.
+    if (field === "isArrangementAgent") return;
+
     const fuzzyIndex = normalizedCells.findIndex((cell) => {
       if (!cell || cell.length < 3) return false;
       return normalizedAliases.some((alias) => alias && alias.length >= 3 && (cell.includes(alias) || alias.includes(cell)));
@@ -432,8 +445,18 @@ function isDataRow(row, indexMap) {
   );
 }
 
+function isNegativeAgentValue(value) {
+  const text = normalizeText(value).toLowerCase();
+  return text === "לא" || text === "no" || text === "false" || text === "0";
+}
+
 function isOperationOnly(row, indexMap) {
-  return normalizeText(getField(row, indexMap, "auditStatus")).includes("תפעול");
+  // V80: מתפעל בלבד נקבע אך ורק לפי העמודה:
+  // "האם מנהל ההסדר  סוכן בפוליסה".
+  // אם הערך בעמודה הוא "לא" המשמעות היא שהמוצר בתפעול בלבד.
+  // לא משתמשים בעמודות סטטוס / דמי ניהול כדי למנוע ערבוב בין סטטוס פוליסה לבין סטטוס טיפול סוכן.
+  const arrangementAgent = getField(row, indexMap, "isArrangementAgent");
+  return isNegativeAgentValue(arrangementAgent);
 }
 
 function getEmployeeCode(row, indexMap) {
@@ -485,7 +508,7 @@ export function parsePensionFund(workbook) {
       allRows.push({
         sheetName,
         sourceRowIndex: headerInfo.index + idx + 2,
-        parserVersion: "stability_06",
+        parserVersion: "stability_07_v80",
         parserWarnings,
         employeeCode: getEmployeeCode(row, indexMap),
 
@@ -500,6 +523,7 @@ export function parsePensionFund(workbook) {
         policyStatus: normalizeText(getField(row, indexMap, "policyStatus")),
         auditStatus: normalizeText(getField(row, indexMap, "auditStatus")),
         isOperationOnly: operationOnly,
+        isArrangementAgent: normalizeText(getField(row, indexMap, "isArrangementAgent")),
 
         investmentTrackRewards: normalizeText(getField(row, indexMap, "investmentTrackNameR")),
         investmentTrackCompensation: normalizeText(getField(row, indexMap, "investmentTrackNameC")),
@@ -526,7 +550,7 @@ export function parsePensionFund(workbook) {
   });
 
   console.log("parsePensionFund:", {
-    version: "stability_06",
+    version: "stability_07_v80",
     total: allRows.length,
     operationOnly: allRows.filter((r) => r.isOperationOnly).length,
     withFees: allRows.filter((r) => r.depositFee !== null || r.accumulationFee !== null).length,

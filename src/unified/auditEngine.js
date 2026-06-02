@@ -28,6 +28,7 @@ export const AUDIT_STATUS_HE = {
   valid: "תקין",
   invalid: "לא תקין",
   excluded: "תפעול בלבד",
+  noAgreement: "אין הסכם",
 };
 
 export const ISSUE_CATEGORY = {
@@ -293,20 +294,20 @@ function evaluateDefaultPensionFundRule(row) {
 
 function evaluateNoInformation(row) {
   return {
-    auditStatus: AUDIT_STATUS.EXCLUDED,
-    auditStatusHe: AUDIT_STATUS_HE.excluded,
-    auditMatchResult: "EXCLUDED_OPERATION_ONLY",
-    auditMatchModelName: "תפעול בלבד",
-    auditMatchRuleType: "EXCLUDED",
+    auditStatus: AUDIT_STATUS.NO_AGREEMENT,
+    auditStatusHe: AUDIT_STATUS_HE.noAgreement,
+    auditMatchResult: "NO_AGREEMENT",
+    auditMatchModelName: "אין הסכם",
+    auditMatchRuleType: "NO_AGREEMENT",
     auditReason: hasFeesInfo(row)
-      ? "לא נמצא מידע הסכם מתאים לבדיקת דמי ניהול — מסומן כמתפעל בלבד"
-      : "אין מידע דמי ניהול/הסכם לבדיקה — מסומן כמתפעל בלבד",
+      ? "לא נמצא הסכם חיצוני או מודל ברירת מחדל מתאים לבדיקת דמי ניהול"
+      : "אין מידע דמי ניהול/הסכם לבדיקה — נדרש הסכם או מקור בדיקה",
     auditReferenceDepositFee: null,
     auditReferenceAccumulationFee: null,
     agreementIssuerFound: false,
-    issueCategory: ISSUE_CATEGORY.NONE,
-    requiredAction: "",
-    priority: PRIORITY.NONE,
+    issueCategory: ISSUE_CATEGORY.MISSING_AGREEMENT,
+    requiredAction: "השלמת קובץ הסכמים / בדיקת מקור הסכם מול מנהל ההסדר",
+    priority: PRIORITY.MEDIUM,
     hasTierModel: false,
     eligibleForTier: false,
     inTierModel: false,

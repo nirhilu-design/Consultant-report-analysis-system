@@ -4635,3 +4635,91 @@ body,
     grid-template-columns: 1fr;
   }
 }
+
+
+/* V76 — Executive Insurance KPI cards use the same visual system as Pension and Education Fund */
+.executiveInsuranceView .educationTopKpiGrid.unified-product-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  gap: 16px !important;
+  margin: 18px 0 20px;
+}
+
+.executiveInsuranceView .educationKpiCard.product-kpi-card {
+  min-height: 142px;
+  border-radius: 24px !important;
+  padding: 18px !important;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-end;
+  text-align: right;
+  direction: rtl;
+  border-width: 1px !important;
+  border-top-width: 1px !important;
+  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.07) !important;
+}
+
+.executiveInsuranceView .educationKpiCard.product-kpi-card .product-kpi-icon {
+  top: 18px;
+  left: 18px;
+  right: auto;
+}
+
+.executiveInsuranceView .educationKpiCard.product-kpi-card .kpi-label {
+  color: #64748b;
+  font-size: 14px;
+  font-weight: 800;
+  margin-bottom: 8px;
+}
+
+.executiveInsuranceView .educationKpiCard.product-kpi-card .kpi-value {
+  color: #0f2a4a;
+  font-size: 24px;
+  font-weight: 900;
+  line-height: 1.1;
+}
+
+.executiveInsuranceView .educationKpiCard.product-kpi-card small {
+  margin-top: 12px;
+  color: #2563eb;
+  font-weight: 800;
+}
+
+.executiveInsuranceView .educationKpiCard.product-kpi-card.card-warning .product-kpi-icon {
+  background: #fef3c7;
+  color: #d97706 !important;
+}
+
+.executiveInsuranceView .educationKpiCard.product-kpi-card.card-green .product-kpi-icon {
+  background: #dcfce7;
+  color: #16a34a !important;
+}
+
+.executiveInsuranceView .educationKpiCard.product-kpi-card.card-red .product-kpi-icon {
+  background: #fee2e2;
+  color: #dc2626 !important;
+}
+
+.executiveInsuranceView .educationKpiCard.product-kpi-card.card-blue .product-kpi-icon,
+.executiveInsuranceView .educationKpiCard.product-kpi-card.card-neutral .product-kpi-icon {
+  background: #dbeafe;
+  color: #2563eb !important;
+}
+
+/* Neutralize older executive-only KPI styling if it still exists later in the stylesheet. */
+.executiveInsuranceView .productKpiCard.executiveKpiCard {
+  all: unset;
+}
+
+@media (max-width: 1100px) {
+  .executiveInsuranceView .educationTopKpiGrid.unified-product-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 680px) {
+  .executiveInsuranceView .educationTopKpiGrid.unified-product-kpi-grid {
+    grid-template-columns: 1fr !important;
+  }
+}

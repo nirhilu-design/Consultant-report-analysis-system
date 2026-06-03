@@ -2,7 +2,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // AGREEMENTS PARSER — קריאה ונרמול קובץ הסכמי דמי ניהול
 //
-// V93 — Dynamic multi-option agreements parser
+// V94 — Dynamic multi-option agreements parser + strict numeric fee parsing
 //   1. קורא דינמית זוגות עמודות של דמי ניהול לכל יצרן: הפקדה + צבירה.
 //   2. תומך ביותר משתי אפשרויות: מודל א, מודל ב, מודל ג, מודל ד וכו'.
 //   3. ברירת מחדל: כל זוג דמי ניהול הוא DEFAULT, כלומר חלופה רגילה לבדיקה.
@@ -34,11 +34,21 @@ function normalizeForSearch(value) {
 function normalizeFeePercent(value) {
   if (value === null || value === undefined || value === "") return null;
 
-  const num =
-    typeof value === "number"
-      ? value
-      : Number(String(value).replace(",", ".").replace(/[^\d.-]/g, ""));
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) return null;
+    if (Math.abs(value) > 20) return null;
+    if (value !== 0 && Math.abs(value) < 0.1) return Number((value * 100).toFixed(4));
+    return Number(value.toFixed(4));
+  }
 
+  const raw = String(value).replace(",", ".");
+  const cleaned = raw.replace(/[^0-9.-]/g, "");
+
+  // V94: טקסטים כמו "אופציה א'", "דמי ניהול הפקדה" או "***" אינם מספרים.
+  // בגרסאות קודמות Number("") הפך ל-0, וזה יצר מודלי הסכם מזויפים.
+  if (!cleaned || !/[0-9]/.test(cleaned)) return null;
+
+  const num = Number(cleaned);
   if (!Number.isFinite(num)) return null;
   if (Math.abs(num) > 20) return null;
   if (num !== 0 && Math.abs(num) < 0.1) return Number((num * 100).toFixed(4));
@@ -189,7 +199,7 @@ function buildAgreementOption({
     sheetName,
     issuer,
     issuerOriginal: issuerRaw,
-    parserVersion: "stability_06_v93_dynamic_options",
+    parserVersion: "stability_07_v94_dynamic_options_strict_fees",
     optionName: explicitTier ? normalizeText(markerText) || "מודל צבירות גבוהות" : buildOptionName(optionIndex, markerText),
     depositFee,
     accumulationFee,
@@ -263,7 +273,7 @@ export function parseAgreements(workbook) {
   });
 
   console.log("parseAgreements result:", {
-    version: "stability_06_v93_dynamic_options",
+    version: "stability_07_v94_dynamic_options_strict_fees",
     total: agreements.length,
     issuers: [...new Set(agreements.map((agreement) => agreement.issuer))],
     countsByIssuer: agreements.reduce((acc, agreement) => {

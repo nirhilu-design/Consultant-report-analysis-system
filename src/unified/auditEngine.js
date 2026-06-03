@@ -161,7 +161,7 @@ function feeScore({ depositFee, accumulationFee } = {}) {
 
   if (deposit === null && accumulation === null) return null;
 
-  return (accumulation || 0) + ((deposit || 0) / 2);
+  return (accumulation || 0) + ((deposit || 0) / 20);
 }
 
 function compareFeesByScore(row, reference) {

@@ -2,10 +2,11 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // BUILD PENSION SUMMARY — מחבר את כל השכבות לתוצאה מלאה
 //
-// Stability 04:
-//   1. הגנות על קלטים שאינם Array
-//   2. fallback בטוח ל-dataQuality.summary
-//   3. שמירה על אותו output schema כדי לא לשבור Dashboard
+// V93
+//   1. שימוש ב-AUDIT_STATUS הרשמי במקום מחרוזות ידניות.
+//   2. תמיכה ב-NO_AGREEMENT כסטטוס אמיתי מהמנוע.
+//   3. noAgreement נספר לפי auditStatus בלבד, לא לפי היעדר reference.
+//   4. agreementOptionsByIssuer מועבר כפי שהוא ל-auditEngine לצורך בדיקה מול כל המודלים.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { normalizeAgreementOptions } from "../unified/agreementEngine.js";
@@ -14,7 +15,7 @@ import { evaluateUnifiedRows } from "../unified/auditEngine.js";
 import { buildPensionAnalytics } from "../unified/analyticsEngine.js";
 import { buildDataQuality } from "../unified/dataQualityEngine.js";
 import { DEFAULT_ISSUER_ALIASES } from "../unified/issuerAliases.js";
-import { PRODUCT_TYPES } from "../unified/unifiedSchema.js";
+import { AUDIT_STATUS, PRODUCT_TYPES } from "../unified/unifiedSchema.js";
 
 function asArray(value) {
   return Array.isArray(value) ? value : [];
@@ -22,25 +23,6 @@ function asArray(value) {
 
 function asObject(value) {
   return value && typeof value === "object" ? value : {};
-}
-
-function isPresent(value) {
-  return value !== null && value !== undefined && value !== "";
-}
-
-function hasAnyAgreement(row) {
-  const safeRow = asObject(row);
-
-  return Boolean(
-    safeRow.agreementIssuerFound ||
-      safeRow.auditMatchRuleType === "INLINE_AGREEMENT" ||
-      safeRow.auditMatchResult === "MATCH_INLINE_AGREEMENT" ||
-      safeRow.auditMatchResult === "FAIL_INLINE_AGREEMENT" ||
-      isPresent(safeRow.depositFeeAgreement) ||
-      isPresent(safeRow.accumulationFeeAgreement) ||
-      isPresent(safeRow.auditReferenceDepositFee) ||
-      isPresent(safeRow.auditReferenceAccumulationFee)
-  );
 }
 
 function normalizeDataQuality(dataQuality) {
@@ -62,6 +44,26 @@ function emptyAnalyticsFallback() {
     managementAudit: [],
     actionDrilldown: [],
   };
+}
+
+function getAuditStatus(row) {
+  return row?.auditStatus || "";
+}
+
+function isExcluded(row) {
+  return getAuditStatus(row) === AUDIT_STATUS.EXCLUDED;
+}
+
+function isNoAgreement(row) {
+  return getAuditStatus(row) === AUDIT_STATUS.NO_AGREEMENT;
+}
+
+function isValid(row) {
+  return getAuditStatus(row) === AUDIT_STATUS.VALID;
+}
+
+function isInvalid(row) {
+  return getAuditStatus(row) === AUDIT_STATUS.INVALID;
 }
 
 export function buildPensionSummary(pensionRows = [], agreements = [], options = {}) {
@@ -103,7 +105,7 @@ export function buildPensionSummary(pensionRows = [], agreements = [], options =
   };
 
   const dataQuality = normalizeDataQuality(buildDataQuality(unifiedRows));
-  const auditedRows = unifiedRows.filter((row) => row.auditStatus !== "excluded");
+  const auditedRows = unifiedRows.filter((row) => !isExcluded(row) && !isNoAgreement(row));
 
   return {
     ...analytics,
@@ -118,11 +120,11 @@ export function buildPensionSummary(pensionRows = [], agreements = [], options =
     summary: {
       total: unifiedRows.length,
       audited: auditedRows.length,
-      valid: unifiedRows.filter((row) => row.auditStatus === "valid").length,
-      invalid: unifiedRows.filter((row) => row.auditStatus === "invalid").length,
-      excluded: unifiedRows.filter((row) => row.auditStatus === "excluded").length,
+      valid: unifiedRows.filter(isValid).length,
+      invalid: unifiedRows.filter(isInvalid).length,
+      excluded: unifiedRows.filter(isExcluded).length,
+      noAgreement: unifiedRows.filter(isNoAgreement).length,
       tierPotential: unifiedRows.filter((row) => row.tierPotentialNotUsed).length,
-      noAgreement: auditedRows.filter((row) => !hasAnyAgreement(row)).length,
       dataQualityIssues: dataQuality.summary.issueCount,
       dataQualityHighIssues: dataQuality.summary.highIssues,
     },

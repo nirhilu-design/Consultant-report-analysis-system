@@ -418,26 +418,44 @@ function evaluateExternalAgreement(row, options = []) {
     )
   );
 
-  const scoreComparison = compareFeesByScore(row, bestReference);
-  const passByScore = Boolean(scoreComparison?.pass);
+  const scoreComparisons = eligibleOptions
+    .map((option) => ({
+      option,
+      comparison: compareFeesByScore(row, option),
+    }))
+    .filter((item) => item.comparison);
+
+  const passingScore = scoreComparisons.find((item) => item.comparison.pass);
+
+  const bestScoreCandidate = scoreComparisons
+    .slice()
+    .sort((a, b) => {
+      const aGap = a.comparison.actualScore - a.comparison.referenceScore;
+      const bGap = b.comparison.actualScore - b.comparison.referenceScore;
+      return aGap - bGap;
+    })[0];
+
+  const selectedScoreOption = passingScore?.option || bestScoreCandidate?.option || bestReference;
+  const selectedScoreComparison = passingScore?.comparison || bestScoreCandidate?.comparison || compareFeesByScore(row, selectedScoreOption);
+  const passByScore = Boolean(passingScore);
 
   return {
     auditStatus: passByScore ? AUDIT_STATUS.VALID : AUDIT_STATUS.INVALID,
     auditStatusHe: passByScore ? AUDIT_STATUS_HE.valid : AUDIT_STATUS_HE.invalid,
     auditMatchResult: passByScore
-      ? `MATCH_${bestReference?.optionName || "EXTERNAL_AGREEMENT"}_BY_SCORE`
+      ? `MATCH_${selectedScoreOption?.optionName || "EXTERNAL_AGREEMENT"}_BY_SCORE`
       : tierPotentialNotUsed
         ? "FAIL_TIER_POTENTIAL"
         : "FAIL_EXTERNAL_AGREEMENT",
-    auditMatchModelName: bestReference?.optionName || "הסכם חיצוני",
-    auditMatchRuleType: bestReference?.conditionType || "EXTERNAL_AGREEMENT",
+    auditMatchModelName: selectedScoreOption?.optionName || "הסכם חיצוני",
+    auditMatchRuleType: selectedScoreOption?.conditionType || "EXTERNAL_AGREEMENT",
     auditReason: passByScore
-      ? `דמי הניהול אינם זהים להסכם, אך הציון המשוקלל נמוך/שווה להסכם: בפועל ${scoreComparison?.actualScore?.toFixed?.(4)} מול הסכם ${scoreComparison?.referenceScore?.toFixed?.(4)}`
+      ? `דמי הניהול אינם זהים להסכם, אך הציון המשוקלל נמוך/שווה לאחת מאפשרויות ההסכם: בפועל ${selectedScoreComparison?.actualScore?.toFixed?.(4)} מול הסכם ${selectedScoreComparison?.referenceScore?.toFixed?.(4)} (${selectedScoreOption?.optionName || "הסכם חיצוני"})`
       : tierPotentialNotUsed
         ? `זכאי למודל צבירה גבוה אך אינו עומד בדמי הניהול של המודל: הפקדה ${row.depositFee ?? "—"}% מול ${eligibleTier.depositFee ?? "—"}% | צבירה ${row.accumulationFee ?? "—"}% מול ${eligibleTier.accumulationFee ?? "—"}%`
-        : `דמי הניהול אינם עומדים בהסכם: הפקדה ${row.depositFee ?? "—"}% מול ${bestReference?.depositFee ?? "—"}% | צבירה ${row.accumulationFee ?? "—"}% מול ${bestReference?.accumulationFee ?? "—"}%`,
-    auditReferenceDepositFee: bestReference?.depositFee ?? null,
-    auditReferenceAccumulationFee: bestReference?.accumulationFee ?? null,
+        : `דמי הניהול אינם עומדים באף אחת מאפשרויות ההסכם: הפקדה ${row.depositFee ?? "—"}% מול ${selectedScoreOption?.depositFee ?? "—"}% | צבירה ${row.accumulationFee ?? "—"}% מול ${selectedScoreOption?.accumulationFee ?? "—"}%`,
+    auditReferenceDepositFee: selectedScoreOption?.depositFee ?? null,
+    auditReferenceAccumulationFee: selectedScoreOption?.accumulationFee ?? null,
     agreementIssuerFound: true,
     issueCategory: passByScore
       ? ISSUE_CATEGORY.NONE

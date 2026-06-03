@@ -2,12 +2,13 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // AGREEMENTS PARSER — קריאה ונרמול קובץ הסכמי דמי ניהול
 //
-// V91 — Pension agreements multi-option hardening
-//   1. תומך רוחבית בכמה אפשרויות הסכם לכל יצרן: מודל א / מודל ב.
-//   2. לא מסווג אוטומטית את העמודות השלישית-רביעית כ"מודל צבירות גבוהות".
-//   3. רק אם יש סימון מפורש של צבירה/מדרגה/מעל סכום — option B יסומן MIN_ACCUMULATION.
-//   4. אם אין סימון מפורש — option B היא חלופה רגילה DEFAULT, ונבדקת לכל לקוח.
-//   5. מתאים רוחבית לכל יצרני קרן הפנסיה, לא רק הראל/הפניקס.
+// V93 — Dynamic multi-option agreements parser
+//   1. קורא דינמית זוגות עמודות של דמי ניהול לכל יצרן: הפקדה + צבירה.
+//   2. תומך ביותר משתי אפשרויות: מודל א, מודל ב, מודל ג, מודל ד וכו'.
+//   3. ברירת מחדל: כל זוג דמי ניהול הוא DEFAULT, כלומר חלופה רגילה לבדיקה.
+//   4. רק אם יש סימון מפורש של מדרגת צבירה / צבירות גבוהות / סף צבירה,
+//      האפשרות תסווג כ-MIN_ACCUMULATION.
+//   5. אין דריסה של מודלים קיימים — כל האפשרויות נשמרות במערך תחת אותו יצרן.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import * as XLSX from "xlsx";
@@ -18,6 +19,15 @@ function normalizeText(value) {
     .replace(/[\u00A0\u200E\u200F]/g, " ")
     .replace(/\s+/g, " ")
     .replace(/[״"]/g, "")
+    .trim();
+}
+
+function normalizeForSearch(value) {
+  return normalizeText(value)
+    .toLowerCase()
+    .replace(/[־–—_-]/g, " ")
+    .replace(/[.:]/g, "")
+    .replace(/\s+/g, " ")
     .trim();
 }
 
@@ -74,25 +84,18 @@ function readSheetRows(workbook, sheetName) {
   }
 }
 
-function extractThresholdFromText(text) {
-  const normalized = normalizeText(text);
-  if (!normalized) return null;
-
-  const matches = normalized.match(/(\d{1,3}(?:,\d{3})+|\d{6,9})/g) || [];
-  const candidates = matches
-    .map((match) => Number(String(match).replace(/,/g, "")))
-    .filter((num) => Number.isFinite(num) && num >= 100_000 && num <= 999_999_999);
-
-  if (!candidates.length) return null;
-  return Math.min(...candidates);
-}
-
 function detectAccumulationThreshold(rows) {
   const fullText = rows
     .map((row) => asArray(row).map((cell) => String(cell ?? "")).join(" "))
     .join(" ");
 
-  return extractThresholdFromText(fullText);
+  const matches = fullText.match(/(\d{1,3}(?:,\d{3})+)/g) || [];
+  const candidates = matches
+    .map((match) => Number(match.replace(/,/g, "")))
+    .filter((num) => num >= 100_000 && num <= 999_999);
+
+  if (!candidates.length) return null;
+  return Math.min(...candidates);
 }
 
 function detectAgreementLayout(rawRow) {
@@ -108,7 +111,11 @@ function detectAgreementLayout(rawRow) {
     const issuer = normalizeText(row[layout.issuerIndex]);
     if (!issuer || issuer.startsWith("*") || /^\d+(?:\.\d+)?$/.test(issuer)) continue;
 
-    const feeIndexes = [0, 1, 2, 3].map((offset) => layout.feeStartIndex + offset);
+    const feeIndexes = [];
+    for (let index = layout.feeStartIndex; index < row.length; index += 1) {
+      feeIndexes.push(index);
+    }
+
     const hasFee = feeIndexes.some((index) => normalizeFeePercent(row[index]) !== null);
 
     if (hasFee) return { ...layout, issuer };
@@ -117,103 +124,114 @@ function detectAgreementLayout(rawRow) {
   return null;
 }
 
-function collectContextText(rows, rowIndex, feeStartIndex) {
-  const parts = [];
+function hasExplicitTierText(value) {
+  const text = normalizeForSearch(value);
+  if (!text) return false;
 
-  // מסתכלים על הכותרות/הערות שסביב אותה שורה, בעיקר סביב עמודות האפשרות השנייה.
-  // זה מונע מצב שבו סכום אקראי במקום אחר בגיליון מסווג את כל מודלי ב' כצבירות גבוהות.
-  const startRow = Math.max(0, rowIndex - 4);
-  const endRow = Math.min(rows.length - 1, rowIndex + 1);
-
-  for (let i = startRow; i <= endRow; i += 1) {
-    const row = asArray(rows[i]);
-    for (let col = Math.max(0, feeStartIndex - 2); col <= feeStartIndex + 5; col += 1) {
-      if (row[col] !== null && row[col] !== undefined && normalizeText(row[col]) !== "") {
-        parts.push(row[col]);
-      }
-    }
-  }
-
-  return normalizeText(parts.join(" "));
-}
-
-function hasOptionBText(text) {
-  const normalized = normalizeText(text);
   return (
-    normalized.includes("אפשרות ב") ||
-    normalized.includes("חלופה ב") ||
-    normalized.includes("מסלול ב") ||
-    normalized.includes("מודל ב") ||
-    normalized.includes("אופציה ב") ||
-    normalized.includes("option b")
+    text.includes("צבירות גבוהות") ||
+    text.includes("צבירה גבוהה") ||
+    text.includes("מדרגת צבירה") ||
+    text.includes("סף צבירה") ||
+    text.includes("מעל צבירה") ||
+    text.includes("מעל") && text.includes("צבירה") ||
+    text.includes("min accumulation") ||
+    text.includes("min_accumulation")
   );
 }
 
-function hasTierText(text) {
-  const normalized = normalizeText(text);
-  if (!normalized) return false;
+function hasDefaultOptionText(value) {
+  const text = normalizeForSearch(value);
+  if (!text) return false;
 
-  const hasAccumulationWord =
-    normalized.includes("צבירה") ||
-    normalized.includes("צבירות") ||
-    normalized.includes("יתרה") ||
-    normalized.includes("נכסים") ||
-    normalized.includes("accumulation") ||
-    normalized.includes("balance");
-
-  const hasThresholdWord =
-    normalized.includes("מעל") ||
-    normalized.includes("מדרגה") ||
-    normalized.includes("גבוה") ||
-    normalized.includes("גבוהות") ||
-    normalized.includes("לפחות") ||
-    normalized.includes("מ-") ||
-    normalized.includes("over") ||
-    normalized.includes("above") ||
-    normalized.includes("tier");
-
-  return hasAccumulationWord && hasThresholdWord;
+  return (
+    text.includes("אפשרות") ||
+    text.includes("חלופה") ||
+    text.includes("מודל") ||
+    text.includes("option") ||
+    text.includes("model")
+  );
 }
 
-function detectSecondOptionCondition({ rows, rowIndex, feeStartIndex, sheetThreshold }) {
-  const contextText = collectContextText(rows, rowIndex, feeStartIndex);
-  const localThreshold = extractThresholdFromText(contextText);
+function buildOptionName(index, markerText = "") {
+  const marker = normalizeText(markerText);
+  if (marker && hasDefaultOptionText(marker)) return marker;
 
-  // אם כתוב במפורש אפשרות/חלופה/מודל ב' — זו חלופה רגילה, גם אם יש מספרים בגיליון.
-  if (hasOptionBText(contextText)) {
-    return {
-      conditionType: "DEFAULT",
-      conditionValue: null,
-      optionName: "מודל ב",
-      isDefault: false,
-      detectionReason: "OPTION_B_TEXT",
-    };
-  }
+  const hebrewLetters = ["א", "ב", "ג", "ד", "ה", "ו", "ז", "ח", "ט", "י"];
+  const suffix = hebrewLetters[index] || String(index + 1);
+  return `מודל ${suffix}`;
+}
 
-  // רק סימון מפורש של צבירה/מדרגה/מעל סכום הופך את המודל השני למדרגת צבירה.
-  if (hasTierText(contextText) && (localThreshold || sheetThreshold)) {
-    return {
-      conditionType: "MIN_ACCUMULATION",
-      conditionValue: localThreshold || sheetThreshold,
-      optionName: "מודל צבירות גבוהות",
-      isDefault: false,
-      detectionReason: "EXPLICIT_TIER_TEXT",
-    };
-  }
+function detectOptionMarker(row, feeIndex) {
+  // מחפש טקסט קרוב לזוג העמודות שמסביר את סוג המודל.
+  // ברוב הקבצים הכותרת/סימון יושבים באחת העמודות של הזוג או מעט לפניהן.
+  const candidateIndexes = [feeIndex - 1, feeIndex, feeIndex + 1].filter((index) => index >= 0);
+  const markers = candidateIndexes
+    .map((index) => normalizeText(row[index]))
+    .filter((value) => value && normalizeFeePercent(value) === null);
 
-  // ברירת המחדל החדשה: שתי האפשרויות הן חלופות רגילות ליצרן.
+  return markers.join(" ");
+}
+
+function buildAgreementOption({
+  sheetName,
+  issuer,
+  issuerRaw,
+  optionIndex,
+  depositFee,
+  accumulationFee,
+  markerText,
+  accumulationThreshold,
+}) {
+  const explicitTier = hasExplicitTierText(markerText);
+
   return {
-    conditionType: "DEFAULT",
-    conditionValue: null,
-    optionName: "מודל ב",
-    isDefault: false,
-    detectionReason: "FALLBACK_SECOND_DEFAULT_OPTION",
+    sheetName,
+    issuer,
+    issuerOriginal: issuerRaw,
+    parserVersion: "stability_06_v93_dynamic_options",
+    optionName: explicitTier ? normalizeText(markerText) || "מודל צבירות גבוהות" : buildOptionName(optionIndex, markerText),
+    depositFee,
+    accumulationFee,
+    conditionType: explicitTier && accumulationThreshold ? "MIN_ACCUMULATION" : "DEFAULT",
+    conditionValue: explicitTier && accumulationThreshold ? accumulationThreshold : null,
+    isDefault: !explicitTier,
   };
 }
 
-function pushAgreement(agreements, payload) {
-  if (payload.depositFee === null && payload.accumulationFee === null) return;
-  agreements.push(payload);
+function extractAgreementOptionsFromRow({ row, layout, sheetName, accumulationThreshold }) {
+  const issuerRaw = layout.issuer;
+  const issuer = canonicalIssuer(issuerRaw) || issuerRaw;
+  const options = [];
+  let optionIndex = 0;
+
+  // כל option הוא זוג עמודות: דמי ניהול מהפקדה + דמי ניהול מצבירה.
+  // ממשיכים עד סוף השורה, ומדלגים על זוגות ריקים.
+  for (let feeIndex = layout.feeStartIndex; feeIndex < row.length; feeIndex += 2) {
+    const depositFee = normalizeFeePercent(row[feeIndex]);
+    const accumulationFee = normalizeFeePercent(row[feeIndex + 1]);
+
+    if (depositFee === null && accumulationFee === null) continue;
+
+    const markerText = detectOptionMarker(row, feeIndex);
+
+    options.push(
+      buildAgreementOption({
+        sheetName,
+        issuer,
+        issuerRaw,
+        optionIndex,
+        depositFee,
+        accumulationFee,
+        markerText,
+        accumulationThreshold,
+      })
+    );
+
+    optionIndex += 1;
+  }
+
+  return options;
 }
 
 export function parseAgreements(workbook) {
@@ -228,76 +246,39 @@ export function parseAgreements(workbook) {
 
     const accumulationThreshold = detectAccumulationThreshold(rows);
 
-    rows.forEach((rawRow, rowIndex) => {
+    rows.forEach((rawRow) => {
       const row = asArray(rawRow);
       const layout = detectAgreementLayout(row);
       if (!layout) return;
 
-      const issuerRaw = layout.issuer;
-      const issuer = canonicalIssuer(issuerRaw) || issuerRaw;
-      const feeStart = layout.feeStartIndex;
-
-      const modelADepositFee = normalizeFeePercent(row[feeStart]);
-      const modelAAccumulationFee = normalizeFeePercent(row[feeStart + 1]);
-
-      pushAgreement(agreements, {
-        sheetName,
-        issuer,
-        issuerOriginal: issuerRaw,
-        parserVersion: "stability_06_v91_multi_options",
-        optionName: "מודל א",
-        depositFee: modelADepositFee,
-        accumulationFee: modelAAccumulationFee,
-        conditionType: "DEFAULT",
-        conditionValue: null,
-        isDefault: true,
-      });
-
-      const modelBDepositFee = normalizeFeePercent(row[feeStart + 2]);
-      const modelBAccumulationFee = normalizeFeePercent(row[feeStart + 3]);
-
-      if (modelBDepositFee !== null || modelBAccumulationFee !== null) {
-        const secondOptionCondition = detectSecondOptionCondition({
-          rows,
-          rowIndex,
-          feeStartIndex: feeStart,
-          sheetThreshold: accumulationThreshold,
-        });
-
-        pushAgreement(agreements, {
+      agreements.push(
+        ...extractAgreementOptionsFromRow({
+          row,
+          layout,
           sheetName,
-          issuer,
-          issuerOriginal: issuerRaw,
-          parserVersion: "stability_06_v91_multi_options",
-          optionName: secondOptionCondition.optionName,
-          depositFee: modelBDepositFee,
-          accumulationFee: modelBAccumulationFee,
-          conditionType: secondOptionCondition.conditionType,
-          conditionValue: secondOptionCondition.conditionValue,
-          isDefault: secondOptionCondition.isDefault,
-          detectionReason: secondOptionCondition.detectionReason,
-        });
-      }
+          accumulationThreshold,
+        })
+      );
     });
   });
 
   console.log("parseAgreements result:", {
-    version: "stability_06_v91_multi_options",
+    version: "stability_06_v93_dynamic_options",
     total: agreements.length,
     issuers: [...new Set(agreements.map((agreement) => agreement.issuer))],
-    byIssuer: agreements.reduce((acc, agreement) => {
+    countsByIssuer: agreements.reduce((acc, agreement) => {
       const key = agreement.issuer || "לא מזוהה";
-      if (!acc[key]) acc[key] = [];
-      acc[key].push({
-        model: agreement.optionName,
-        conditionType: agreement.conditionType,
-        conditionValue: agreement.conditionValue,
-        depositFee: agreement.depositFee,
-        accumulationFee: agreement.accumulationFee,
-        detectionReason: agreement.detectionReason || "MODEL_A",
-      });
+      acc[key] = (acc[key] || 0) + 1;
       return acc;
     }, {}),
+    sample: agreements.map((agreement) => ({
+      issuer: agreement.issuer,
+      model: agreement.optionName,
+      depositFee: agreement.depositFee,
+      accumulationFee: agreement.accumulationFee,
+      conditionType: agreement.conditionType,
+      conditionValue: agreement.conditionValue,
+    })),
   });
 
   return agreements;
